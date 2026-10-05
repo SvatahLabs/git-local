@@ -191,7 +191,9 @@ func TestCaptureFailureNeverChangesDestinations(t *testing.T) {
 }
 
 func TestRecoveryPreservesExternalChanges(t *testing.T) {
-	for _, kind := range []string{"edit", "owned", "branch", "symlink", "configuration", "tampered-journal"} {
+	// A branch switch alone no longer blocks recovery (GL-010); see
+	// TestRecoveryAfterMainCommitIndexAndBranchChange.
+	for _, kind := range []string{"edit", "owned", "symlink", "configuration", "tampered-journal"} {
 		t.Run(kind, func(t *testing.T) {
 			t.Parallel()
 			repo, r, w := fixture(t)
@@ -215,8 +217,6 @@ func TestRecoveryPreservesExternalChanges(t *testing.T) {
 				write(t, root, "notes/a", "external")
 			case "owned":
 				repo.Git("add", "-f", "notes/a")
-			case "branch":
-				repo.Git("switch", "-q", "-c", "other")
 			case "symlink":
 				remove(t, root, "notes")
 				if err = os.Symlink(t.TempDir(), filepath.Join(root, "notes")); err != nil {
