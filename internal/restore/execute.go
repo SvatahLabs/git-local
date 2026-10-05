@@ -178,7 +178,7 @@ func execute(ctx context.Context, r *gitexec.Runner, cwd, sourceWorkspace, selec
 			}
 		}
 		j := journal{SchemaVersion: version, Kind: "restore", ID: id, Manifest: m, Direction: "apply"}
-		guard, err := newGuard(ctx, r, w, files, &j, recheck)
+		guard, err := newGuard(ctx, r, w, files, &j, recheck, false)
 		if err != nil {
 			return err
 		}
@@ -249,14 +249,22 @@ type guard struct {
 	journal *journal
 	recheck func() error
 	key     []byte
+	// evidence and branch are the main HEAD, index and branch every re-check
+	// compares against: the plan's during execution, and a fresh snapshot
+	// pinned when recovery starts.
+	evidence selection.Evidence
+	branch   string
 }
 
-func newGuard(ctx context.Context, r *gitexec.Runner, w workspace.Context, files *storage.Dir, j *journal, recheck func() error) (*guard, error) {
+// newGuard checks the operation and stage paths against main ownership. A
+// recovery takes a fresh ownership snapshot: commits, checkouts and index
+// changes since the interruption are fine while those paths stay unowned.
+func newGuard(ctx context.Context, r *gitexec.Runner, w workspace.Context, files *storage.Dir, j *journal, recheck func() error, recovering bool) (*guard, error) {
 	e, err := selection.New(r, w.Root, w.Admin)
 	if err != nil {
 		return nil, err
 	}
-	g := &guard{r: r, w: w, files: files, engine: e, journal: j, recheck: recheck}
+	g := &guard{r: r, w: w, files: files, engine: e, journal: j, recheck: recheck, evidence: j.Manifest.Plan.Ownership, branch: j.Manifest.MainBranch}
 	if j.SchemaVersion == 2 {
 		policy, key, e := loadRestoreKey(w)
 		if e != nil {
@@ -280,7 +288,13 @@ func newGuard(ctx context.Context, r *gitexec.Runner, w workspace.Context, files
 		e.Close()
 		return nil, err
 	}
-	if owner.Evidence != j.Manifest.Plan.Ownership {
+	if recovering {
+		g.evidence = owner.Evidence
+		if g.branch, err = mainBranch(ctx, r, w); err != nil {
+			e.Close()
+			return nil, err
+		}
+	} else if owner.Evidence != j.Manifest.Plan.Ownership {
 		e.Close()
 		return nil, fmt.Errorf("%w: main ownership changed", storage.ErrConflict)
 	}
@@ -327,14 +341,14 @@ func (g *guard) recognize(ctx context.Context) error {
 	}
 	m := g.journal.Manifest
 	p := m.Plan
-	if err := (selection.Ownership{Evidence: p.Ownership}).Revalidate(ctx, g.r, g.w.Root, g.w.Admin); err != nil {
+	if err := (selection.Ownership{Evidence: g.evidence}).Revalidate(ctx, g.r, g.w.Root, g.w.Admin); err != nil {
 		return err
 	}
 	branch, err := mainBranch(ctx, g.r, g.w)
 	if err != nil {
 		return err
 	}
-	if branch != m.MainBranch {
+	if branch != g.branch {
 		return fmt.Errorf("%w: main branch changed", storage.ErrConflict)
 	}
 	for _, entry := range []struct{ id, head string }{{p.SourceWorkspaceID, p.SourceHead}, {p.DestinationWorkspaceID, p.DestinationBaseline}} {
@@ -700,7 +714,7 @@ func recoverRestore(ctx context.Context, r *gitexec.Runner, cwd, id string, roll
 			return err
 		}
 		defer files.Close()
-		g, err := newGuard(ctx, r, w, files, &j, recheck)
+		g, err := newGuard(ctx, r, w, files, &j, recheck, true)
 		if err != nil {
 			return stopped(id, err)
 		}
