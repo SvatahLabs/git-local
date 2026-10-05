@@ -296,7 +296,17 @@ fail with a conflict instead of silently choosing a version. Overlays require
 Git with a POSIX shell for the filter command (Git for Windows supplies one),
 a regular UTF-8 file of at most 1 MiB, and no existing line-ending, ident or
 content filter on that path. Native Windows overlay behavior still awaits CI
-qualification. See the
+qualification.
+
+**`git archive` applies active overlays.** Git runs the smudge filter for
+archives too, so a plain `git archive HEAD` puts your local patch in the
+archive. Export without overlays by disabling the filter for that command:
+
+```sh
+git -c filter.gitlocal-overlay.process= -c filter.gitlocal-overlay.required=false archive HEAD -o release.tar
+```
+
+The commit and push guards don't cover archives. See the
 [overlay implementation contract](project/specifications/proposal/OVERLAY_PLAN.md)
 for remaining broader qualification. `overlay remove`
 leaves the working file and saved versions intact; the former patch becomes an
