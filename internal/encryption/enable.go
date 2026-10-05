@@ -31,7 +31,7 @@ func EnableFresh(ctx context.Context, r *gitexec.Runner, cwd, keyFile string, pa
 			return err
 		}
 		defer engine.Close()
-		rules := make([]secureblob.PathRule, 0, len(paths))
+		normalized := make([]string, 0, len(paths))
 		for _, arg := range paths {
 			path, e := engine.Normalize(cwd, arg)
 			if e != nil {
@@ -40,14 +40,11 @@ func EnableFresh(ctx context.Context, r *gitexec.Runner, cwd, keyFile string, pa
 			if !state.Selected(path) {
 				return fmt.Errorf("%w: %q is not selected for local history", storage.ErrConflict, path)
 			}
-			kind := "file"
-			for _, rule := range state.Include {
-				if rule.Path == path {
-					kind = rule.Kind
-					break
-				}
-			}
-			rules = append(rules, secureblob.PathRule{Path: path, Kind: kind})
+			normalized = append(normalized, path)
+		}
+		rules, err := sensitiveRules(w.Root, state, normalized)
+		if err != nil {
+			return err
 		}
 		policy, err := secureblob.PolicyForKey(keyFile, w.Root, w.Common, rules)
 		if err != nil {

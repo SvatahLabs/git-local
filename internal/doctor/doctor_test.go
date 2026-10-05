@@ -13,8 +13,10 @@ import (
 	"gitlocal/internal/configtx"
 	"gitlocal/internal/gitexec"
 	"gitlocal/internal/history"
+	"gitlocal/internal/keymaterial"
 	"gitlocal/internal/overlay"
 	"gitlocal/internal/restore"
+	"gitlocal/internal/secureblob"
 	"gitlocal/internal/storage"
 	"gitlocal/internal/testutil"
 	"gitlocal/internal/workspace"
@@ -389,4 +391,37 @@ func TestDoctorReportsMissingAndAbsoluteOverlayInclude(t *testing.T) {
 	}
 	repo.Git("config", "--local", "--replace-all", "include.path", configPath)
 	overlayIssue("absolute path")
+}
+
+func TestDoctorReportsSensitiveFileRuleNamingADirectory(t *testing.T) {
+	repo, r, w := fixture(t)
+	if err := os.MkdirAll(filepath.Join(repo.Root, "notes", "secrets"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	keyPath := filepath.Join(t.TempDir(), "sensitive.key")
+	if err := keymaterial.Create(keyPath, repo.Root); err != nil {
+		t.Fatal(err)
+	}
+	policy, err := secureblob.PolicyForKey(keyPath, w.Root, w.Common, []secureblob.PathRule{{Path: "notes/secrets", Kind: "file"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	common, err := storage.OpenDir(w.Common)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer common.Close()
+	if err := secureblob.WriteLocked(common, policy, w.Root, w.Common); err != nil {
+		t.Fatal(err)
+	}
+	report, err := Run(ctx, r, repo.Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range report.Findings {
+		if finding.Check == "encryption" && finding.Severity == "error" && strings.Contains(finding.Message, `"notes/secrets" is recorded as a file but is a directory`) {
+			return
+		}
+	}
+	t.Fatalf("doctor did not report the kind mismatch: %+v", report.Findings)
 }

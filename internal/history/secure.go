@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	"gitlocal/internal/gitexec"
 	"gitlocal/internal/secureblob"
@@ -39,6 +40,24 @@ func loadSecure(w workspace.Context) (*secureState, error) {
 
 func (s *secureState) covers(path string) bool {
 	return s != nil && s.policy.Covers(path)
+}
+
+// uncoveredAlias fails closed for a path that falls under a sensitive rule by
+// alias key (case, normalization, or a file rule naming a directory) without
+// being covered by its exact spelling, so it would otherwise be stored as
+// plaintext.
+func (s *secureState) uncoveredAlias(path string) error {
+	if s == nil || s.policy.Covers(path) {
+		return nil
+	}
+	key := storage.AliasKey(path)
+	for _, rule := range s.policy.Sensitive {
+		ruleKey := storage.AliasKey(rule.Path)
+		if key == ruleKey || strings.HasPrefix(key, ruleKey+"/") {
+			return fmt.Errorf("%w: %q matches sensitive path %q only by spelling or kind and would be saved unencrypted; run git local doctor", storage.ErrConflict, path, rule.Path)
+		}
+	}
+	return nil
 }
 
 func (s *secureState) identity(w workspace.Context, path, mode string) secureblob.Identity {

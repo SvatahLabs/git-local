@@ -4,7 +4,10 @@ package doctor
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"gitlocal/internal/configtx"
@@ -14,7 +17,10 @@ import (
 	"gitlocal/internal/hook"
 	"gitlocal/internal/overlay"
 	"gitlocal/internal/restore"
+	"gitlocal/internal/secureblob"
 	"gitlocal/internal/selection"
+	"gitlocal/internal/storage"
+	"gitlocal/internal/workspace"
 )
 
 type Finding struct {
@@ -147,6 +153,13 @@ func Run(ctx context.Context, r *gitexec.Runner, cwd string) (Report, error) {
 		} else {
 			result.add("main ownership", "ok", "main HEAD and index do not own the current selection", "")
 		}
+		if paths, e := sensitiveKindMismatches(d.Workspace); e != nil {
+			result.add("encryption", "error", e.Error(), "Inspect the sensitive-file policy.")
+		} else {
+			for _, path := range paths {
+				result.add("encryption", "error", fmt.Sprintf("sensitive path %q is recorded as a file but is a directory; files below it were saved unencrypted, and snapshots are refused until the policy is corrected", path), "Keep the private store and its backups private. Changing an existing sensitive-file policy isn't supported yet.")
+			}
+		}
 		storeErr := gitexec.ValidateStore(d.Workspace.Store)
 		if storeErr != nil {
 			result.add("history store", "error", storeErr.Error(), "Restore a supported private store configuration from a trusted backup.")
@@ -247,4 +260,36 @@ func Run(ctx context.Context, r *gitexec.Runner, cwd string) (Report, error) {
 		return result, ctx.Err()
 	}
 	return result, nil
+}
+
+// sensitiveKindMismatches lists file rules that name a directory in this
+// checkout. Earlier releases recorded such rules, which left every file below
+// the directory stored as plaintext.
+func sensitiveKindMismatches(w workspace.Context) ([]string, error) {
+	common, err := storage.OpenDir(w.Common)
+	if err != nil {
+		return nil, err
+	}
+	defer common.Close()
+	var policy secureblob.Policy
+	if err := common.ReadJSON(secureblob.PolicyFile, &policy); errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	} else if err != nil {
+		return nil, err
+	}
+	files, err := storage.OpenDir(w.Root)
+	if err != nil {
+		return nil, err
+	}
+	defer files.Close()
+	var paths []string
+	for _, rule := range policy.Sensitive {
+		if rule.Kind != "file" || storage.ValidateSelectionPath(rule.Path) != nil {
+			continue
+		}
+		if info, err := files.Lstat(filepath.FromSlash(rule.Path)); err == nil && info.IsDir() {
+			paths = append(paths, rule.Path)
+		}
+	}
+	return paths, nil
 }

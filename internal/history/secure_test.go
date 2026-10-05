@@ -216,3 +216,35 @@ func TestSensitiveSnapshotEncryptsContentAndReusesUnchangedBlob(t *testing.T) {
 		t.Fatalf("sensitive digest did not change: %+v %v", next, err)
 	}
 }
+
+func TestSnapshotFailsClosedForPathOnlyAliasingASensitiveRule(t *testing.T) {
+	for _, tc := range []struct{ rule, file string }{
+		{"config/secrets", "config/secrets/token"},
+		{"notes/secret.txt", "notes/Secret.txt"},
+	} {
+		t.Run(tc.file, func(t *testing.T) {
+			repo, g, w := fixture(t)
+			write(t, repo.Root, tc.file, []byte("TOKEN=alias-secret\n"))
+			change(t, g, repo.Root, true, filepath.Dir(tc.file))
+			keyPath := filepath.Join(t.TempDir(), "sensitive.key")
+			if err := keymaterial.Create(keyPath, repo.Root); err != nil {
+				t.Fatal(err)
+			}
+			policy, err := secureblob.PolicyForKey(keyPath, w.Root, w.Common, []secureblob.PathRule{{Path: tc.rule, Kind: "file"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			common, err := storage.OpenDir(w.Common)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := secureblob.WriteLocked(common, policy, w.Root, w.Common); err != nil {
+				t.Fatal(err)
+			}
+			common.Close()
+			if _, err := Commit(context.Background(), g, repo.Root, "aliased"); err == nil || !strings.Contains(err.Error(), "sensitive path") {
+				t.Fatalf("snapshot of %q under file rule %q: %v", tc.file, tc.rule, err)
+			}
+		})
+	}
+}

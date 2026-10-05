@@ -157,6 +157,9 @@ func commitWithOptions(ctx context.Context, r *gitexec.Runner, cwd, message, wri
 		entries := scopeEntries(plan.Entries, scope)
 		plainRegular := 0
 		for _, entry := range entries {
+			if e = secure.uncoveredAlias(entry.Path); e != nil {
+				return e
+			}
 			if entry.Mode&os.ModeSymlink == 0 && !secure.covers(entry.Path) {
 				plainRegular++
 			}

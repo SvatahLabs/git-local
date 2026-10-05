@@ -93,6 +93,16 @@ interrupted, run
 rollback is available only before policy publication. Keep the external key
 safe and available to every worktree. Migration rewrites snapshot commits, so
 previous snapshot IDs change; use `git local log` to find their replacements.
+
+A sensitive path may be a selected file or directory, or any file or directory
+inside a selected directory. `enable` and `migrate` read its kind from the
+checkout, so a sensitive subdirectory covers everything below it. The path must
+already exist with its exact on-disk spelling: a missing path, or one that
+differs only in case or Unicode normalization, is refused. A snapshot fails if
+a file would match a sensitive path only by spelling, and `doctor` reports a
+policy from an earlier release that recorded a directory as a file. Files below
+such a directory were saved unencrypted, and changing an existing policy isn't
+supported yet.
 If the key is moved, `encrypt rebind-key` accepts its new absolute path only
 when the replacement bytes match the stored key fingerprint.
 
