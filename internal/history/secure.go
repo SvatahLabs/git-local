@@ -41,18 +41,18 @@ func (s *secureState) covers(path string) bool {
 	return s != nil && s.policy.Covers(path)
 }
 
-// uncoveredAlias fails closed for a path that falls under a sensitive rule by
-// alias key (case, normalization, or a file rule naming a directory) without
-// being covered by its exact spelling, so it would otherwise be stored as
-// plaintext.
-func (s *secureState) uncoveredAlias(path string) error {
+// uncoveredRule reports the sensitive rule a path falls under by alias key
+// (case, normalization, or a file rule naming a directory) without being
+// covered by its exact spelling, so it would otherwise be stored as plaintext.
+func (s *secureState) uncoveredRule(path string) (string, bool) {
 	if s == nil {
-		return nil
+		return "", false
 	}
-	if rule, ok := s.policy.UncoveredAlias(path); ok {
-		return fmt.Errorf("%w: %q matches sensitive path %q only by spelling or kind and would be saved unencrypted; run git local doctor", storage.ErrConflict, path, rule)
-	}
-	return nil
+	return s.policy.UncoveredAlias(path)
+}
+
+func skippedWarning(path, rule string) string {
+	return fmt.Sprintf("skipped %q: it matches sensitive path %q only by spelling or kind and would be saved unencrypted; its last saved version is kept until the sensitive-file policy is corrected (see git local doctor)", path, rule)
 }
 
 func (s *secureState) identity(w workspace.Context, path, mode string) secureblob.Identity {

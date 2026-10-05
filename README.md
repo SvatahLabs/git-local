@@ -119,12 +119,15 @@ saved snapshots first: a path with saved files below it is a directory even if
 it was since deleted or replaced, and a saved path may be missing from the
 checkout. Otherwise the path must exist with its exact on-disk spelling: a
 missing path, or one that differs only in case or Unicode normalization, is
-refused. A snapshot or migration fails if a file would match a sensitive path
-only by spelling or kind. `doctor` reports a policy from an earlier release
-that recorded a directory as a file or used a different spelling; files it
-should have covered were saved unencrypted. Changing an existing policy isn't
-supported yet; until then, `git local untrack` the affected path to keep
-taking snapshots of other files.
+refused. Migration fails if a file would match a sensitive path only by
+spelling or kind. `doctor` reports a policy from an earlier release that
+recorded a directory as a file or used a different spelling; files it should
+have covered were saved unencrypted. **Changing an existing policy isn't
+supported yet.** Until it is, a snapshot skips each file that matches a
+sensitive path only by spelling or kind and prints a warning naming it: no new
+plaintext is written, the skipped file keeps its last saved version (or stays
+absent if it was never saved), and every other file is saved as usual. Changes
+to skipped files go unsaved until the policy is corrected.
 If the key is moved, `encrypt rebind-key` accepts its new absolute path only
 when the replacement bytes match the stored key fingerprint.
 

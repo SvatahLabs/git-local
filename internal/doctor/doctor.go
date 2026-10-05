@@ -175,7 +175,7 @@ func Run(ctx context.Context, r *gitexec.Runner, cwd string) (Report, error) {
 			result.add("encryption", "error", e.Error(), "Inspect the sensitive-file policy.")
 		} else {
 			for _, problem := range paths {
-				result.add("encryption", "error", problem+"; files it should cover were saved unencrypted, and snapshots that include them are refused until the policy is corrected", "Keep the private store and its backups private. Changing an existing sensitive-file policy isn't supported yet; until then, git local untrack the affected path to keep taking snapshots of other files.")
+				result.add("encryption", "error", problem+"; files it should cover were saved unencrypted, and snapshots skip them (keeping their last saved version) until the policy is corrected", "Keep the private store and its backups private. Changing an existing sensitive-file policy isn't supported yet; changes to the skipped files go unsaved until it is.")
 			}
 		}
 		storeErr := gitexec.ValidateStore(d.Workspace.Store)

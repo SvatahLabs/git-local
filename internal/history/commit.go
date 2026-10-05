@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"reflect"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -75,6 +76,8 @@ func commitWithOptions(ctx context.Context, r *gitexec.Runner, cwd, message, wri
 	if err = ValidateWriter(writer); err != nil {
 		return result, err
 	}
+	var skipped []string
+	defer func() { result.Warnings = append(result.Warnings, skipped...) }()
 	result.Warnings, err = configtx.WithSelection(ctx, r, cwd, func(w workspace.Context, state selection.State, recheck func() error) error {
 		secure, e := loadSecure(w)
 		if e != nil {
@@ -155,11 +158,33 @@ func commitWithOptions(ctx context.Context, r *gitexec.Runner, cwd, message, wri
 			}
 		}
 		entries := scopeEntries(plan.Entries, scope)
+		// A path that falls under a sensitive rule only by spelling or kind
+		// (a policy from an earlier release) would be saved as plaintext. It
+		// is skipped instead: its last saved version is carried forward
+		// unchanged, and it isn't recorded as deleted.
+		skip := map[string]bool{}
+		for path, file := range oldFiles {
+			if rule, ok := secure.uncoveredRule(path); ok && inScope(scope, path) {
+				nextFiles[path] = file
+				skip[path] = true
+				skipped = append(skipped, skippedWarning(path, rule))
+			}
+		}
+		kept := entries[:0:0]
+		for _, entry := range entries {
+			if rule, ok := secure.uncoveredRule(entry.Path); ok {
+				if !skip[entry.Path] {
+					skip[entry.Path] = true
+					skipped = append(skipped, skippedWarning(entry.Path, rule))
+				}
+				continue
+			}
+			kept = append(kept, entry)
+		}
+		entries = kept
+		sort.Strings(skipped)
 		plainRegular := 0
 		for _, entry := range entries {
-			if e = secure.uncoveredAlias(entry.Path); e != nil {
-				return e
-			}
 			if entry.Mode&os.ModeSymlink == 0 && !secure.covers(entry.Path) {
 				plainRegular++
 			}
