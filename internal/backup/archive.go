@@ -84,7 +84,9 @@ func packDirectory(ctx context.Context, root *storage.Dir, dst *tar.Writer, rel,
 		if rel != "" {
 			child = filepath.Join(rel, component)
 		}
-		if filepath.ToSlash(child) == "locks/repository.lock" {
+		// The quarantine holds local rescue copies, possibly plaintext; it
+		// isn't private history and stays out of backups.
+		if filepath.ToSlash(child) == "locks/repository.lock" || child == "quarantine" {
 			continue
 		}
 		info, err := root.Lstat(child)

@@ -62,6 +62,7 @@ git local reset --hard HEAD~1
 git local restore --source latest --dry-run -- notes
 git local restore --source <snapshot-id> -- notes
 git local recover --list
+git local recover <transaction-id> --abandon
 git local doctor
 git local doctor --json
 git local workspace list --json
@@ -75,6 +76,23 @@ git local encrypt migrate --key-file /secure/location/gitlocal-files.key -- note
 git local encrypt rebind-key /secure/new-location/gitlocal-files.key
 git local completion bash
 ```
+
+An interrupted transaction blocks git-local commands and the commit and push
+guards until it is resolved. `git local doctor` lists every pending journal
+(configuration, seed, restore, encryption migration and initialization) with the
+command that resolves it. Use `recover <id> --resume` or `--rollback` first (for
+an encryption migration, `encrypt recover`). If neither can finish, for example
+because a file was edited after the interruption,
+`git local recover <id> --abandon` gives the transaction up: working files,
+selections and ignore rules stay as they are, staging files whose content local
+history already holds are removed, and any other journal-reserved bytes are
+moved to `.git/gitlocal/quarantine/<id>/` with a `manifest.json` describing
+them. An abandoned encryption migration moves its prepared and replaced stores
+there instead of deleting them; before the policy is published, the original
+store must still be in service. The quarantine is never deleted automatically
+and isn't included in backups; delete it once you've checked its contents. The
+abandoned journal is archived with outcome `abandoned`, and a restore keeps its
+recovery ref. Run `git local doctor` afterwards to check the result.
 
 Sensitive-file encryption can be enabled before the first private snapshot.
 First `track` the path, create a separate 32-byte key outside every checkout,

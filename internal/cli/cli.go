@@ -18,6 +18,7 @@ import (
 	"gitlocal/internal/backup"
 	"gitlocal/internal/configtx"
 	"gitlocal/internal/doctor"
+	"gitlocal/internal/encryption"
 	"gitlocal/internal/gitexec"
 	"gitlocal/internal/guard"
 	"gitlocal/internal/history"
@@ -757,17 +758,23 @@ func New(out, errOut io.Writer) *cobra.Command {
 	root.AddCommand(reset)
 	root.AddCommand(guardCommand())
 	root.AddCommand(overlayCommand())
-	var resume, rollback, list bool
-	recover := &cobra.Command{Use: "recover <transaction-id> --resume|--rollback", Short: "Resume or roll back an interrupted configuration, seed, or restore transaction",
+	var resume, rollback, abandon, list bool
+	recover := &cobra.Command{Use: "recover <transaction-id> --resume|--rollback|--abandon", Short: "Resume, roll back or abandon an interrupted configuration, seed, restore, encryption or initialization transaction",
 		Args: func(_ *cobra.Command, args []string) error {
 			if list {
-				if len(args) != 0 || resume || rollback {
+				if len(args) != 0 || resume || rollback || abandon {
 					return usageError{errors.New("--list cannot be combined with an ID or recovery direction")}
 				}
 				return nil
 			}
-			if len(args) != 1 || resume == rollback {
-				return usageError{errors.New("provide a transaction ID and exactly one of --resume or --rollback")}
+			directions := 0
+			for _, set := range []bool{resume, rollback, abandon} {
+				if set {
+					directions++
+				}
+			}
+			if len(args) != 1 || directions != 1 {
+				return usageError{errors.New("provide a transaction ID and exactly one of --resume, --rollback or --abandon")}
 			}
 			if !storage.ValidUUID(args[0]) {
 				return usageError{errors.New("invalid transaction ID")}
@@ -802,6 +809,9 @@ func New(out, errOut io.Writer) *cobra.Command {
 					}
 				}
 				return nil
+			}
+			if abandon {
+				return abandonTransaction(c, r, cwd, args[0])
 			}
 			kind, err := configtx.TransactionKind(c.Context(), r, cwd, args[0])
 			if err != nil {
@@ -860,6 +870,7 @@ func New(out, errOut io.Writer) *cobra.Command {
 	}
 	recover.Flags().BoolVar(&resume, "resume", false, "Finish the recorded transaction")
 	recover.Flags().BoolVar(&rollback, "rollback", false, "Restore the recorded pre-transaction state")
+	recover.Flags().BoolVar(&abandon, "abandon", false, "Give up the transaction, leaving files as they are and quarantining unpreserved bytes")
 	recover.Flags().BoolVar(&list, "list", false, "List unfinished transaction IDs")
 	root.AddCommand(recover)
 	return root
@@ -1354,4 +1365,65 @@ func inspectionConflicts(s history.StatusResult) error {
 		}
 	}
 	return nil
+}
+
+// abandonTransaction gives up a transaction that neither resume nor rollback
+// can finish. Each kind's handler takes the repository lock and runs its own
+// safety checks.
+func abandonTransaction(c *cobra.Command, r *gitexec.Runner, cwd, id string) error {
+	kind, err := configtx.JournalKind(c.Context(), r, cwd, id)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("no transaction %s", id)
+		}
+		return err
+	}
+	var result configtx.AbandonResult
+	switch kind {
+	case "config", "seed":
+		result, err = configtx.Abandon(c.Context(), r, cwd, id)
+	case "restore":
+		result, err = restore.Abandon(c.Context(), r, cwd, id)
+	case "encrypt":
+		result, err = encryption.AbandonMigration(c.Context(), r, cwd, id)
+	case "init":
+		err = fmt.Errorf("%w: finish the initialization by running git local init in its checkout", storage.ErrConflict)
+	default:
+		err = fmt.Errorf("transaction %s has unknown kind %q", id, kind)
+	}
+	quarantined := []map[string]string{}
+	for _, entry := range result.Quarantined {
+		quarantined = append(quarantined, map[string]string{"file": entry.File, "source": entry.Source, "root": entry.Root, "kind": entry.Kind, "reason": entry.Reason})
+	}
+	removed := result.Removed
+	if removed == nil {
+		removed = []string{}
+	}
+	if setJSON(c, map[string]any{"transactionId": id, "kind": kind, "abandoned": err == nil, "quarantine": result.Quarantine, "quarantined": quarantined, "removed": removed}, result.Warnings...) {
+		return err
+	}
+	for _, warning := range result.Warnings {
+		fmt.Fprintln(c.ErrOrStderr(), "Warning:", warning)
+	}
+	if err != nil {
+		return err
+	}
+	out := c.OutOrStdout()
+	for _, name := range result.Removed {
+		if _, err := fmt.Fprintf(out, "Removed staging file %s; local history holds its content.\n", name); err != nil {
+			return err
+		}
+	}
+	for _, entry := range result.Quarantined {
+		if _, err := fmt.Fprintf(out, "Quarantined %s as %s (%s).\n", entry.Source, entry.File, entry.Reason); err != nil {
+			return err
+		}
+	}
+	if result.Quarantine != "" {
+		if _, err := fmt.Fprintf(out, "Quarantine: %s (kept until you delete it).\n", result.Quarantine); err != nil {
+			return err
+		}
+	}
+	_, err = fmt.Fprintf(out, "Abandoned %s transaction %s. Files were left as they are; run git local doctor to check the result.\n", kind, id)
+	return err
 }

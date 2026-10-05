@@ -513,3 +513,54 @@ func TestDoctorReportsStageFileInIndex(t *testing.T) {
 	}
 	t.Fatalf("doctor did not report the staged stage file: %+v", report.Findings)
 }
+
+func TestDoctorGivesNextCommandForEveryPendingJournal(t *testing.T) {
+	repo, r, w := fixture(t)
+	meta, err := storage.OpenDir(filepath.Join(w.Common, "gitlocal"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer meta.Close()
+	ids := map[string]string{}
+	for _, kind := range []string{"config", "restore", "encrypt"} {
+		id, err := storage.UUID()
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids[kind] = id
+		body := `{"direction":"apply"}`
+		if kind == "config" {
+			body = `{"direction":"rollback"}`
+		}
+		if err := meta.AtomicWrite("transactions/"+kind+"-"+id+".json", []byte(body+"\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The encryption journal blocks every session; doctor still explains each.
+	result, err := Run(ctx, r, repo.Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string][]string{
+		ids["config"]:  {"git local recover " + ids["config"] + " --rollback.", "git local recover " + ids["config"] + " --abandon"},
+		ids["restore"]: {"git local recover " + ids["restore"] + " --resume or --rollback", "git local recover " + ids["restore"] + " --abandon"},
+		ids["encrypt"]: {"git local encrypt recover " + ids["encrypt"] + " --resume or --rollback", "git local recover " + ids["encrypt"] + " --abandon"},
+	}
+	for id, fragments := range want {
+		found := false
+		for _, f := range result.Findings {
+			if f.Check != "transaction "+id || f.Severity != "error" {
+				continue
+			}
+			found = true
+			for _, fragment := range fragments {
+				if !strings.Contains(f.Action, fragment) {
+					t.Fatalf("action for %s lacks %q: %s", id, fragment, f.Action)
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("no finding for %s:\n%s", id, result.Human())
+		}
+	}
+}

@@ -468,7 +468,7 @@ func validateJournal(j Journal, repo, id string) error {
 	if j.Kind == "retirement" {
 		return validateRetirement(j, repo, id)
 	}
-	if j.SchemaVersion != 1 || j.Kind != "selection" || j.ID != id || j.RepositoryID != repo || !storage.ValidUUID(j.WorkspaceID) || (j.Operation != "track" && j.Operation != "untrack") || (j.Direction != "apply" && j.Direction != "rollback") || (j.Outcome != "" && j.Outcome != "committed" && j.Outcome != "rolledback") {
+	if j.SchemaVersion != 1 || j.Kind != "selection" || j.ID != id || j.RepositoryID != repo || !storage.ValidUUID(j.WorkspaceID) || (j.Operation != "track" && j.Operation != "untrack") || (j.Direction != "apply" && j.Direction != "rollback") || (j.Outcome != "" && j.Outcome != "committed" && j.Outcome != "rolledback" && j.Outcome != OutcomeAbandoned) {
 		return errors.New("invalid configuration transaction journal")
 	}
 	for _, im := range []Image{j.Before, j.After, j.ExcludeBefore, j.ExcludeUnion, j.ExcludeAfter} {

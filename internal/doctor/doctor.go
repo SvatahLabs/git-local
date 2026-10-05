@@ -80,6 +80,25 @@ func Run(ctx context.Context, r *gitexec.Runner, cwd string) (Report, error) {
 		return result, nil
 	}
 	result.add("git", "ok", "required local Git behavior is available", "")
+	// Pending journals are listed without a session, which an initialization
+	// or encryption journal refuses, so every kind gets its next command.
+	pending, pendingErr := configtx.PendingJournals(ctx, r, cwd)
+	pendingReported := false
+	reportPending := func() {
+		pendingReported = true
+		if pendingErr != nil {
+			result.add("transactions", "error", pendingErr.Error(), "Inspect the transactions directory.")
+			return
+		}
+		if len(pending) == 0 {
+			result.add("transactions", "ok", "no unfinished transactions", "")
+			return
+		}
+		for _, p := range pending {
+			action, reason := p.Next()
+			result.add("transaction "+p.ID, "error", "unfinished "+p.Kind+" transaction: "+reason, action)
+		}
+	}
 	err := configtx.ReadDiagnostic(ctx, r, cwd, func(d configtx.DiagnosticState) error {
 		result.RepositoryID = d.Workspace.RepositoryID
 		result.WorkspaceID = d.Workspace.WorkspaceID
@@ -99,21 +118,9 @@ func Run(ctx context.Context, r *gitexec.Runner, cwd string) (Report, error) {
 			}
 			result.add("workspaces", "ok", fmt.Sprintf("%d workspace records inspected", len(d.Workspaces)), "")
 		}
-		if d.PendingErr != nil {
-			result.add("transactions", "error", d.PendingErr.Error(), "Inspect the transactions directory; run git local init for an unfinished initialization.")
-		} else if len(d.Pending) > 0 {
-			for _, id := range d.Pending {
-				action := "Run git local recover " + id + " --resume or --rollback."
-				for _, journal := range d.Journals {
-					if journal.ID == id && (journal.Kind == "restore" || journal.Kind == "seed") {
-						action = "From the original destination workspace, run git local recover " + id + " --resume or --rollback."
-						break
-					}
-				}
-				result.add("transaction "+id, "error", "unfinished transaction requires explicit recovery", action)
-			}
-		} else {
-			result.add("transactions", "ok", "no unfinished transactions", "")
+		reportPending()
+		if d.PendingErr != nil && pendingErr == nil && len(pending) == 0 {
+			result.add("transactions", "error", d.PendingErr.Error(), "Inspect the transactions directory.")
 		}
 		if d.JournalErr != nil {
 			result.add("journals", "error", d.JournalErr.Error(), "Inspect unexpected transaction metadata; do not delete recovery records blindly.")
@@ -210,6 +217,9 @@ func Run(ctx context.Context, r *gitexec.Runner, cwd string) (Report, error) {
 			return result, ctx.Err()
 		}
 		result.add("configuration", "error", err.Error(), "Run git local init for an incomplete initialization, or inspect schema and identity files before retrying.")
+		if !pendingReported && (pendingErr != nil || len(pending) > 0) {
+			reportPending()
+		}
 	}
 	if err == nil {
 		snapshot, e := configtx.LoadGuardSnapshot(ctx, r, cwd)

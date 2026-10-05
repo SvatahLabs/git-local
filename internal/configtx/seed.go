@@ -241,7 +241,7 @@ func seed(ctx context.Context, r *gitexec.Runner, cwd string, planner SeedPlanne
 }
 
 func validateSeed(j seedJournal, repo, workspaceID string) error {
-	if (j.SchemaVersion != 1 && j.SchemaVersion != 2) || j.Kind != "seed" || !storage.ValidUUID(j.ID) || j.RepositoryID != repo || j.WorkspaceID != workspaceID || !storage.ValidUUID(j.Source) || j.Source == workspaceID || !oidValid(j.Snapshot) || (j.Direction != "apply" && j.Direction != "rollback") || (j.Outcome != "" && j.Outcome != "committed" && j.Outcome != "rolledback") || j.Outcome == "committed" && j.Direction != "apply" || j.Outcome == "rolledback" && j.Direction != "rollback" || j.Config.ID != j.ID || j.Config.WorkspaceID != workspaceID || j.Config.Direction != "apply" || j.Config.Outcome != "" || j.Config.Operation != "track" {
+	if (j.SchemaVersion != 1 && j.SchemaVersion != 2) || j.Kind != "seed" || !storage.ValidUUID(j.ID) || j.RepositoryID != repo || j.WorkspaceID != workspaceID || !storage.ValidUUID(j.Source) || j.Source == workspaceID || !oidValid(j.Snapshot) || (j.Direction != "apply" && j.Direction != "rollback") || (j.Outcome != "" && j.Outcome != "committed" && j.Outcome != "rolledback" && j.Outcome != OutcomeAbandoned) || j.Outcome == "committed" && j.Direction != "apply" || j.Outcome == "rolledback" && j.Direction != "rollback" || j.Config.ID != j.ID || j.Config.WorkspaceID != workspaceID || j.Config.Direction != "apply" || j.Config.Outcome != "" || j.Config.Operation != "track" {
 		return errors.New("invalid seed journal")
 	}
 	if j.SchemaVersion == 1 && j.KeyFingerprint != "" || j.SchemaVersion == 2 && !oidValid(j.KeyFingerprint) {

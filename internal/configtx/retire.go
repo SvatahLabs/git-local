@@ -163,7 +163,7 @@ func (s *session) applyRetirement(ctx context.Context, j *Journal, f fault) ([]s
 	return warnings, s.archive(ctx, *j, f)
 }
 func validateRetirement(j Journal, repo, id string) error {
-	if j.SchemaVersion != 1 || j.Operation != "retire" || j.ID != id || j.RepositoryID != repo || !storage.ValidUUID(j.WorkspaceID) || (j.Direction != "apply" && j.Direction != "rollback") || (j.Outcome != "" && j.Outcome != "committed" && j.Outcome != "rolledback") {
+	if j.SchemaVersion != 1 || j.Operation != "retire" || j.ID != id || j.RepositoryID != repo || !storage.ValidUUID(j.WorkspaceID) || (j.Direction != "apply" && j.Direction != "rollback") || (j.Outcome != "" && j.Outcome != "committed" && j.Outcome != "rolledback" && j.Outcome != OutcomeAbandoned) {
 		return errors.New("invalid retirement journal")
 	}
 	var target Source

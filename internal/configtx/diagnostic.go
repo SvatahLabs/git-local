@@ -2,6 +2,7 @@ package configtx
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -142,6 +143,20 @@ func (s *session) inspectJournals() ([]JournalInfo, error) {
 					item.Err = errors.New("completed configuration journal has no outcome")
 				}
 			}
+			if (kind == "encrypt" || kind == "init") && directory.completed {
+				// Only recover --abandon archives these; record their outcome.
+				var j struct {
+					Outcome string `json:"outcome"`
+				}
+				data, err := s.meta.ReadFile(directory.path+"/"+name, 16<<20)
+				item.Err = err
+				if item.Err == nil {
+					item.Err = json.Unmarshal(data, &j)
+				}
+				if item.Err == nil && j.Outcome != OutcomeAbandoned {
+					item.Err = errors.New("completed " + kind + " journal was not abandoned")
+				}
+			}
 			if kind == "seed" {
 				var j seedJournal
 				item.Err = s.meta.ReadJSON(directory.path+"/"+name, &j)
@@ -172,7 +187,7 @@ func (s *session) inspectJournals() ([]JournalInfo, error) {
 	return out, nil
 }
 func journalName(name string) (string, string, bool) {
-	for _, item := range []struct{ prefix, kind string }{{"config-", "config"}, {"restore-", "restore"}, {"seed-", "seed"}} {
+	for _, item := range []struct{ prefix, kind string }{{"config-", "config"}, {"restore-", "restore"}, {"seed-", "seed"}, {"encrypt-", "encrypt"}, {"init-", "init"}} {
 		if strings.HasPrefix(name, item.prefix) && strings.HasSuffix(name, ".json") {
 			id := strings.TrimSuffix(strings.TrimPrefix(name, item.prefix), ".json")
 			return item.kind, id, storage.ValidUUID(id)

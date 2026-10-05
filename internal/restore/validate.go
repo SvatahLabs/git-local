@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"runtime"
 
+	"gitlocal/internal/configtx"
 	"gitlocal/internal/gitexec"
 	"gitlocal/internal/history"
 	"gitlocal/internal/secureblob"
@@ -25,7 +26,7 @@ func validateJournal(ctx context.Context, r *gitexec.Runner, w workspace.Context
 func validateJournalWithLiveState(ctx context.Context, r *gitexec.Runner, w workspace.Context, state selection.State, digest, id string, j journal, checkLive bool) error {
 	m := j.Manifest
 	p := m.Plan
-	if (j.SchemaVersion != 1 && j.SchemaVersion != 2) || j.Kind != "restore" || j.ID != id || m.SchemaVersion != j.SchemaVersion || m.Kind != "restore-recovery" || m.ID != id || p.SchemaVersion != 1 || p.RepositoryID != w.RepositoryID || p.DestinationWorkspaceID != w.WorkspaceID || !storage.ValidUUID(p.SourceWorkspaceID) || !validOID(j.RecoverySnapshot) || j.Direction != "apply" && j.Direction != "rollback" || j.Outcome != "" && j.Outcome != "committed" && j.Outcome != "rolledback" || j.Progress < 0 || j.Progress > len(p.Operations) || j.Outcome != "" && j.Progress != len(p.Operations) || len(p.Operations) == 0 || len(m.Post) != len(p.Operations) || len(m.Stages) != len(p.Operations) {
+	if (j.SchemaVersion != 1 && j.SchemaVersion != 2) || j.Kind != "restore" || j.ID != id || m.SchemaVersion != j.SchemaVersion || m.Kind != "restore-recovery" || m.ID != id || p.SchemaVersion != 1 || p.RepositoryID != w.RepositoryID || p.DestinationWorkspaceID != w.WorkspaceID || !storage.ValidUUID(p.SourceWorkspaceID) || !validOID(j.RecoverySnapshot) || j.Direction != "apply" && j.Direction != "rollback" || j.Outcome != "" && j.Outcome != "committed" && j.Outcome != "rolledback" && j.Outcome != configtx.OutcomeAbandoned || j.Progress < 0 || j.Progress > len(p.Operations) || (j.Outcome == "committed" || j.Outcome == "rolledback") && j.Progress != len(p.Operations) || len(p.Operations) == 0 || len(m.Post) != len(p.Operations) || len(m.Stages) != len(p.Operations) {
 		return errors.New("invalid restore journal identity or schema")
 	}
 	if j.SchemaVersion == 1 && (p.EncryptedKeyFingerprint != "" || len(m.BeforeStored) != 0 || len(m.PostStored) != 0) || j.SchemaVersion == 2 && (!validFingerprintHex(p.EncryptedKeyFingerprint) || len(m.BeforeStored) != len(p.Operations) || len(m.PostStored) != len(p.Operations)) {

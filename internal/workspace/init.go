@@ -293,7 +293,7 @@ func validateJournal(j initJournal, w *Context) error {
 	return nil
 }
 func validateTop(common string) error {
-	allowed := map[string]bool{"repository.json": true, "history.git": true, "locks": true, "transactions": true, "workspaces": true, "hook-install.json": true, "overlays": true, "overlay-filter.gitconfig": true, "overlay-install.json": true, "encryption.json": true}
+	allowed := map[string]bool{"repository.json": true, "history.git": true, "locks": true, "transactions": true, "workspaces": true, "hook-install.json": true, "overlays": true, "overlay-filter.gitconfig": true, "overlay-install.json": true, "encryption.json": true, "quarantine": true}
 	entries, err := os.ReadDir(filepath.Join(common, "gitlocal"))
 	if err != nil {
 		return err

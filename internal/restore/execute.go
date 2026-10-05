@@ -795,3 +795,115 @@ func (w stageWriter) Write(b []byte) (int, error) {
 	}
 	return n, point(w.ctx, w.f, fmt.Sprintf("stage-write:%d", w.index))
 }
+
+// Abandon gives up a pending restore without resuming or rolling it back.
+// Working files stay as they are and the recovery ref is kept, so the anchored
+// preimages and postimages remain in local history. A staging file is removed
+// when it matches its anchored image; any other staging bytes are quarantined.
+func Abandon(ctx context.Context, r *gitexec.Runner, cwd, id string) (configtx.AbandonResult, error) {
+	result := configtx.AbandonResult{TransactionID: id, Kind: "restore"}
+	if !storage.ValidUUID(id) {
+		return result, errors.New("invalid restore transaction ID")
+	}
+	err := configtx.WithRestore(ctx, r, cwd, id, func(w workspace.Context, state selection.State, digest string, _ func() error) error {
+		meta, err := openMeta(w.Common)
+		if err != nil {
+			return err
+		}
+		defer meta.Close()
+		j, err := readJournal(meta, journalPath(id))
+		if os.IsNotExist(err) {
+			done, e := readJournal(meta, completedPath(id))
+			if e != nil {
+				return e
+			}
+			if done.Outcome != configtx.OutcomeAbandoned {
+				return errors.New("restore already completed with a different outcome")
+			}
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if destination := j.Manifest.Plan.DestinationWorkspaceID; destination != w.WorkspaceID {
+			return fmt.Errorf("%w: abandon restore transaction %s from its destination workspace %s", storage.ErrConflict, id, destination)
+		}
+		// The anchor must hold every recorded image before a matching stage can
+		// be deleted as a duplicate.
+		evidence := j
+		evidence.Outcome = configtx.OutcomeAbandoned
+		if err := validateJournalWithLiveState(ctx, r, w, state, digest, id, evidence, false); err != nil {
+			return err
+		}
+		var key []byte
+		var keyErr error
+		if j.SchemaVersion == 2 {
+			policy, loaded, e := loadRestoreKey(w)
+			if e == nil && policy.KeyFingerprint != j.Manifest.Plan.EncryptedKeyFingerprint {
+				e = errors.New("sensitive-file key differs from the restore journal")
+			}
+			key, keyErr = loaded, e
+			if e != nil {
+				key = nil
+			}
+		}
+		files, err := storage.OpenDir(w.Root)
+		if err != nil {
+			return err
+		}
+		defer files.Close()
+		q, err := configtx.NewQuarantine(meta, id, "restore")
+		if err != nil {
+			return err
+		}
+		g := &guard{r: r, w: w, files: files, journal: &j, key: key}
+		m := j.Manifest
+		for i, stages := range m.Stages {
+			op := m.Plan.Operations[i]
+			for _, entry := range []struct {
+				path, workspaceID string
+				image             Fingerprint
+			}{{stages.Apply, m.Plan.SourceWorkspaceID, m.Post[i]}, {stages.Rollback, w.WorkspaceID, op.Before}} {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				if _, err := files.Lstat(entry.path); os.IsNotExist(err) {
+					continue
+				} else if err != nil {
+					return err
+				}
+				reason := "staging bytes don't match the anchored image"
+				if entry.image.KeyedDigest == "" || key != nil {
+					match, err := g.matchesImage(ctx, entry.path, entry.image, entry.workspaceID, op.Path)
+					if err != nil {
+						return err
+					}
+					if match {
+						if err := files.Remove(entry.path); err != nil {
+							return err
+						}
+						result.Removed = append(result.Removed, entry.path)
+						continue
+					}
+				} else {
+					reason = "sensitive-file key is unavailable to verify the staging bytes"
+				}
+				quarantined, err := q.QuarantineFile(meta, files, entry.path, w.Root, reason)
+				if err != nil {
+					return err
+				}
+				result.Quarantined = append(result.Quarantined, quarantined)
+			}
+		}
+		if keyErr != nil && len(result.Quarantined) > 0 {
+			result.Warnings = append(result.Warnings, "sensitive-file key unavailable: "+keyErr.Error())
+		}
+		result.Quarantine = q.Directory(w.Common)
+		j.Outcome = configtx.OutcomeAbandoned
+		if err := writeJournal(meta, j); err != nil {
+			return err
+		}
+		return archive(ctx, meta, j, nil)
+	})
+	return result, err
+}

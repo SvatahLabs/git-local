@@ -34,6 +34,8 @@ type migrationJournal struct {
 	NewRecovery    map[string]string `json:"newRecovery,omitempty"`
 	SeedUpdates    []recordUpdate    `json:"seedUpdates,omitempty"`
 	RestoreUpdates []recordUpdate    `json:"restoreUpdates,omitempty"`
+	// Outcome is set only on a journal archived by AbandonMigration.
+	Outcome string `json:"outcome,omitempty"`
 }
 
 type recordUpdate struct {
@@ -166,7 +168,7 @@ func migrationJournalsSupported(meta *storage.Dir) ([]string, []string, error) {
 			return nil, nil, fmt.Errorf("%w: invalid completed transaction %q", storage.ErrConflict, name)
 		}
 		switch kind {
-		case "config":
+		case "config", "encrypt", "init":
 		case "seed":
 			seeds = append(seeds, name)
 		case "restore":
@@ -535,7 +537,7 @@ func readMigrationJournal(meta *storage.Dir, id, repositoryID string) (migration
 	if err := dec.Decode(&j); err != nil {
 		return j, err
 	}
-	if dec.Decode(new(any)) != io.EOF || j.SchemaVersion != 1 || j.Kind != "encrypt" || j.ID != id || j.RepositoryID != repositoryID {
+	if dec.Decode(new(any)) != io.EOF || j.SchemaVersion != 1 || j.Kind != "encrypt" || j.ID != id || j.RepositoryID != repositoryID || j.Outcome != "" {
 		return j, errors.New("invalid encryption migration journal")
 	}
 	if len(j.OldHeads) != len(j.NewHeads)+len(j.NewRecovery) {
@@ -623,48 +625,13 @@ func RecoverMigration(ctx context.Context, r *gitexec.Runner, cwd, id, direction
 	if !storage.ValidUUID(id) || direction != "resume" && direction != "rollback" {
 		return errors.New("encrypt recover requires a transaction UUID and --resume or --rollback")
 	}
-	w, err := workspace.Discover(ctx, r, cwd)
+	locked, err := lockMigration(ctx, r, cwd)
 	if err != nil {
 		return err
 	}
-	common, err := storage.OpenDir(w.Common)
-	if err != nil {
-		return err
-	}
-	defer common.Close()
-	lock, err := common.Lock(ctx, "gitlocal/locks/repository.lock", false)
-	if err != nil {
-		return err
-	}
-	defer lock.Close()
-	var repo workspace.Repository
-	if err := common.ReadJSON("gitlocal/repository.json", &repo); err != nil {
-		return err
-	}
-	if repo.SchemaVersion != workspace.SchemaVersion || !storage.ValidUUID(repo.RepositoryID) {
-		return errors.New("invalid repository identity during encryption recovery")
-	}
-	admin, err := storage.OpenDir(w.Admin)
-	if err != nil {
-		return err
-	}
-	var identity workspace.Identity
-	identityErr := admin.ReadJSON("gitlocal-workspace.json", &identity)
-	admin.Close()
-	if identityErr != nil {
-		return identityErr
-	}
-	if identity.SchemaVersion != workspace.SchemaVersion || identity.RepositoryID != repo.RepositoryID || !storage.ValidUUID(identity.WorkspaceID) {
-		return errors.New("invalid workspace identity during encryption recovery")
-	}
-	w.RepositoryID = repo.RepositoryID
-	w.WorkspaceID = identity.WorkspaceID
-	meta, err := storage.OpenDir(filepath.Join(w.Common, "gitlocal"))
-	if err != nil {
-		return err
-	}
-	defer meta.Close()
-	j, err := readMigrationJournal(meta, id, repo.RepositoryID)
+	defer locked.close()
+	w, common, meta := locked.w, locked.common, locked.meta
+	j, err := readMigrationJournal(meta, id, w.RepositoryID)
 	if err != nil {
 		return err
 	}
@@ -800,4 +767,159 @@ func RecoverMigration(ctx context.Context, r *gitexec.Runner, cwd, id, direction
 		}
 	}
 	return meta.Remove(journalName(id))
+}
+
+type lockedMigration struct {
+	w            *workspace.Context
+	common, meta *storage.Dir
+	lock         *storage.Lock
+}
+
+func (l *lockedMigration) close() {
+	if l.meta != nil {
+		l.meta.Close()
+	}
+	if l.lock != nil {
+		l.lock.Close()
+	}
+	if l.common != nil {
+		l.common.Close()
+	}
+}
+
+// lockMigration takes the exclusive repository lock without opening a
+// session, which the pending migration journal would refuse.
+func lockMigration(ctx context.Context, r *gitexec.Runner, cwd string) (*lockedMigration, error) {
+	w, err := workspace.Discover(ctx, r, cwd)
+	if err != nil {
+		return nil, err
+	}
+	l := &lockedMigration{w: w}
+	success := false
+	defer func() {
+		if !success {
+			l.close()
+		}
+	}()
+	if l.common, err = storage.OpenDir(w.Common); err != nil {
+		return nil, err
+	}
+	if l.lock, err = l.common.Lock(ctx, "gitlocal/locks/repository.lock", false); err != nil {
+		return nil, err
+	}
+	var repo workspace.Repository
+	if err := l.common.ReadJSON("gitlocal/repository.json", &repo); err != nil {
+		return nil, err
+	}
+	if repo.SchemaVersion != workspace.SchemaVersion || !storage.ValidUUID(repo.RepositoryID) {
+		return nil, errors.New("invalid repository identity during encryption recovery")
+	}
+	admin, err := storage.OpenDir(w.Admin)
+	if err != nil {
+		return nil, err
+	}
+	var identity workspace.Identity
+	identityErr := admin.ReadJSON("gitlocal-workspace.json", &identity)
+	admin.Close()
+	if identityErr != nil {
+		return nil, identityErr
+	}
+	if identity.SchemaVersion != workspace.SchemaVersion || identity.RepositoryID != repo.RepositoryID || !storage.ValidUUID(identity.WorkspaceID) {
+		return nil, errors.New("invalid workspace identity during encryption recovery")
+	}
+	w.RepositoryID = repo.RepositoryID
+	w.WorkspaceID = identity.WorkspaceID
+	if l.meta, err = storage.OpenDir(filepath.Join(w.Common, "gitlocal")); err != nil {
+		return nil, err
+	}
+	success = true
+	return l, nil
+}
+
+func completedMigrationName(id string) string {
+	return "transactions/completed/encrypt-" + id + ".json"
+}
+
+// AbandonMigration gives up an encryption migration without resuming or
+// rolling it back. It never deletes a store: the prepared encrypted store, the
+// replaced plaintext store and prepared journal updates move into the
+// quarantine. Before publication the original plaintext store must still be in
+// service; after publication the encrypted store and policy stay as they are.
+func AbandonMigration(ctx context.Context, r *gitexec.Runner, cwd, id string) (configtx.AbandonResult, error) {
+	result := configtx.AbandonResult{TransactionID: id, Kind: "encrypt"}
+	if !storage.ValidUUID(id) {
+		return result, errors.New("invalid transaction ID")
+	}
+	locked, err := lockMigration(ctx, r, cwd)
+	if err != nil {
+		return result, err
+	}
+	defer locked.close()
+	w, common, meta := locked.w, locked.common, locked.meta
+	j, err := readMigrationJournal(meta, id, w.RepositoryID)
+	if errors.Is(err, os.ErrNotExist) {
+		var done struct {
+			Outcome string `json:"outcome"`
+		}
+		data, e := meta.ReadFile(completedMigrationName(id), 1<<20)
+		if e == nil {
+			e = json.Unmarshal(data, &done)
+		}
+		if e == nil && done.Outcome != configtx.OutcomeAbandoned {
+			e = errors.New("encryption migration completed with a different outcome")
+		}
+		return result, e
+	}
+	if err != nil {
+		return result, err
+	}
+	live, err := storeExists(w.Store)
+	if err != nil {
+		return result, err
+	}
+	if !live {
+		return result, fmt.Errorf("%w: no history store is in service; run git local encrypt recover %s --rollback or --resume", storage.ErrConflict, id)
+	}
+	_, policyErr := common.Lstat(secureblob.PolicyFile)
+	published := policyErr == nil
+	if policyErr != nil && !errors.Is(policyErr, os.ErrNotExist) {
+		return result, policyErr
+	}
+	if !published {
+		if err := matchHeads(ctx, r, w.Store, j.OldHeads); err != nil {
+			return result, fmt.Errorf("%w: the store in service isn't the original history (%v); run git local encrypt recover %s --rollback", storage.ErrConflict, err, id)
+		}
+	}
+	q, err := configtx.NewQuarantine(meta, id, "encrypt")
+	if err != nil {
+		return result, err
+	}
+	for _, item := range []struct{ name, reason string }{
+		{stageName(id), "encrypted history prepared by the migration"},
+		{backupName(id), "plaintext history the migration replaced"},
+		{recordsName(id), "completed journals rewritten for the encrypted history"},
+	} {
+		if _, err := meta.Lstat(item.name); errors.Is(err, os.ErrNotExist) {
+			continue
+		} else if err != nil {
+			return result, err
+		}
+		entry, err := q.QuarantineStore(meta, item.name, item.reason)
+		if err != nil {
+			return result, err
+		}
+		result.Quarantined = append(result.Quarantined, entry)
+		if item.name == backupName(id) {
+			result.Warnings = append(result.Warnings, "the quarantine holds plaintext history; delete "+q.Directory(w.Common)+" once you no longer need it")
+		}
+	}
+	result.Quarantine = q.Directory(w.Common)
+	j.Outcome = configtx.OutcomeAbandoned
+	if err := meta.MkdirAll("transactions/completed"); err != nil {
+		return result, err
+	}
+	if err := meta.WriteJSON(completedMigrationName(id), j); err != nil {
+		return result, err
+	}
+	return result, meta.Remove(journalName(id))
 }
