@@ -74,8 +74,9 @@ func LoadForPaths(ctx context.Context, commonPath, owner string, paths []string)
 	}
 	wanted := make(map[string]bool, len(paths))
 	for _, path := range paths {
-		if err := storage.ValidateSelectionPath(path); err != nil {
-			return nil, err
+		// An unselectable path can't carry an overlay; compare its portable alias.
+		if storage.ValidateSelectionPath(path) != nil {
+			path = storage.PortableAlias(path)
 		}
 		wanted[storage.AliasKey(path)] = true
 	}

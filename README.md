@@ -171,7 +171,11 @@ hook execution still awaits CI qualification. The guards reject additions or
 changes to paths selected by any active or retired workspace, and to
 `.gitlocal-tmp-*` staging files, and detect saved
 overlay patches that entered the index or a pushed commit without the filter;
-staged deletions remain allowed. Existing shell hooks keep their contents and run after the
+staged deletions remain allowed. Paths that can never be selected, such as
+`aux.c`, `nul.txt`, names with a backslash or a trailing dot or space, or
+non-UTF-8 names, pass the guards unless the spelling Windows would resolve them
+to (backslash as separator, trailing dots and spaces dropped) aliases a
+selected path. Existing shell hooks keep their contents and run after the
 managed guard block. Use `git local hook status` to inspect protection and
 `git local hook uninstall` to remove only git-local's blocks. Either command
 accepts `--pre-commit` or `--pre-push` to select one guard. Installation uses

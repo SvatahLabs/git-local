@@ -97,3 +97,17 @@ func TestProcessorStripsAgainstLiveIndex(t *testing.T) {
 		t.Fatalf("smudge failed: %v %q", err, smudged)
 	}
 }
+
+func TestLoadForPathsAcceptsUnselectablePaths(t *testing.T) {
+	common := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(common, "gitlocal", "locks"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(common, "gitlocal", "locks", "repository.lock"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	versions, err := LoadForPaths(context.Background(), common, "", []string{"aux.c", `a\b.md`, "name.", "\xffbyte.txt"})
+	if err != nil || len(versions) != 0 {
+		t.Fatalf("LoadForPaths: %v %+v", err, versions)
+	}
+}

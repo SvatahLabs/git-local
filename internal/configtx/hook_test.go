@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"gitlocal/internal/gitexec"
+	"gitlocal/internal/selection"
 	"gitlocal/internal/testutil"
 	"gitlocal/internal/workspace"
 )
@@ -40,5 +41,26 @@ func TestHookChecksSelectionsFromOtherActiveWorkspaces(t *testing.T) {
 	conflicts, err := CheckStagedPaths(ctx, r, repo.Root, []string{"app.txt", "notes/secret", "NOTES/SECRET"})
 	if err != nil || len(conflicts) != 2 || conflicts[0].Path != "notes/secret" || conflicts[1].Path != "NOTES/SECRET" {
 		t.Fatalf("cross-workspace guard: %+v, %v", conflicts, err)
+	}
+}
+
+func TestGuardCheckTreatsUnselectablePathsByPortableAlias(t *testing.T) {
+	s := GuardSnapshot{Selections: []GuardSelection{{WorkspaceID: "w", State: selection.State{Include: []selection.Rule{{Path: "notes/secret", Kind: "file"}, {Path: "private", Kind: "directory"}}}}}}
+	unselectable := []string{"aux.c", "con.h", "nul.txt", `a\b.md`, "name.", "\xffbyte.txt", "dir/COM1.log"}
+	aliases := []string{`notes\secret`, "notes/secret.", "NOTES/SECRET ", `private\x`, "private./x"}
+	conflicts, err := s.Check(append(append([]string{}, unselectable...), aliases...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(conflicts) != len(aliases) {
+		t.Fatalf("conflicts: %+v", conflicts)
+	}
+	for i, c := range conflicts {
+		if c.Path != aliases[i] || c.WorkspaceID != "w" {
+			t.Fatalf("conflict %d: %+v", i, c)
+		}
+	}
+	if _, err := s.Check([]string{"bad\x00name"}); err == nil {
+		t.Fatal("accepted a NUL in a changed path")
 	}
 }

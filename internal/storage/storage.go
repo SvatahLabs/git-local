@@ -86,6 +86,18 @@ func ValidateSelectionPath(path string) error {
 	return nil
 }
 
+// PortableAlias maps a path that fails ValidateSelectionPath to the spelling a
+// Windows filesystem would resolve it to: backslashes separate components, and
+// trailing dots and spaces are dropped. Such a path can never be selected
+// itself, so guards compare this alias with AliasKey instead of rejecting it.
+func PortableAlias(path string) string {
+	parts := strings.Split(strings.ReplaceAll(path, "\\", "/"), "/")
+	for i, part := range parts {
+		parts[i] = strings.TrimRight(part, ". ")
+	}
+	return strings.Join(parts, "/")
+}
+
 // AliasKey is conservative across case-sensitive and normalization-sensitive
 // filesystems. Callers reject collisions; they never change the stored name.
 func AliasKey(path string) string {

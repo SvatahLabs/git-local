@@ -114,15 +114,19 @@ func LoadGuardSnapshot(ctx context.Context, r *gitexec.Runner, cwd string) (Guar
 func (s GuardSnapshot) Check(paths []string) ([]HookConflict, error) {
 	conflicts := []HookConflict{}
 	for _, p := range paths {
-		if p == "" || strings.ContainsAny(p, "\x00\\") || path.IsAbs(p) || path.Clean(p) != p || p == ".." || strings.HasPrefix(p, "../") {
-			return nil, fmt.Errorf("invalid selected path %q", p)
+		if p == "" || strings.ContainsRune(p, 0) || path.IsAbs(p) || path.Clean(p) != p || p == ".." || strings.HasPrefix(p, "../") {
+			return nil, fmt.Errorf("invalid changed path %q", p)
 		}
 		if StagingPath(p) {
 			conflicts = append(conflicts, HookConflict{Path: p, Staging: true})
 			continue
 		}
+		candidate := p
+		if storage.ValidateSelectionPath(p) != nil {
+			candidate = storage.PortableAlias(p)
+		}
 		for _, selected := range s.Selections {
-			if selectedAlias(selected.State, p) {
+			if selectedAlias(selected.State, candidate) {
 				conflicts = append(conflicts, HookConflict{Path: p, WorkspaceID: selected.WorkspaceID, WorkspaceRoot: selected.WorkspaceRoot})
 				break
 			}
