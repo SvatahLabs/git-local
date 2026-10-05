@@ -120,6 +120,23 @@ func (policy Policy) Covers(path string) bool {
 	return false
 }
 
+// UncoveredAlias returns the sensitive rule a path falls under by alias key
+// (case, normalization, or a file rule naming a directory) when the path's
+// exact spelling is not covered, so it would otherwise be stored as plaintext.
+func (policy Policy) UncoveredAlias(path string) (string, bool) {
+	if policy.Covers(path) {
+		return "", false
+	}
+	key := storage.AliasKey(path)
+	for _, rule := range policy.Sensitive {
+		ruleKey := storage.AliasKey(rule.Path)
+		if key == ruleKey || strings.HasPrefix(key, ruleKey+"/") {
+			return rule.Path, true
+		}
+	}
+	return "", false
+}
+
 // LoadKey fails closed if a key is missing, changed, or not owner-private.
 func LoadKey(policy Policy, repoRoot, commonGitDir string) ([]byte, error) {
 	canonical, err := Canonical(policy, repoRoot, commonGitDir)

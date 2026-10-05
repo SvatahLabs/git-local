@@ -715,7 +715,10 @@ func TestOverlayFilterFailsClosedWhenCheckoutMovesOrIncludeIsMissing(t *testing.
 	if out, err := add.CombinedOutput(); err != nil {
 		t.Fatalf("overlay add: %v\n%s", err, out)
 	}
-	stageEdit := func(line string) {
+	// stageEdit edits an unrelated line and runs git add. The filter must
+	// either strip the patch (wantStaged) or make git add fail; the index must
+	// never receive the patch.
+	stageEdit := func(line string, wantStaged bool) {
 		t.Helper()
 		working := bytes.Replace(base, []byte("port = 80"), []byte("port = 8080"), 1)
 		working = bytes.Replace(working, []byte("g\n"), []byte(line+"\n"), 1)
@@ -724,10 +727,18 @@ func TestOverlayFilterFailsClosedWhenCheckoutMovesOrIncludeIsMissing(t *testing.
 		}
 		cmd := exec.Command(repo.GitPath, "add", "app.conf")
 		cmd.Dir, cmd.Env = repo.Root, repo.Env
-		if out, err := cmd.CombinedOutput(); err != nil {
-			return
-		} else if staged := repo.Git("cat-file", "blob", ":app.conf"); bytes.Contains(staged, []byte("8080")) {
-			t.Fatalf("git add staged the overlay patch (%s): %q", out, staged)
+		out, err := cmd.CombinedOutput()
+		staged := repo.Git("cat-file", "blob", ":app.conf")
+		if bytes.Contains(staged, []byte("8080")) {
+			t.Fatalf("git add staged the overlay patch (%v, %s): %q", err, out, staged)
+		}
+		if wantStaged {
+			want := bytes.Replace(base, []byte("g\n"), []byte(line+"\n"), 1)
+			if err != nil || !bytes.Equal(staged, want) {
+				t.Fatalf("git add did not stage the edit without the patch (%v, %s): %q", err, out, staged)
+			}
+		} else if err == nil {
+			t.Fatalf("git add succeeded without the filter configuration: %q", staged)
 		}
 	}
 
@@ -736,12 +747,12 @@ func TestOverlayFilterFailsClosedWhenCheckoutMovesOrIncludeIsMissing(t *testing.
 		t.Fatal(err)
 	}
 	repo.Root = moved
-	stageEdit("moved")
+	stageEdit("moved", true)
 
 	if err := os.Remove(filepath.Join(repo.Root, ".git", "gitlocal", filterConfigName)); err != nil {
 		t.Fatal(err)
 	}
-	stageEdit("missing include")
+	stageEdit("missing include", false)
 }
 
 func TestOverlayAddFiltersUnusualNamesAndRefusesOverriddenAttributes(t *testing.T) {

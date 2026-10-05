@@ -228,6 +228,13 @@ func installNamed(ctx context.Context, r *gitexec.Runner, cwd, executable string
 	if err := checkLocation(location, dir, allowShared); err != nil {
 		return nil, err
 	}
+	tracked, err := trackedHooks(ctx, r, w, dir, selected)
+	if err != nil {
+		return nil, err
+	}
+	if len(tracked) > 0 {
+		return nil, fmt.Errorf("%w: hook files %s in %s are tracked by Git; installing would commit this machine's binary path. Call `git local guard staged` and `git local guard push \"$1\"` from those hooks instead", storage.ErrConflict, strings.Join(tracked, ", "), dir)
+	}
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, err
 	}

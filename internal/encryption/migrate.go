@@ -356,7 +356,11 @@ func migrationPolicy(ctx context.Context, r *gitexec.Runner, cwd string, w works
 		}
 		normalized = append(normalized, path)
 	}
-	rules, err := sensitiveRules(w.Root, state, normalized)
+	recorded, err := history.HistoricalPaths(ctx, r, w)
+	if err != nil {
+		return secureblob.Policy{}, nil, err
+	}
+	rules, err := sensitiveRules(w.Root, state, normalized, recorded)
 	if err != nil {
 		return secureblob.Policy{}, nil, err
 	}

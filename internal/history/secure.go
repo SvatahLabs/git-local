@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strings"
 
 	"gitlocal/internal/gitexec"
 	"gitlocal/internal/secureblob"
@@ -47,15 +46,11 @@ func (s *secureState) covers(path string) bool {
 // being covered by its exact spelling, so it would otherwise be stored as
 // plaintext.
 func (s *secureState) uncoveredAlias(path string) error {
-	if s == nil || s.policy.Covers(path) {
+	if s == nil {
 		return nil
 	}
-	key := storage.AliasKey(path)
-	for _, rule := range s.policy.Sensitive {
-		ruleKey := storage.AliasKey(rule.Path)
-		if key == ruleKey || strings.HasPrefix(key, ruleKey+"/") {
-			return fmt.Errorf("%w: %q matches sensitive path %q only by spelling or kind and would be saved unencrypted; run git local doctor", storage.ErrConflict, path, rule.Path)
-		}
+	if rule, ok := s.policy.UncoveredAlias(path); ok {
+		return fmt.Errorf("%w: %q matches sensitive path %q only by spelling or kind and would be saved unencrypted; run git local doctor", storage.ErrConflict, path, rule)
 	}
 	return nil
 }

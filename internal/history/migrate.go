@@ -21,6 +21,30 @@ type MigrationResult struct {
 	Snapshots map[string]string
 }
 
+// HistoricalPaths lists every repository-relative file path recorded by any
+// snapshot reachable from a ref in the private store. Migration uses it so a
+// sensitive rule matches what history holds, not only today's checkout.
+func HistoricalPaths(ctx context.Context, r *gitexec.Runner, w workspace.Context) (map[string]bool, error) {
+	paths := map[string]bool{}
+	commits, err := r.History(ctx, w.Store, nil, "rev-list", "--all")
+	if err != nil {
+		return nil, err
+	}
+	if len(bytes.TrimSpace(commits)) == 0 {
+		return paths, nil
+	}
+	b, err := r.History(ctx, w.Store, bytes.NewReader(commits), "diff-tree", "--stdin", "--root", "-r", "--no-commit-id", "--no-renames", "--name-only", "-z")
+	if err != nil {
+		return nil, err
+	}
+	for _, name := range strings.Split(string(b), "\x00") {
+		if rest, ok := strings.CutPrefix(name, "files/"); ok && rest != "" {
+			paths[rest] = true
+		}
+	}
+	return paths, nil
+}
+
 // RewritePlaintextStore copies validated user histories into a new bare store,
 // encrypting every file covered by policy. It refuses other refs because their
 // objects may contain plaintext and cannot safely be carried over unchanged.
@@ -269,6 +293,9 @@ func rewriteSnapshot(ctx context.Context, r *gitexec.Runner, w workspace.Context
 	for _, path := range paths {
 		file := oldFiles[path]
 		id := file.ID
+		if rule, ok := policy.UncoveredAlias(path); ok {
+			return "", fmt.Errorf("%w: historical file %q matches sensitive path %q only by spelling or kind and would stay unencrypted", storage.ErrConflict, path, rule)
+		}
 		if policy.Covers(path) {
 			identity := secureblob.Identity{RepositoryID: w.RepositoryID, WorkspaceID: source, Path: path, Mode: file.Mode}
 			id, digests[path], err = migrateSensitiveBlob(ctx, r, w.Store, destination, file.ID, key, identity)

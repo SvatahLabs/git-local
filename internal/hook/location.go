@@ -30,21 +30,25 @@ type Location struct {
 	Kind, Worktree string
 }
 
+// locate picks the most specific (deepest) root containing dir, so a worktree
+// nested inside the common Git directory still counts as a worktree, and the
+// common directory nested inside the main worktree counts as the repository.
 func locate(ctx context.Context, r *gitexec.Runner, w *workspace.Context, dir string) (Location, error) {
 	resolved := resolveExisting(dir)
-	if within(resolveExisting(w.Common), resolved) {
-		return Location{Kind: LocationRepository}, nil
-	}
 	roots, err := workspace.RegisteredRoots(ctx, r, w)
 	if err != nil {
 		return Location{}, err
 	}
+	best, bestLen := Location{Kind: LocationShared}, -1
+	if common := resolveExisting(w.Common); within(common, resolved) {
+		best, bestLen = Location{Kind: LocationRepository}, len(common)
+	}
 	for _, root := range roots {
-		if within(resolveExisting(root), resolved) {
-			return Location{Kind: LocationWorktree, Worktree: root}, nil
+		if resolvedRoot := resolveExisting(root); within(resolvedRoot, resolved) && len(resolvedRoot) > bestLen {
+			best, bestLen = Location{Kind: LocationWorktree, Worktree: root}, len(resolvedRoot)
 		}
 	}
-	return Location{Kind: LocationShared}, nil
+	return best, nil
 }
 
 // checkLocation refuses directories whose hook scripts are shared with other

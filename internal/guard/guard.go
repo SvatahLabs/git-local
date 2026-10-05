@@ -12,6 +12,7 @@ import (
 	"gitlocal/internal/configtx"
 	"gitlocal/internal/gitexec"
 	"gitlocal/internal/overlay"
+	"gitlocal/internal/storage"
 )
 
 type Finding struct {
@@ -73,17 +74,37 @@ func Staged(ctx context.Context, r *gitexec.Runner, cwd, index string) ([]Findin
 		if version.Manifest.WorkspaceID != processor.WorkspaceID {
 			continue
 		}
-		candidate, err := r.IndexBlob(ctx, snapshot.Root, index, version.Manifest.Path)
-		if err != nil {
-			return nil, err
-		}
-		if reason, err := overlayReason(ctx, r, version, candidate); err != nil {
-			return nil, err
-		} else if reason != "" {
-			findings = append(findings, Finding{HookConflict: configtx.HookConflict{Path: version.Manifest.Path, WorkspaceID: version.Manifest.WorkspaceID}, OverlayName: version.Manifest.Name, OverlayReason: reason})
+		for _, staged := range aliasPaths(paths, version.Manifest.Path) {
+			candidate, err := r.IndexBlob(ctx, snapshot.Root, index, staged)
+			if err != nil {
+				return nil, err
+			}
+			if reason, err := overlayReason(ctx, r, version, candidate); err != nil {
+				return nil, err
+			} else if reason != "" {
+				findings = append(findings, Finding{HookConflict: configtx.HookConflict{Path: staged, WorkspaceID: version.Manifest.WorkspaceID}, OverlayName: version.Manifest.Name, OverlayReason: reason})
+			}
 		}
 	}
 	return findings, nil
+}
+
+// aliasPaths returns the changed paths that matched an overlay's path by alias
+// key: its exact spelling and any case, normalization or portable alias of it.
+// Each is checked, so a patch staged under an alias spelling is still caught.
+func aliasPaths(paths []string, overlayPath string) []string {
+	want := storage.AliasKey(overlayPath)
+	var matched []string
+	for _, p := range paths {
+		candidate := p
+		if storage.ValidateSelectionPath(p) != nil {
+			candidate = storage.PortableAlias(p)
+		}
+		if storage.AliasKey(candidate) == want {
+			matched = append(matched, p)
+		}
+	}
+	return matched
 }
 
 func overlayReason(ctx context.Context, r *gitexec.Runner, version overlay.Version, candidate []byte) (string, error) {
@@ -172,16 +193,18 @@ func Push(ctx context.Context, r *gitexec.Runner, cwd, remote string, input io.R
 				return nil, err
 			}
 			for _, version := range versions {
-				candidate, err := r.Guard(ctx, snapshot.Root, "", "cat-file", "blob", commit+":"+version.Manifest.Path)
-				if err != nil {
-					return nil, err
-				}
-				reason, err := overlayReason(ctx, r, version, candidate)
-				if err != nil {
-					return nil, err
-				}
-				if reason != "" {
-					findings = append(findings, Finding{HookConflict: configtx.HookConflict{Path: version.Manifest.Path, WorkspaceID: version.Manifest.WorkspaceID}, Commit: commit, OverlayName: version.Manifest.Name, OverlayReason: reason})
+				for _, pushed := range aliasPaths(paths, version.Manifest.Path) {
+					candidate, err := r.Guard(ctx, snapshot.Root, "", "cat-file", "blob", commit+":"+pushed)
+					if err != nil {
+						return nil, err
+					}
+					reason, err := overlayReason(ctx, r, version, candidate)
+					if err != nil {
+						return nil, err
+					}
+					if reason != "" {
+						findings = append(findings, Finding{HookConflict: configtx.HookConflict{Path: pushed, WorkspaceID: version.Manifest.WorkspaceID}, Commit: commit, OverlayName: version.Manifest.Name, OverlayReason: reason})
+					}
 				}
 			}
 		}

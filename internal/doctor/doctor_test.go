@@ -458,3 +458,58 @@ func TestDoctorWarnsAboutManagedBlockWithoutStageRule(t *testing.T) {
 		t.Fatalf("selection change did not rewrite the block: %v\n%s", err, data)
 	}
 }
+
+func TestDoctorReportsSensitiveRuleSpelledDifferently(t *testing.T) {
+	repo, r, w := fixture(t)
+	if err := os.MkdirAll(filepath.Join(repo.Root, "notes"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo.Root, "notes", "secret.txt"), []byte("s\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	keyPath := filepath.Join(t.TempDir(), "sensitive.key")
+	if err := keymaterial.Create(keyPath, repo.Root); err != nil {
+		t.Fatal(err)
+	}
+	policy, err := secureblob.PolicyForKey(keyPath, w.Root, w.Common, []secureblob.PathRule{{Path: "notes/Secret.txt", Kind: "file"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	common, err := storage.OpenDir(w.Common)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer common.Close()
+	if err := secureblob.WriteLocked(common, policy, w.Root, w.Common); err != nil {
+		t.Fatal(err)
+	}
+	report, err := Run(ctx, r, repo.Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range report.Findings {
+		if finding.Check == "encryption" && finding.Severity == "error" && strings.Contains(finding.Message, `"notes/Secret.txt" is spelled "notes/secret.txt" on disk`) {
+			return
+		}
+	}
+	t.Fatalf("doctor did not report the spelling mismatch: %+v", report.Findings)
+}
+
+func TestDoctorReportsStageFileInIndex(t *testing.T) {
+	repo, r, _ := fixture(t)
+	name := ".gitlocal-tmp-0b8c3d4e-1111-4222-8333-444455556666"
+	if err := os.WriteFile(filepath.Join(repo.Root, name), []byte("private\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	repo.Git("add", "-f", "--", name)
+	report, err := Run(ctx, r, repo.Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range report.Findings {
+		if finding.Check == "staging files" && strings.Contains(finding.Message, name+" (staged in the index)") {
+			return
+		}
+	}
+	t.Fatalf("doctor did not report the staged stage file: %+v", report.Findings)
+}

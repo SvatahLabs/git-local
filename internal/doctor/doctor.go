@@ -167,8 +167,8 @@ func Run(ctx context.Context, r *gitexec.Runner, cwd string) (Report, error) {
 		if paths, e := sensitiveKindMismatches(d.Workspace); e != nil {
 			result.add("encryption", "error", e.Error(), "Inspect the sensitive-file policy.")
 		} else {
-			for _, path := range paths {
-				result.add("encryption", "error", fmt.Sprintf("sensitive path %q is recorded as a file but is a directory; files below it were saved unencrypted, and snapshots are refused until the policy is corrected", path), "Keep the private store and its backups private. Changing an existing sensitive-file policy isn't supported yet.")
+			for _, problem := range paths {
+				result.add("encryption", "error", problem+"; files it should cover were saved unencrypted, and snapshots that include them are refused until the policy is corrected", "Keep the private store and its backups private. Changing an existing sensitive-file policy isn't supported yet; until then, git local untrack the affected path to keep taking snapshots of other files.")
 			}
 		}
 		storeErr := gitexec.ValidateStore(d.Workspace.Store)
@@ -275,9 +275,10 @@ func Run(ctx context.Context, r *gitexec.Runner, cwd string) (Report, error) {
 	return result, nil
 }
 
-// sensitiveKindMismatches lists file rules that name a directory in this
-// checkout. Earlier releases recorded such rules, which left every file below
-// the directory stored as plaintext.
+// sensitiveKindMismatches describes rules that don't protect what the checkout
+// holds: a file rule naming a directory, or a rule spelled differently from the
+// on-disk path. Earlier releases recorded both, which left the files stored as
+// plaintext.
 func sensitiveKindMismatches(w workspace.Context) ([]string, error) {
 	common, err := storage.OpenDir(w.Common)
 	if err != nil {
@@ -295,16 +296,61 @@ func sensitiveKindMismatches(w workspace.Context) ([]string, error) {
 		return nil, err
 	}
 	defer files.Close()
-	var paths []string
+	var problems []string
 	for _, rule := range policy.Sensitive {
-		if rule.Kind != "file" || storage.ValidateSelectionPath(rule.Path) != nil {
+		if storage.ValidateSelectionPath(rule.Path) != nil {
+			continue
+		}
+		if spelled := onDiskSpelling(files, rule.Path); spelled != "" {
+			problems = append(problems, fmt.Sprintf("sensitive path %q is spelled %q on disk", rule.Path, spelled))
+			continue
+		}
+		if rule.Kind != "file" {
 			continue
 		}
 		if info, err := files.Lstat(filepath.FromSlash(rule.Path)); err == nil && info.IsDir() {
-			paths = append(paths, rule.Path)
+			problems = append(problems, fmt.Sprintf("sensitive path %q is recorded as a file but is a directory", rule.Path))
 		}
 	}
-	return paths, nil
+	return problems, nil
+}
+
+// onDiskSpelling returns the checkout's spelling of path when some component
+// exists only under a different alias spelling (case or normalization). It
+// returns "" when the path matches exactly or doesn't exist.
+func onDiskSpelling(files *storage.Dir, path string) string {
+	parts := strings.Split(path, "/")
+	spelled := make([]string, 0, len(parts))
+	differs := false
+	for i, part := range parts {
+		entries, err := files.ReadDir(filepath.FromSlash(strings.Join(parts[:i], "/")))
+		if err != nil {
+			return ""
+		}
+		match := ""
+		for _, entry := range entries {
+			if entry.Name() == part {
+				match = part
+				break
+			}
+			if storage.AliasKey(entry.Name()) == storage.AliasKey(part) {
+				match = entry.Name()
+			}
+		}
+		if match == "" {
+			return ""
+		}
+		differs = differs || match != part
+		spelled = append(spelled, match)
+		if match != part {
+			// Keep reading below the on-disk spelling.
+			parts[i] = match
+		}
+	}
+	if !differs {
+		return ""
+	}
+	return strings.Join(spelled, "/")
 }
 
 // leftoverStages lists untracked restore and seed staging files in this
@@ -320,6 +366,16 @@ func leftoverStages(ctx context.Context, r *gitexec.Runner, w workspace.Context)
 	for _, name := range strings.Split(string(b), "\x00") {
 		if name != "" {
 			stages = append(stages, name)
+		}
+	}
+	// A stage that was force-added is in the index, which is the riskier state.
+	b, err = r.Main(ctx, w.Root, w.Admin, "ls-files", "-z", "--cached", "--full-name")
+	if err != nil {
+		return nil, err
+	}
+	for _, name := range strings.Split(string(b), "\x00") {
+		if configtx.StagingPath(name) {
+			stages = append(stages, name+" (staged in the index)")
 		}
 	}
 	return stages, nil

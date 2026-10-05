@@ -200,6 +200,7 @@ func siblings(exceptions []string, emit func(string) error) error {
 	}
 	return walk(root, "")
 }
+
 // StagePattern ignores restore and seed staging files at any depth. An
 // interrupted operation keeps them beside a selected file, where the file's own
 // rule doesn't match, and they can hold decrypted content.

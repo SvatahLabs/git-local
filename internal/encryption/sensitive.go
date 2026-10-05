@@ -15,7 +15,11 @@ import (
 // or else from the checkout: a directory below a tracked directory must cover
 // its descendants. A path that is missing or spelled differently on disk is
 // refused, because a file rule for it would silently protect nothing.
-func sensitiveRules(root string, state selection.State, paths []string) ([]secureblob.PathRule, error) {
+//
+// history lists the paths recorded by existing snapshots (nil for a fresh
+// store). A path with recorded descendants is a directory rule whatever the
+// checkout holds now, and a path that history records may be missing on disk.
+func sensitiveRules(root string, state selection.State, paths []string, history map[string]bool) ([]secureblob.PathRule, error) {
 	files, err := storage.OpenDir(root)
 	if err != nil {
 		return nil, err
@@ -23,7 +27,10 @@ func sensitiveRules(root string, state selection.State, paths []string) ([]secur
 	defer files.Close()
 	rules := make([]secureblob.PathRule, 0, len(paths))
 	for _, path := range paths {
-		rule, err := sensitiveRule(files, state, path)
+		rule, err := historicalRule(state, path, history)
+		if err == nil && rule.Kind == "" {
+			rule, err = sensitiveRule(files, state, path, history[path])
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -32,7 +39,23 @@ func sensitiveRules(root string, state selection.State, paths []string) ([]secur
 	return rules, nil
 }
 
-func sensitiveRule(files *storage.Dir, state selection.State, path string) (secureblob.PathRule, error) {
+// historicalRule decides a rule from snapshot history alone. It returns an
+// empty Kind when the checkout must decide.
+func historicalRule(state selection.State, path string, history map[string]bool) (secureblob.PathRule, error) {
+	for _, rule := range state.Include {
+		if rule.Path == path {
+			return secureblob.PathRule{}, nil
+		}
+	}
+	for recorded := range history {
+		if strings.HasPrefix(recorded, path+"/") {
+			return secureblob.PathRule{Path: path, Kind: "directory"}, nil
+		}
+	}
+	return secureblob.PathRule{}, nil
+}
+
+func sensitiveRule(files *storage.Dir, state selection.State, path string, recorded bool) (secureblob.PathRule, error) {
 	for _, rule := range state.Include {
 		if rule.Path == path {
 			return secureblob.PathRule{Path: path, Kind: rule.Kind}, nil
@@ -56,6 +79,10 @@ func sensitiveRule(files *storage.Dir, state selection.State, path string) (secu
 		}
 		if !found && alias != "" {
 			return secureblob.PathRule{}, fmt.Errorf("%w: sensitive path %q is spelled %q on disk; use the exact spelling", storage.ErrConflict, path, strings.Join(append(parts[:i:i], alias), "/"))
+		}
+		if !found && recorded {
+			// Deleted since it was saved: history holds it as a file.
+			return secureblob.PathRule{Path: path, Kind: "file"}, nil
 		}
 		if !found {
 			return secureblob.PathRule{}, fmt.Errorf("%w: sensitive path %q does not exist; create it before enabling encryption", storage.ErrConflict, path)

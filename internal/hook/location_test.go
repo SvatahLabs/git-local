@@ -53,3 +53,43 @@ func TestInstallRefusesTrackedHooksDirectoryWithoutChanges(t *testing.T) {
 		t.Fatalf("hook status did not explain the tracked hooks directory: %v\n%s", err, out)
 	}
 }
+
+// A linked worktree inside the common Git directory is still a worktree: its
+// tracked hooks directory must be refused, not treated as repository-private.
+func TestInstallRefusesTrackedHooksInWorktreeInsideGitDirectory(t *testing.T) {
+	repo := testutil.New(t)
+	repo.Commit()
+	original := []byte("#!/bin/sh\necho team hook\n")
+	if err := os.Mkdir(filepath.Join(repo.Root, ".githooks"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo.Root, ".githooks", "pre-commit"), original, 0700); err != nil {
+		t.Fatal(err)
+	}
+	repo.Git("add", ".githooks/pre-commit")
+	repo.Git("commit", "-qm", "team hooks")
+	nested := filepath.Join(repo.Root, ".git", "wt2")
+	repo.Git("worktree", "add", "-q", nested)
+	repo.Git("-C", nested, "config", "core.hooksPath", filepath.Join(nested, ".githooks"))
+	binary := testBinary(t)
+	runLocal := func(args ...string) (string, error) {
+		c := exec.Command(binary, args...)
+		c.Dir, c.Env = nested, repo.RunnerEnv()
+		out, err := c.CombinedOutput()
+		return string(out), err
+	}
+	if out, err := runLocal("init"); err != nil {
+		t.Fatalf("init: %v\n%s", err, out)
+	}
+	for _, args := range [][]string{{"hook", "install"}, {"auto", "install"}} {
+		if out, err := runLocal(args...); err == nil {
+			t.Fatalf("%v installed into a tracked hooks directory of a nested worktree:\n%s", args, out)
+		}
+	}
+	if got, err := os.ReadFile(filepath.Join(nested, ".githooks", "pre-commit")); err != nil || !bytes.Equal(got, original) {
+		t.Fatalf("refused install changed the tracked hook: %v %q", err, got)
+	}
+	if status := repo.Git("-C", nested, "status", "--porcelain"); len(status) != 0 {
+		t.Fatalf("refused install changed the nested worktree:\n%s", status)
+	}
+}

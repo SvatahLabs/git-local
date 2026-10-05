@@ -42,7 +42,7 @@ func EnableFresh(ctx context.Context, r *gitexec.Runner, cwd, keyFile string, pa
 			}
 			normalized = append(normalized, path)
 		}
-		rules, err := sensitiveRules(w.Root, state, normalized)
+		rules, err := sensitiveRules(w.Root, state, normalized, nil)
 		if err != nil {
 			return err
 		}

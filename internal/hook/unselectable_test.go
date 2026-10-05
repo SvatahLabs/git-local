@@ -87,3 +87,48 @@ func TestGuardsAllowUnselectablePathsAndCatchTheirAliases(t *testing.T) {
 		}
 	}
 }
+
+// An overlay patch staged under an alias spelling of the overlay's path (here a
+// trailing dot, a separate file on POSIX) must still be caught by the guard.
+func TestGuardCatchesOverlayPatchUnderAliasSpelling(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a trailing-dot name is not representable on Windows")
+	}
+	repo := testutil.New(t)
+	repo.Git("config", "core.autocrlf", "false")
+	base := "port = 80\na\nb\nc\nd\ne\nf\ng\n"
+	local := strings.Replace(base, "port = 80", "port = 8080", 1)
+	if err := os.WriteFile(filepath.Join(repo.Root, "app.conf"), []byte(base), 0600); err != nil {
+		t.Fatal(err)
+	}
+	repo.Git("add", "app.conf")
+	repo.Git("commit", "-qm", "config")
+	binary := testBinary(t)
+	runLocal := func(args ...string) (string, error) {
+		c := exec.Command(binary, args...)
+		c.Dir, c.Env = repo.Root, repo.RunnerEnv()
+		out, err := c.CombinedOutput()
+		return string(out), err
+	}
+	if out, err := runLocal("init"); err != nil {
+		t.Fatalf("init: %v\n%s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(repo.Root, "app.conf"), []byte(local), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := runLocal("overlay", "add", "port", "--", "app.conf"); err != nil {
+		t.Fatalf("overlay add: %v\n%s", err, out)
+	}
+	if out, err := runLocal("hook", "install"); err != nil {
+		t.Fatalf("hook install: %v\n%s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(repo.Root, "app.conf."), []byte(local), 0600); err != nil {
+		t.Fatal(err)
+	}
+	repo.Git("add", "--", "app.conf.")
+	commit := exec.Command(repo.GitPath, "commit", "-qm", "alias leak")
+	commit.Dir, commit.Env = repo.Root, repo.Env
+	if out, err := commit.CombinedOutput(); err == nil || !strings.Contains(string(out), "app.conf.") {
+		t.Fatalf("guard did not catch the overlay patch under an alias spelling: %v\n%s", err, out)
+	}
+}

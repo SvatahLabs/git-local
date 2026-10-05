@@ -115,3 +115,43 @@ func TestSensitivePathMustExistWithItsOnDiskSpelling(t *testing.T) {
 		}
 	}
 }
+
+// assertNoPlaintext scans every object in the private store, including old
+// snapshots, for the secret bytes.
+func assertNoPlaintext(t *testing.T, r *gitexec.Runner, w *workspace.Context) {
+	t.Helper()
+	all, err := r.History(context.Background(), w.Store, nil, "cat-file", "--batch-all-objects", "--batch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(all, subdirectorySecret) {
+		t.Fatal("secret from an earlier snapshot is still plaintext in the private store")
+	}
+}
+
+// A sensitive directory deleted after it was saved still has history. Migration
+// must take the rule kind from that history, not from today's checkout.
+func TestMigrateUsesHistoryForDeletedSensitiveDirectory(t *testing.T) {
+	for _, recreateAsFile := range []bool{false, true} {
+		r, w, root, keyPath := trackedDirectoryFixture(t)
+		ctx := context.Background()
+		if _, err := history.Commit(ctx, r, root, "secret saved"); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.RemoveAll(filepath.Join(root, "config", "secrets")); err != nil {
+			t.Fatal(err)
+		}
+		if recreateAsFile {
+			if err := os.WriteFile(filepath.Join(root, "config", "secrets"), []byte("x\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := history.Commit(ctx, r, root, "secret removed"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Migrate(ctx, r, root, keyPath, []string{"config/secrets"}); err != nil {
+			t.Fatalf("recreateAsFile=%v: %v", recreateAsFile, err)
+		}
+		assertNoPlaintext(t, r, w)
+	}
+}

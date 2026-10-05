@@ -158,7 +158,7 @@ func AuditInstallation(ctx context.Context, r *gitexec.Runner, cwd, commonPath s
 		return legacyIncludeError(legacy[0])
 	}
 	if count != 1 {
-		return fmt.Errorf("active overlays require exactly one filter include; found %d; rerun git local overlay add for an active overlay to restore it", count)
+		return fmt.Errorf("active overlays require exactly one filter include; found %d; run git local overlay remove <name> for each active overlay (saved versions and the working file are kept), then git local overlay add each again", count)
 	}
 	if exists, err := localRequired(ctx, r, cwd); err != nil {
 		return err
@@ -170,7 +170,7 @@ func AuditInstallation(ctx context.Context, r *gitexec.Runner, cwd, commonPath s
 		return err
 	}
 	if !exists {
-		return errors.New("active overlays have no filter configuration file; rerun git local overlay add for an active overlay to restore it")
+		return errors.New("active overlays have no filter configuration file; run git local overlay remove <name> for each active overlay (saved versions and the working file are kept), then git local overlay add each again")
 	}
 	executable, command, err := installedCommand(config)
 	if err != nil {
