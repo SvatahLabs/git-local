@@ -605,6 +605,22 @@ func readMigrationJournal(meta *storage.Dir, id, repositoryID string) (migration
 	return j, nil
 }
 
+// ownedStorePresent reports a migration-owned store directory without
+// validating its contents.
+func ownedStorePresent(path string) (bool, error) {
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if !info.IsDir() {
+		return false, errors.New("migration store path is obstructed")
+	}
+	return true, nil
+}
+
 func storeExists(path string) (bool, error) {
 	info, err := os.Lstat(path)
 	if os.IsNotExist(err) {
@@ -645,11 +661,19 @@ func RecoverMigration(ctx context.Context, r *gitexec.Runner, cwd, id, direction
 	if err != nil {
 		return err
 	}
-	backupExists, err := storeExists(backup)
+	policy, published, err := secureblob.ReadLocked(common, w.Root, w.Common)
 	if err != nil {
 		return err
 	}
-	policy, published, err := secureblob.ReadLocked(common, w.Root, w.Common)
+	// After publication the plaintext store only awaits deletion. A crash or
+	// I/O error partway through removing it can leave it without config or
+	// refs, so it is neither validated nor compared, only removed.
+	var backupExists bool
+	if published {
+		backupExists, err = ownedStorePresent(backup)
+	} else {
+		backupExists, err = storeExists(backup)
+	}
 	if err != nil {
 		return err
 	}
@@ -664,7 +688,7 @@ func RecoverMigration(ctx context.Context, r *gitexec.Runner, cwd, id, direction
 	if published && direction == "rollback" {
 		return errors.New("encryption policy is published; resume cleanup instead of rolling back")
 	}
-	if backupExists {
+	if backupExists && !published {
 		if err := matchHeads(ctx, r, backup, j.OldHeads); err != nil {
 			return err
 		}
