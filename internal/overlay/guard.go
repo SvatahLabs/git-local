@@ -161,9 +161,11 @@ func LoadForPaths(ctx context.Context, commonPath, owner string, paths []string)
 	return result, nil
 }
 
-// ContainsPatch returns true when applying the saved patch changes nothing:
-// the candidate already carries that patch. A conflicting candidate must be
-// resolved before a guard can certify that it is clean.
+// ContainsPatch returns true when the candidate already carries the saved
+// patch or any one of its hunks: applying it changes nothing. A candidate with
+// only some hunks staged (git apply --cached, update-index, or a client that
+// skips filters) still leaks those. A conflicting candidate must be resolved
+// before a guard can certify that it is clean.
 func ContainsPatch(ctx context.Context, git string, v Version, candidate []byte) (bool, error) {
 	if err := validateText(candidate); err != nil {
 		return false, err
@@ -172,5 +174,21 @@ func ContainsPatch(ctx context.Context, git string, v Version, candidate []byte)
 	if err != nil {
 		return false, err
 	}
-	return bytes.Equal(applied, candidate), nil
+	if bytes.Equal(applied, candidate) {
+		return true, nil
+	}
+	versions, err := hunkVersions(ctx, git, v.Base, v.Local)
+	if err != nil || len(versions) < 2 {
+		return false, err
+	}
+	for _, local := range versions {
+		applied, err := Apply(ctx, git, v.Base, local, candidate)
+		if err != nil {
+			return false, err
+		}
+		if bytes.Equal(applied, candidate) {
+			return true, nil
+		}
+	}
+	return false, nil
 }

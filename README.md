@@ -204,7 +204,8 @@ pre-commit and pre-push guards on macOS, Linux or Git for Windows. Native Window
 hook execution still awaits CI qualification. The guards reject additions or
 changes to paths selected by any active or retired workspace, and to
 `.gitlocal-tmp-*` staging files, and detect saved
-overlay patches that entered the index or a pushed commit without the filter;
+overlay patches that entered the index or a pushed commit without the filter,
+including a single hunk of a multi-hunk patch staged on its own;
 staged deletions remain allowed. Paths that can never be selected, such as
 `aux.c`, `nul.txt`, names with a backslash or a trailing dot or space, or
 non-UTF-8 names, pass the guards unless the spelling Windows would resolve them
