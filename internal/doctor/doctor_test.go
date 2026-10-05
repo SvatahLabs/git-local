@@ -13,6 +13,7 @@ import (
 	"gitlocal/internal/configtx"
 	"gitlocal/internal/gitexec"
 	"gitlocal/internal/history"
+	"gitlocal/internal/overlay"
 	"gitlocal/internal/restore"
 	"gitlocal/internal/storage"
 	"gitlocal/internal/testutil"
@@ -334,4 +335,58 @@ func TestAuditChecksOlderSnapshots(t *testing.T) {
 	if _, err = history.AuditWorkspaceLocked(ctx, r, *w, w.WorkspaceID); err == nil {
 		t.Fatal("older snapshot corruption missed")
 	}
+}
+
+func TestDoctorReportsMissingAndAbsoluteOverlayInclude(t *testing.T) {
+	repo, r, w := fixture(t)
+	if err := os.WriteFile(filepath.Join(repo.Root, "app.conf"), []byte("port = 80\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	repo.Git("add", "app.conf")
+	repo.Git("commit", "-qm", "config")
+	source, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	program, err := os.ReadFile(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	executable := filepath.Join(t.TempDir(), filepath.Base(source))
+	if err := os.WriteFile(executable, program, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo.Root, "app.conf"), []byte("port = 8080\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := overlay.Add(ctx, r, repo.Root, "port", "app.conf", executable); err != nil {
+		t.Fatal(err)
+	}
+	overlayIssue := func(want string) {
+		t.Helper()
+		report, err := Run(ctx, r, repo.Root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, finding := range report.Findings {
+			if finding.Check == "overlays" && finding.Severity == "error" && strings.Contains(finding.Message, want) {
+				return
+			}
+		}
+		t.Fatalf("doctor did not report %q: %+v", want, report.Findings)
+	}
+	configPath := filepath.Join(w.Common, "gitlocal", "overlay-filter.gitconfig")
+	config, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(configPath); err != nil {
+		t.Fatal(err)
+	}
+	overlayIssue("no filter configuration file")
+	if err := os.WriteFile(configPath, config, 0600); err != nil {
+		t.Fatal(err)
+	}
+	repo.Git("config", "--local", "--replace-all", "include.path", configPath)
+	overlayIssue("absolute path")
 }

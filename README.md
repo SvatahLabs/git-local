@@ -234,10 +234,20 @@ for remaining broader qualification. `overlay remove`
 leaves the working file and saved versions intact; the former patch becomes an
 ordinary edit that Git can stage.
 
+The filter driver lives in `.git/gitlocal/overlay-filter.gitconfig`, included
+from the local Git config through the relative path
+`gitlocal/overlay-filter.gitconfig`, so it keeps working when the checkout is
+moved or mounted at another path. `filter.gitlocal-overlay.required=true` is
+also set directly in the local config: if the include file goes missing, `git
+add` of an overlaid file fails instead of staging the patch. The last `overlay
+remove` unsets both.
+
 `git local doctor` verifies that active overlays still have their managed
-attributes, required Git filter, and executable. If it reports a damaged
-installation, restore those parts before staging or checking out affected
-files; an `overlay add` update also refuses a changed active filter.
+attributes, relative include, required Git filter, and executable. If it reports
+a damaged installation, restore those parts before staging or checking out
+affected files; an `overlay add` update also refuses a changed active filter.
+Installations from earlier releases used an absolute include path; doctor
+reports it, and the next `overlay add` or `overlay remove` rewrites it.
 
 If a pull fails because the upstream changed the overlay's lines, run
 `git local overlay status` to see the conflicting upstream blob and whether Git

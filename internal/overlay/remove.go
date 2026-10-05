@@ -98,24 +98,20 @@ func Remove(ctx context.Context, r *gitexec.Runner, cwd, name string) (Manifest,
 	if len(remaining) == 0 && !installExists {
 		return empty, errors.New("overlay installation provenance is missing; cannot safely restore Git attributes and config")
 	}
-	includePath := filepath.Join(p.Common, "gitlocal", filterConfigName)
-	includeCount := 0
-	if len(remaining) == 0 {
-		includes, err := localIncludes(ctx, r, p.Root)
-		if err != nil {
-			return empty, err
-		}
-		for _, item := range includes {
-			if item == includePath {
-				includeCount++
-			}
-		}
-		if includeCount > 1 {
-			return empty, errors.New("duplicate overlay filter include")
-		}
-		if install.IncludePathExisted && includeCount != 1 {
-			return empty, errors.New("preexisting overlay filter include was removed")
-		}
+	includes, err := localIncludes(ctx, r, p.Root)
+	if err != nil {
+		return empty, err
+	}
+	includeCount, legacy := managedIncludes(includes)
+	if includeCount+len(legacy) > 1 {
+		return empty, errors.New("duplicate overlay filter include")
+	}
+	if len(remaining) == 0 && install.IncludePathExisted && includeCount+len(legacy) != 1 {
+		return empty, errors.New("preexisting overlay filter include was removed")
+	}
+	requiredExists, err := localRequired(ctx, r, p.Root)
+	if err != nil {
+		return empty, err
 	}
 	if m.State != "removing" {
 		m.State = "removing"
@@ -144,13 +140,33 @@ func Remove(ctx context.Context, r *gitexec.Runner, cwd, name string) (Manifest,
 		return empty, errors.New("overlay attributes changed during removal")
 	}
 	if len(remaining) == 0 {
-		if !install.IncludePathExisted && includeCount == 1 {
-			if _, err := localConfig(ctx, r, p.Root, "--fixed-value", "--unset-all", "include.path", includePath); err != nil {
+		if !install.IncludePathExisted {
+			for _, include := range append([]string{filterInclude}, legacy...) {
+				if err := unsetLocal(ctx, r, p.Root, "--fixed-value", "include.path", include); err != nil {
+					return empty, err
+				}
+			}
+		}
+		if !install.RequiredExisted {
+			if err := unsetLocal(ctx, r, p.Root, requiredKey); err != nil {
 				return empty, err
 			}
 		}
 		if err := restoreOptional(d, filterConfigName, install.ConfigData, install.ConfigExisted, os.FileMode(install.ConfigMode)); err != nil {
 			return empty, fmt.Errorf("restore overlay filter config: %w", err)
+		}
+	} else {
+		// Migrate an absolute include from an earlier release for the overlays
+		// that stay active.
+		if len(legacy) == 1 {
+			if _, err := localConfig(ctx, r, p.Root, "--fixed-value", "--replace-all", "include.path", filterInclude, legacy[0]); err != nil {
+				return empty, err
+			}
+		}
+		if !requiredExists {
+			if _, err := localConfig(ctx, r, p.Root, requiredKey, "true"); err != nil {
+				return empty, err
+			}
 		}
 	}
 	m.State = "removed"

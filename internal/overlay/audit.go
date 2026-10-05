@@ -72,16 +72,13 @@ func AuditResetFilter(ctx context.Context, r *gitexec.Runner, cwd, admin, common
 		return err
 	}
 	defer d.Close()
-	includePath := filepath.Join(commonPath, "gitlocal", filterConfigName)
 	includes, err := localIncludes(ctx, r, cwd)
 	if err != nil {
 		return err
 	}
-	count := 0
-	for _, include := range includes {
-		if include == includePath {
-			count++
-		}
+	count, legacy := managedIncludes(includes)
+	if len(legacy) > 0 {
+		return legacyIncludeError(legacy[0])
 	}
 	if count != 1 {
 		return fmt.Errorf("overlay filter requires exactly one managed include; found %d", count)
@@ -153,26 +150,28 @@ func AuditInstallation(ctx context.Context, r *gitexec.Runner, cwd, commonPath s
 	if _, err := AttributeUserBytes(attributes, paths); err != nil {
 		return err
 	}
-	includePath := filepath.Join(commonPath, "gitlocal", filterConfigName)
 	includes, err := localIncludes(ctx, r, cwd)
 	if err != nil {
 		return err
 	}
-	count := 0
-	for _, include := range includes {
-		if include == includePath {
-			count++
-		}
+	count, legacy := managedIncludes(includes)
+	if len(legacy) > 0 {
+		return legacyIncludeError(legacy[0])
 	}
 	if count != 1 {
-		return fmt.Errorf("active overlays require exactly one filter include; found %d", count)
+		return fmt.Errorf("active overlays require exactly one filter include; found %d; rerun git local overlay add for an active overlay to restore it", count)
+	}
+	if exists, err := localRequired(ctx, r, cwd); err != nil {
+		return err
+	} else if !exists {
+		return errors.New("local Git config does not set " + requiredKey + ", so a missing include would fail open; rerun git local overlay add for an active overlay to restore it")
 	}
 	config, exists, _, err := readOptional(d, filterConfigName, 1<<20)
 	if err != nil {
 		return err
 	}
 	if !exists {
-		return errors.New("active overlays have no filter configuration file")
+		return errors.New("active overlays have no filter configuration file; rerun git local overlay add for an active overlay to restore it")
 	}
 	executable, command, err := installedCommand(config)
 	if err != nil {
@@ -194,6 +193,10 @@ func AuditInstallation(ctx context.Context, r *gitexec.Runner, cwd, commonPath s
 		}
 	}
 	return nil
+}
+
+func legacyIncludeError(include string) error {
+	return fmt.Errorf("overlay filter include uses an absolute path that stops resolving when the checkout moves: %s; rerun git local overlay add for an active overlay to migrate it", include)
 }
 
 func filterExecutableReady(path string) bool {

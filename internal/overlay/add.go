@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -325,22 +326,20 @@ func Add(ctx context.Context, r *gitexec.Runner, cwd, name, given, executable st
 			return empty, fmt.Errorf("existing %s attribute requires a separate conversion policy", key)
 		}
 	}
-	includePath := filepath.Join(p.Common, "gitlocal", filterConfigName)
 	includes, err := localIncludes(ctx, r, p.Root)
 	if err != nil {
 		return empty, err
 	}
-	includeCount := 0
-	for _, item := range includes {
-		if item == includePath {
-			includeCount++
-		}
-	}
-	if includeCount > 1 {
+	includeCount, legacy := managedIncludes(includes)
+	if includeCount+len(legacy) > 1 {
 		return empty, errors.New("duplicate overlay filter include")
 	}
-	if len(paths) > 0 && includeCount == 0 {
+	if len(paths) > 0 && includeCount+len(legacy) == 0 {
 		return empty, errors.New("active overlays have no required filter configuration")
+	}
+	requiredExisted, err := localRequired(ctx, r, p.Root)
+	if err != nil {
+		return empty, err
 	}
 	oldConfig, configExists, configMode, err := readOptional(d, filterConfigName, 1<<20)
 	if err != nil {
@@ -355,8 +354,12 @@ func Add(ctx context.Context, r *gitexec.Runner, cwd, name, given, executable st
 			if err != nil {
 				return empty, err
 			}
-			if err := checkEffectiveFilter(ctx, r, p.Root, command); err != nil {
-				return empty, err
+			// An absolute include from an earlier release may no longer
+			// resolve; the effective filter is checked after migration.
+			if len(legacy) == 0 {
+				if err := checkEffectiveFilter(ctx, r, p.Root, command); err != nil {
+					return empty, err
+				}
 			}
 		} else if !bytes.HasPrefix(oldConfig, []byte("[filter \"gitlocal-overlay\"]\n")) {
 			return empty, errors.New("overlay filter configuration was changed")
@@ -375,20 +378,27 @@ func Add(ctx context.Context, r *gitexec.Runner, cwd, name, given, executable st
 		}
 	}
 	if len(paths) == 0 && (!installExists || !pendingFound) {
-		record := installation{SchemaVersion: 1, AttributesExisted: attrExists, AttributesMode: uint32(attrMode), ConfigExisted: configExists, ConfigMode: uint32(configMode), ConfigData: bytes.Clone(oldConfig), IncludePathExisted: includeCount == 1}
+		record := installation{SchemaVersion: 1, AttributesExisted: attrExists, AttributesMode: uint32(attrMode), ConfigExisted: configExists, ConfigMode: uint32(configMode), ConfigData: bytes.Clone(oldConfig), IncludePathExisted: includeCount+len(legacy) == 1, RequiredExisted: requiredExisted}
 		if err := d.WriteJSON(installationFile, record); err != nil {
 			return empty, err
 		}
 	}
-	configWritten, includeAdded, attrWritten := false, false, false
+	configWritten, includeAdded, requiredAdded, attrWritten := false, false, false, false
+	migrated := ""
 	rollback := func(cause error) (Manifest, error) {
 		var recovery error
 		if attrWritten {
 			recovery = errors.Join(recovery, restoreOptional(common, "info/attributes", oldAttr, attrExists, attrMode))
 		}
-		if includeAdded {
-			_, e := localConfig(ctx, r, p.Root, "--fixed-value", "--unset-all", "include.path", includePath)
+		if requiredAdded {
+			recovery = errors.Join(recovery, unsetLocal(ctx, r, p.Root, requiredKey))
+		}
+		if migrated != "" {
+			_, e := localConfig(ctx, r, p.Root, "--fixed-value", "--replace-all", "include.path", migrated, filterInclude)
 			recovery = errors.Join(recovery, e)
+		}
+		if includeAdded {
+			recovery = errors.Join(recovery, unsetLocal(ctx, r, p.Root, "--fixed-value", "include.path", filterInclude))
 		}
 		if configWritten {
 			recovery = errors.Join(recovery, restoreOptional(d, filterConfigName, oldConfig, configExists, configMode))
@@ -399,11 +409,25 @@ func Add(ctx context.Context, r *gitexec.Runner, cwd, name, given, executable st
 		return rollback(err)
 	}
 	configWritten = true
-	if includeCount == 0 {
-		if _, err := localConfig(ctx, r, p.Root, "--add", "include.path", includePath); err != nil {
+	if len(legacy) == 1 {
+		if _, err := localConfig(ctx, r, p.Root, "--fixed-value", "--replace-all", "include.path", filterInclude, legacy[0]); err != nil {
+			return rollback(err)
+		}
+		migrated = legacy[0]
+	} else if includeCount == 0 {
+		if _, err := localConfig(ctx, r, p.Root, "--add", "include.path", filterInclude); err != nil {
 			return rollback(err)
 		}
 		includeAdded = true
+	}
+	if !requiredExisted {
+		if _, err := localConfig(ctx, r, p.Root, requiredKey, "true"); err != nil {
+			return rollback(err)
+		}
+		requiredAdded = true
+	}
+	if err := checkEffectiveFilter(ctx, r, p.Root, filterCommandForOS(executable, runtime.GOOS)); err != nil {
+		return rollback(err)
 	}
 	modeToWrite := attrMode
 	if !attrExists {

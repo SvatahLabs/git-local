@@ -57,10 +57,17 @@ func TestAuditInstallationDetectsFilterAndAttributeDrift(t *testing.T) {
 	}
 	check("")
 	configPath := filepath.Join(w.Common, "gitlocal", filterConfigName)
-	repo.Git("config", "--local", "--fixed-value", "--unset-all", "include.path", configPath)
+	repo.Git("config", "--local", "--fixed-value", "--unset-all", "include.path", filterInclude)
 	check("exactly one filter include")
 	repo.Git("config", "--local", "--add", "include.path", configPath)
+	check("absolute path")
+	if _, err := Add(ctx, r, repo.Root, "port", "app.conf", executable); err != nil {
+		t.Fatalf("add did not migrate the absolute include: %v", err)
+	}
 	check("")
+	if got := strings.TrimSpace(string(repo.Git("config", "--local", "--get-all", "include.path"))); got != filterInclude {
+		t.Fatalf("include after migration: %q", got)
+	}
 	config, err := os.ReadFile(configPath)
 	if err != nil {
 		t.Fatal(err)
@@ -77,8 +84,10 @@ func TestAuditInstallationDetectsFilterAndAttributeDrift(t *testing.T) {
 	}
 	check("")
 	repo.Git("config", "--local", "filter.gitlocal-overlay.required", "false")
-	check("not required")
+	check("value other than true")
 	repo.Git("config", "--local", "--unset", "filter.gitlocal-overlay.required")
+	check("does not set")
+	repo.Git("config", "--local", "filter.gitlocal-overlay.required", "true")
 	check("")
 	attributesPath := filepath.Join(w.Common, "info", "attributes")
 	attributes, err := os.ReadFile(attributesPath)

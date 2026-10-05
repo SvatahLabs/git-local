@@ -687,3 +687,58 @@ func TestOverlayRemoveRestoresGitFilesAndKeepsWorkingContent(t *testing.T) {
 		t.Fatalf("second removal changed Git config: %v", err)
 	}
 }
+
+func TestOverlayFilterFailsClosedWhenCheckoutMovesOrIncludeIsMissing(t *testing.T) {
+	repo := testutil.New(t)
+	repo.Git("config", "core.autocrlf", "false")
+	base := []byte("port = 80\na\nb\nc\nd\ne\nf\ng\n")
+	if err := os.WriteFile(filepath.Join(repo.Root, "app.conf"), base, 0600); err != nil {
+		t.Fatal(err)
+	}
+	repo.Git("add", "app.conf")
+	repo.Git("commit", "-qm", "initial")
+	r, err := gitexec.New(repo.RunnerEnv())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := workspace.Init(context.Background(), r, repo.Root); err != nil {
+		t.Fatal(err)
+	}
+	r.Close()
+	bin := integrationBinary(t)
+	if err := os.WriteFile(filepath.Join(repo.Root, "app.conf"), bytes.Replace(base, []byte("port = 80"), []byte("port = 8080"), 1), 0600); err != nil {
+		t.Fatal(err)
+	}
+	add := exec.Command(bin, "overlay", "add", "port", "--", "app.conf")
+	add.Dir, add.Env = repo.Root, repo.RunnerEnv()
+	if out, err := add.CombinedOutput(); err != nil {
+		t.Fatalf("overlay add: %v\n%s", err, out)
+	}
+	stageEdit := func(line string) {
+		t.Helper()
+		working := bytes.Replace(base, []byte("port = 80"), []byte("port = 8080"), 1)
+		working = bytes.Replace(working, []byte("g\n"), []byte(line+"\n"), 1)
+		if err := os.WriteFile(filepath.Join(repo.Root, "app.conf"), working, 0600); err != nil {
+			t.Fatal(err)
+		}
+		cmd := exec.Command(repo.GitPath, "add", "app.conf")
+		cmd.Dir, cmd.Env = repo.Root, repo.Env
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return
+		} else if staged := repo.Git("cat-file", "blob", ":app.conf"); bytes.Contains(staged, []byte("8080")) {
+			t.Fatalf("git add staged the overlay patch (%s): %q", out, staged)
+		}
+	}
+
+	moved := filepath.Join(filepath.Dir(repo.Root), "moved-checkout")
+	if err := os.Rename(repo.Root, moved); err != nil {
+		t.Fatal(err)
+	}
+	repo.Root = moved
+	stageEdit("moved")
+
+	if err := os.Remove(filepath.Join(repo.Root, ".git", "gitlocal", filterConfigName)); err != nil {
+		t.Fatal(err)
+	}
+	stageEdit("missing include")
+}

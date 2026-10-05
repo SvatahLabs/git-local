@@ -20,6 +20,7 @@ type installation struct {
 	ConfigMode         uint32 `json:"configMode"`
 	ConfigData         []byte `json:"configData,omitempty"`
 	IncludePathExisted bool   `json:"includePathExisted"`
+	RequiredExisted    bool   `json:"requiredExisted,omitempty"`
 }
 
 func loadInstallation(d *storage.Dir) (installation, bool, error) {
