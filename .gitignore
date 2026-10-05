@@ -1,0 +1,42 @@
+# Build output
+/bin/
+/dist/
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+/coverage.out
+/vendor/
+go.work
+go.work.sum
+
+# OS
+.DS_Store
+._*
+Thumbs.db
+Desktop.ini
+
+# Editors and IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Logs and temp files
+*.log
+*.tmp
+tmp/
+
+# Claude Code worktrees
+.claude/worktrees/
