@@ -228,18 +228,17 @@ func siblings(exceptions []string, emit func(string) error) error {
 // rule doesn't match, and they can hold decrypted content.
 const StagePattern = ".gitlocal-tmp-*"
 
+// Block is the managed block for patterns. With no selections it still holds
+// StagePattern, so a stage left after everything was untracked stays ignored.
 func Block(patterns []byte) []byte {
-	if len(patterns) == 0 {
-		return nil
-	}
 	b := append([]byte(Begin), StagePattern+"\n"...)
 	b = append(b, patterns...)
 	return append(b, []byte(End)...)
 }
 
-// legacyBlock is the block written by releases without StagePattern. It stays
-// accepted so existing repositories keep working; the next selection change
-// rewrites it.
+// legacyBlock is the block written by releases without StagePattern, which
+// also wrote no block at all for an empty selection. It stays accepted so
+// existing repositories keep working; the next selection change rewrites it.
 func legacyBlock(patterns []byte) []byte {
 	if len(patterns) == 0 {
 		return nil

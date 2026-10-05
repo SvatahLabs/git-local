@@ -125,8 +125,10 @@ func TestTrackUntrackAndUserIgnorePreservation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The block keeps only the staging-file rule (GL-082); user bytes are
+	// restored unchanged around it.
 	after, _ := os.ReadFile(w.Exclude)
-	if !bytes.Equal(after, user) {
+	if !bytes.Equal(after, exclude.Render(user, nil)) {
 		t.Fatal("last untrack did not restore user bytes")
 	}
 	if _, err = os.Stat(filepath.Join(r.Root, "notes/private")); err != nil {

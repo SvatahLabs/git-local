@@ -238,6 +238,9 @@ func checkMainlineOwnership(ctx context.Context, r *gitexec.Runner, w workspace.
 				return err
 			}
 			if len(conflicts) != 0 {
+				if conflicts[0].Staging {
+					return fmt.Errorf("%w: mainline Git tracks restore or seed staging file %q, which may hold private content; remove it from the index and HEAD first", storage.ErrConflict, p)
+				}
 				return fmt.Errorf("%w: selected path %q already belongs to mainline Git", storage.ErrConflict, p)
 			}
 		}

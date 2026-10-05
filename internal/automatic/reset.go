@@ -89,6 +89,9 @@ func checkResetTarget(ctx context.Context, r *gitexec.Runner, w *workspace.Conte
 			return nil, err
 		}
 		if len(conflicts) != 0 {
+			if conflicts[0].Staging {
+				return nil, fmt.Errorf("%w: reset target contains restore or seed staging file %q, which may hold private content; remove it from that commit first", storage.ErrConflict, conflicts[0].Path)
+			}
 			return nil, fmt.Errorf("%w: reset target contains selected path %q from workspace %s", storage.ErrConflict, conflicts[0].Path, conflicts[0].WorkspaceID)
 		}
 		for _, selected := range snapshot.Selections {

@@ -189,6 +189,7 @@ selected in one worktree may also be ignored by ordinary Git in another.
 The managed block also ignores `.gitlocal-tmp-*` at any depth: restore and
 linked-worktree seed stage each file under that name beside its target, and an
 interrupted operation keeps partial stages, which may hold decrypted content.
+The block, with that rule, stays after every selection is untracked.
 `doctor` lists leftover stages, and warns when a block written by an earlier
 release lacks that rule; the next `track` or `untrack` adds it.
 The generated rules follow the checkout's `core.ignorecase` (true by default on
