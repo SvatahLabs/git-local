@@ -95,14 +95,18 @@ safe and available to every worktree. Migration rewrites snapshot commits, so
 previous snapshot IDs change; use `git local log` to find their replacements.
 
 A sensitive path may be a selected file or directory, or any file or directory
-inside a selected directory. `enable` and `migrate` read its kind from the
-checkout, so a sensitive subdirectory covers everything below it. The path must
-already exist with its exact on-disk spelling: a missing path, or one that
-differs only in case or Unicode normalization, is refused. A snapshot fails if
-a file would match a sensitive path only by spelling, and `doctor` reports a
-policy from an earlier release that recorded a directory as a file. Files below
-such a directory were saved unencrypted, and changing an existing policy isn't
-supported yet.
+inside a selected directory. `enable` reads its kind from the checkout, so a
+sensitive subdirectory covers everything below it. `migrate` reads it from the
+saved snapshots first: a path with saved files below it is a directory even if
+it was since deleted or replaced, and a saved path may be missing from the
+checkout. Otherwise the path must exist with its exact on-disk spelling: a
+missing path, or one that differs only in case or Unicode normalization, is
+refused. A snapshot or migration fails if a file would match a sensitive path
+only by spelling or kind. `doctor` reports a policy from an earlier release
+that recorded a directory as a file or used a different spelling; files it
+should have covered were saved unencrypted. Changing an existing policy isn't
+supported yet; until then, `git local untrack` the affected path to keep
+taking snapshots of other files.
 If the key is moved, `encrypt rebind-key` accepts its new absolute path only
 when the replacement bytes match the stored key fingerprint.
 
@@ -190,7 +194,8 @@ worktree (for example `core.hooksPath=.githooks` or husky's `.husky`), where the
 scripts can be committed and would carry this machine's binary path, and leave
 it unchanged. They also refuse a directory outside the repository, such as a
 global `core.hooksPath` shared by other repositories, unless
-`--allow-shared-hooks-dir` is given. With an existing hook manager, call
+`--allow-shared-hooks-dir` is given, and refuse to modify hook files that Git
+tracks wherever the directory is. With an existing hook manager, call
 `git local guard staged` from its pre-commit hook and `git local guard push
 "$1"` (passing the hook's standard input) from its pre-push hook instead.
 `hook status` and `auto status` report a worktree or shared hooks directory
