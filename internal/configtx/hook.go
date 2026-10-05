@@ -2,6 +2,7 @@ package configtx
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -33,6 +34,11 @@ type GuardSelection struct {
 	State                      selection.State
 }
 
+// ErrNoState reports a repository without a <git-common-dir>/gitlocal
+// directory. Nothing can be selected there, so guards pass. Any other missing
+// or damaged state is an ordinary error and fails closed.
+var ErrNoState = errors.New("repository has no git-local state")
+
 // LoadGuardSnapshot reads only durable selection metadata. It deliberately
 // avoids workspace discovery and private-history checks on the hook hot path.
 func LoadGuardSnapshot(ctx context.Context, r *gitexec.Runner, cwd string) (GuardSnapshot, error) {
@@ -59,6 +65,9 @@ func LoadGuardSnapshot(ctx context.Context, r *gitexec.Runner, cwd string) (Guar
 		return result, err
 	}
 	defer common.Close()
+	if _, err := common.Lstat("gitlocal"); errors.Is(err, os.ErrNotExist) {
+		return result, ErrNoState
+	}
 	lock, err := common.LockExisting(ctx, "gitlocal/locks/repository.lock")
 	if err != nil {
 		return result, err

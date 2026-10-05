@@ -36,6 +36,9 @@ func names(data []byte) ([]string, error) {
 
 func Staged(ctx context.Context, r *gitexec.Runner, cwd, index string) ([]Finding, error) {
 	snapshot, err := configtx.LoadGuardSnapshot(ctx, r, cwd)
+	if errors.Is(err, configtx.ErrNoState) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -104,6 +107,9 @@ func Push(ctx context.Context, r *gitexec.Runner, cwd, remote string, input io.R
 		return nil, errors.New("remote name is required")
 	}
 	snapshot, err := configtx.LoadGuardSnapshot(ctx, r, cwd)
+	if errors.Is(err, configtx.ErrNoState) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}

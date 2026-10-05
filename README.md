@@ -179,7 +179,11 @@ selected path. Existing shell hooks keep their contents and run after the
 managed guard block. Use `git local hook status` to inspect protection and
 `git local hook uninstall` to remove only git-local's blocks. Either command
 accepts `--pre-commit` or `--pre-push` to select one guard. Installation uses
-Git's effective `core.hooksPath` directory.
+Git's effective `core.hooksPath` directory. In a repository with no git-local
+state (no `<git-common-dir>/gitlocal` directory), `guard staged` and `guard push`
+succeed without output, so a hook directory shared with such repositories
+doesn't block their commits or pushes; partial or damaged state still fails
+closed.
 Git's default hook directory is shared by linked worktrees. A relative
 `core.hooksPath` may resolve separately in each worktree; install from each
 checkout that needs the guard.
