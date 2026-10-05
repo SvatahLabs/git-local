@@ -332,6 +332,31 @@ func (g *guard) matchesImage(ctx context.Context, path string, image Fingerprint
 	}
 	return imageEqual(actual, image), err
 }
+
+// stageMatches is matchesImage for a reserved stage. It also accepts a
+// complete regular-file stage still at its 0600 creation mode: a process that
+// died after the last write but before StageNamed's Chmod leaves it there.
+// created reports that case, so the caller applies the final mode.
+func (g *guard) stageMatches(ctx context.Context, path string, image Fingerprint, workspaceID, identityPath string) (bool, bool, error) {
+	var actual Fingerprint
+	var err error
+	if image.KeyedDigest != "" {
+		identity := secureblob.Identity{RepositoryID: g.w.RepositoryID, WorkspaceID: workspaceID, Path: identityPath, Mode: image.GitMode}
+		protected, e := inspectSensitiveFile(g.files, path, g.key, identity)
+		err = e
+		actual = protectedFingerprint(protected)
+	} else {
+		actual, err = inspectFile(ctx, g.r, g.w.Store, g.files, path)
+	}
+	if err != nil || imageEqual(actual, image) {
+		return err == nil, false, err
+	}
+	if runtime.GOOS == "windows" || !image.Exists || image.Kind != "file" || !actual.Exists || actual.Kind != "file" || actual.Permissions != 0600 {
+		return false, false, nil
+	}
+	actual.GitMode, actual.Permissions = image.GitMode, image.Permissions
+	return imageEqual(actual, image), true, nil
+}
 func (g *guard) recognize(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -388,7 +413,7 @@ func (g *guard) recognize(ctx context.Context) error {
 			if entry.path == stages.Apply {
 				workspaceID = p.SourceWorkspaceID
 			}
-			match, e := g.matchesImage(ctx, entry.path, entry.image, workspaceID, p.Operations[i].Path)
+			match, _, e := g.stageMatches(ctx, entry.path, entry.image, workspaceID, p.Operations[i].Path)
 			if e != nil {
 				return e
 			}
@@ -585,12 +610,17 @@ func install(ctx context.Context, r *gitexec.Runner, w workspace.Context, files 
 			return err
 		}
 		if actual.Exists {
-			match, e := g.matchesImage(ctx, stage, desired, identity.WorkspaceID, path)
+			match, created, e := g.stageMatches(ctx, stage, desired, identity.WorkspaceID, path)
 			if e != nil {
 				return e
 			}
 			if !match {
 				return fmt.Errorf("%w: unrecognized staging bytes at %q; preserved", storage.ErrConflict, stage)
+			}
+			if created {
+				if err := files.ChmodStaged(stage, os.FileMode(desired.Permissions)); err != nil {
+					return err
+				}
 			}
 		} else {
 			if desired.Kind == "symlink" {
@@ -761,7 +791,7 @@ func cleanupStages(ctx context.Context, r *gitexec.Runner, w workspace.Context, 
 			if entry.path == stages.Apply {
 				workspaceID = g.journal.Manifest.Plan.SourceWorkspaceID
 			}
-			match, err := g.matchesImage(ctx, entry.path, entry.image, workspaceID, g.journal.Manifest.Plan.Operations[i].Path)
+			match, _, err := g.stageMatches(ctx, entry.path, entry.image, workspaceID, g.journal.Manifest.Plan.Operations[i].Path)
 			if err != nil {
 				return err
 			}
@@ -774,7 +804,7 @@ func cleanupStages(ctx context.Context, r *gitexec.Runner, w workspace.Context, 
 			if err = g.recognize(ctx); err != nil {
 				return err
 			}
-			match, e := g.matchesImage(ctx, entry.path, entry.image, workspaceID, g.journal.Manifest.Plan.Operations[i].Path)
+			match, _, e := g.stageMatches(ctx, entry.path, entry.image, workspaceID, g.journal.Manifest.Plan.Operations[i].Path)
 			if e != nil {
 				return e
 			}
@@ -888,7 +918,7 @@ func Abandon(ctx context.Context, r *gitexec.Runner, cwd, id string) (configtx.A
 				}
 				reason := "staging bytes don't match the anchored image"
 				if entry.image.KeyedDigest == "" || key != nil {
-					match, err := g.matchesImage(ctx, entry.path, entry.image, entry.workspaceID, op.Path)
+					match, _, err := g.stageMatches(ctx, entry.path, entry.image, entry.workspaceID, op.Path)
 					if err != nil {
 						return err
 					}
