@@ -184,9 +184,17 @@ state (no `<git-common-dir>/gitlocal` directory), `guard staged` and `guard push
 succeed without output, so a hook directory shared with such repositories
 doesn't block their commits or pushes; partial or damaged state still fails
 closed.
-Git's default hook directory is shared by linked worktrees. A relative
-`core.hooksPath` may resolve separately in each worktree; install from each
-checkout that needs the guard.
+Git's default hook directory is shared by linked worktrees, so one
+installation covers them. `hook install` and `auto install` refuse a hooks directory inside any
+worktree (for example `core.hooksPath=.githooks` or husky's `.husky`), where the
+scripts can be committed and would carry this machine's binary path, and leave
+it unchanged. They also refuse a directory outside the repository, such as a
+global `core.hooksPath` shared by other repositories, unless
+`--allow-shared-hooks-dir` is given. With an existing hook manager, call
+`git local guard staged` from its pre-commit hook and `git local guard push
+"$1"` (passing the hook's standard input) from its pre-push hook instead.
+`hook status` and `auto status` report a worktree or shared hooks directory
+and any tracked hook files.
 On a new branch, the pre-push guard excludes commits reachable from known
 remote-tracking branches; without those refs it scans the branch's full ancestry.
 Hooks protect against accidental leaks;

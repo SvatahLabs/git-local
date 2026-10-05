@@ -869,7 +869,7 @@ func hookCommand() *cobra.Command {
 	hooks := &cobra.Command{Use: "hook", Short: "Manage selected-path commit and push guards"}
 	for _, action := range []string{"install", "uninstall"} {
 		action := action
-		var preCommit, prePush bool
+		var preCommit, prePush, allowShared bool
 		command := &cobra.Command{Use: action, Short: action + " selected-path guards",
 			Args: func(_ *cobra.Command, args []string) error {
 				if len(args) != 0 {
@@ -886,7 +886,7 @@ func hookCommand() *cobra.Command {
 						if e != nil {
 							return e
 						}
-						paths, err = hook.Install(c.Context(), r, cwd, executable, preCommit, prePush)
+						paths, err = hook.Install(c.Context(), r, cwd, executable, preCommit, prePush, allowShared)
 					} else {
 						paths, err = hook.Uninstall(c.Context(), r, cwd, preCommit, prePush)
 					}
@@ -906,6 +906,7 @@ func hookCommand() *cobra.Command {
 		command.Flags().BoolVar(&preCommit, "pre-commit", false, "Select the pre-commit guard")
 		command.Flags().BoolVar(&prePush, "pre-push", false, "Select the pre-push guard")
 		if action == "install" {
+			command.Flags().BoolVar(&allowShared, "allow-shared-hooks-dir", false, "Install into a hooks directory outside this repository, such as a global core.hooksPath")
 			command.Flags().Bool("chain", false, "Deprecated: existing shell hooks are preserved automatically")
 			_ = command.Flags().MarkHidden("chain")
 		}
@@ -918,7 +919,7 @@ func hookCommand() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				if setJSON(c, map[string]any{"currentDirectory": status.Current, "installed": status.Installed, "previousDirectories": status.Previous}) {
+				if setJSON(c, map[string]any{"currentDirectory": status.Current, "installed": status.Installed, "previousDirectories": status.Previous, "location": status.Location.Kind, "worktree": status.Location.Worktree, "tracked": status.Tracked}) {
 					return nil
 				}
 				for _, name := range []string{"pre-commit", "pre-push"} {
@@ -928,6 +929,7 @@ func hookCommand() *cobra.Command {
 					}
 					fmt.Fprintf(c.OutOrStdout(), "%s: %s (%s)\n", name, state, status.Current)
 				}
+				printHookLocation(c, status)
 				for _, p := range status.Previous {
 					fmt.Fprintf(c.OutOrStdout(), "previous installation: %s\n", p)
 				}
@@ -942,7 +944,8 @@ func autoCommand() *cobra.Command {
 	auto := &cobra.Command{Use: "auto", Short: "Capture local snapshots on Git events or a timer"}
 	for _, action := range []string{"install", "uninstall"} {
 		action := action
-		auto.AddCommand(&cobra.Command{Use: action, Args: cobra.NoArgs, Short: action + " automatic snapshot hooks", RunE: func(c *cobra.Command, _ []string) error {
+		var allowShared bool
+		command := &cobra.Command{Use: action, Args: cobra.NoArgs, Short: action + " automatic snapshot hooks", RunE: func(c *cobra.Command, _ []string) error {
 			return inspectCommand(c, func(r *gitexec.Runner, cwd string) error {
 				var paths []string
 				var err error
@@ -951,7 +954,7 @@ func autoCommand() *cobra.Command {
 					if e != nil {
 						return e
 					}
-					paths, err = hook.InstallSnapshots(c.Context(), r, cwd, executable)
+					paths, err = hook.InstallSnapshots(c.Context(), r, cwd, executable, allowShared)
 				} else {
 					paths, err = hook.UninstallSnapshots(c.Context(), r, cwd)
 				}
@@ -968,7 +971,11 @@ func autoCommand() *cobra.Command {
 				}
 				return nil
 			})
-		}})
+		}}
+		if action == "install" {
+			command.Flags().BoolVar(&allowShared, "allow-shared-hooks-dir", false, "Install into a hooks directory outside this repository, such as a global core.hooksPath")
+		}
+		auto.AddCommand(command)
 	}
 	auto.AddCommand(&cobra.Command{Use: "status", Args: cobra.NoArgs, Short: "Show automatic snapshot hooks", RunE: func(c *cobra.Command, _ []string) error {
 		return inspectCommand(c, func(r *gitexec.Runner, cwd string) error {
@@ -976,7 +983,7 @@ func autoCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if setJSON(c, map[string]any{"currentDirectory": status.Current, "installed": status.Installed}) {
+			if setJSON(c, map[string]any{"currentDirectory": status.Current, "installed": status.Installed, "location": status.Location.Kind, "worktree": status.Location.Worktree, "tracked": status.Tracked}) {
 				return nil
 			}
 			for _, name := range []string{"post-commit", "post-checkout", "pre-rebase", "post-rewrite"} {
@@ -988,6 +995,7 @@ func autoCommand() *cobra.Command {
 					return err
 				}
 			}
+			printHookLocation(c, status)
 			return nil
 		})
 	}})
@@ -1115,6 +1123,19 @@ func guardCommand() *cobra.Command {
 		return nil
 	}})
 	return guards
+}
+
+// printHookLocation explains a hooks directory that install refuses by default.
+func printHookLocation(c *cobra.Command, status hook.Status) {
+	switch status.Location.Kind {
+	case hook.LocationWorktree:
+		fmt.Fprintf(c.OutOrStdout(), "hooks directory is inside the worktree %s; hook install refuses it because hook scripts there can be committed\n", status.Location.Worktree)
+	case hook.LocationShared:
+		fmt.Fprintf(c.OutOrStdout(), "hooks directory is shared: it is outside this repository and other repositories may use it; hook install needs --allow-shared-hooks-dir\n")
+	}
+	if len(status.Tracked) > 0 {
+		fmt.Fprintf(c.OutOrStdout(), "tracked: %s\n", strings.Join(status.Tracked, ", "))
+	}
 }
 
 func guardRunner() (*gitexec.Runner, error) {

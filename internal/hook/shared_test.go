@@ -55,8 +55,17 @@ func TestSharedHooksLeaveUninitializedRepositoriesWorking(t *testing.T) {
 	if out, err := runA("init"); err != nil {
 		t.Fatalf("init A: %v\n%s", err, out)
 	}
-	if out, err := runA("hook", "install"); err != nil {
+	if out, err := runA("hook", "install"); err == nil || !strings.Contains(out, "--allow-shared-hooks-dir") {
+		t.Fatalf("hook install into a shared directory without the flag: %v\n%s", err, out)
+	}
+	if entries, err := os.ReadDir(shared); err != nil || len(entries) != 1 {
+		t.Fatalf("refused install changed the shared directory: %v %v", err, entries)
+	}
+	if out, err := runA("hook", "install", "--allow-shared-hooks-dir"); err != nil {
 		t.Fatalf("hook install in A: %v\n%s", err, out)
+	}
+	if out, err := runA("hook", "status"); err != nil || !strings.Contains(out, "shared") {
+		t.Fatalf("hook status did not report the shared directory: %v\n%s", err, out)
 	}
 
 	b := testutil.New(t)

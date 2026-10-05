@@ -39,7 +39,7 @@ func TestInstalledGuardBlocksForcedAddAndChainsExistingHook(t *testing.T) {
 	if out, err := runLocal("track", "notes/secret"); err != nil {
 		t.Fatalf("track: %v\n%s", err, out)
 	}
-	hooks := filepath.Join(repo.Root, "hooks-custom")
+	hooks := filepath.Join(repo.Root, ".git", "hooks-custom")
 	if err := os.Mkdir(hooks, 0700); err != nil {
 		t.Fatal(err)
 	}

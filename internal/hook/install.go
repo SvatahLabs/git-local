@@ -29,6 +29,9 @@ type Status struct {
 	Current   string
 	Installed map[string]bool
 	Previous  []string
+	Location  Location
+	// Tracked names hook files in Current that the current worktree tracks.
+	Tracked []string
 }
 
 var snapshotEvents = []string{"post-commit", "post-checkout", "pre-rebase", "post-rewrite"}
@@ -196,15 +199,18 @@ func names(preCommit, prePush bool) []string {
 	return n
 }
 
-func Install(ctx context.Context, r *gitexec.Runner, cwd, executable string, preCommit, prePush bool) ([]string, error) {
-	return installNamed(ctx, r, cwd, executable, names(preCommit, prePush))
+// Install adds the guards to Git's effective hooks directory. A directory
+// inside a worktree is always refused; one outside the repository's common
+// directory needs allowShared.
+func Install(ctx context.Context, r *gitexec.Runner, cwd, executable string, preCommit, prePush, allowShared bool) ([]string, error) {
+	return installNamed(ctx, r, cwd, executable, names(preCommit, prePush), allowShared)
 }
 
-func InstallSnapshots(ctx context.Context, r *gitexec.Runner, cwd, executable string) ([]string, error) {
-	return installNamed(ctx, r, cwd, executable, snapshotEvents)
+func InstallSnapshots(ctx context.Context, r *gitexec.Runner, cwd, executable string, allowShared bool) ([]string, error) {
+	return installNamed(ctx, r, cwd, executable, snapshotEvents, allowShared)
 }
 
-func installNamed(ctx context.Context, r *gitexec.Runner, cwd, executable string, selected []string) ([]string, error) {
+func installNamed(ctx context.Context, r *gitexec.Runner, cwd, executable string, selected []string, allowShared bool) ([]string, error) {
 	w, common, lock, err := open(ctx, r, cwd)
 	if err != nil {
 		return nil, err
@@ -213,6 +219,13 @@ func installNamed(ctx context.Context, r *gitexec.Runner, cwd, executable string
 	defer lock.Close()
 	dir, err := directory(ctx, r, w)
 	if err != nil {
+		return nil, err
+	}
+	location, err := locate(ctx, r, w, dir)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkLocation(location, dir, allowShared); err != nil {
 		return nil, err
 	}
 	if err := os.MkdirAll(dir, 0700); err != nil {
@@ -432,7 +445,15 @@ func Inspect(ctx context.Context, r *gitexec.Runner, cwd string) (Status, error)
 	if err != nil {
 		return Status{}, err
 	}
-	s := Status{Current: current, Installed: map[string]bool{}}
+	location, err := locate(ctx, r, w, current)
+	if err != nil {
+		return Status{}, err
+	}
+	tracked, err := trackedHooks(ctx, r, w, current, append([]string{"pre-commit", "pre-push"}, snapshotEvents...))
+	if err != nil {
+		return Status{}, err
+	}
+	s := Status{Current: current, Installed: map[string]bool{}, Location: location, Tracked: tracked}
 	for _, record := range m.Records {
 		if record.Directory == current {
 			data, e := os.ReadFile(filepath.Join(record.Directory, record.Name))
