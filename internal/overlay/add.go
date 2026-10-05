@@ -437,6 +437,17 @@ func Add(ctx context.Context, r *gitexec.Runner, cwd, name, given, executable st
 		return rollback(err)
 	}
 	attrWritten = true
+	// A later line in info/attributes, or an unparseable pattern, would
+	// silently leave a path unfiltered; Git's own answer is authoritative.
+	for _, managed := range newPaths {
+		attrs, err := r.CheckAttributes(ctx, p.Root, managed)
+		if err != nil {
+			return rollback(err)
+		}
+		if attrs["filter"] != "gitlocal-overlay" {
+			return rollback(fmt.Errorf("Git does not apply the overlay filter to %q (filter: %s); remove the conflicting attribute line", managed, attrs["filter"]))
+		}
+	}
 	m, err := publishVersionLocked(d, p.WorkspaceID, name, path, base, local)
 	if err != nil {
 		return rollback(err)

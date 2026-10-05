@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -741,4 +742,78 @@ func TestOverlayFilterFailsClosedWhenCheckoutMovesOrIncludeIsMissing(t *testing.
 		t.Fatal(err)
 	}
 	stageEdit("missing include")
+}
+
+func TestOverlayAddFiltersUnusualNamesAndRefusesOverriddenAttributes(t *testing.T) {
+	repo := testutil.New(t)
+	repo.Git("config", "core.autocrlf", "false")
+	names := []string{"nbsp\u00a0name.conf", "ideographic\u3000space.conf", "zero\u200bwidth.conf"}
+	if runtime.GOOS != "windows" {
+		names = append(names, "control\x01name.conf")
+	}
+	base := []byte("port = 80\na\nb\nc\nd\ne\nf\ng\n")
+	for _, name := range append(append([]string{}, names...), "app.conf") {
+		if err := os.WriteFile(filepath.Join(repo.Root, name), base, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	repo.Git("add", ".")
+	repo.Git("commit", "-qm", "initial")
+	r, err := gitexec.New(repo.RunnerEnv())
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, err := workspace.Init(context.Background(), r, repo.Root)
+	r.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := integrationBinary(t)
+	local := bytes.Replace(base, []byte("port = 80"), []byte("port = 8080"), 1)
+	for i, name := range names {
+		if err := os.WriteFile(filepath.Join(repo.Root, name), local, 0600); err != nil {
+			t.Fatal(err)
+		}
+		add := exec.Command(bin, "overlay", "add", fmt.Sprintf("o%d", i), "--", name)
+		add.Dir, add.Env = repo.Root, repo.RunnerEnv()
+		out, err := add.CombinedOutput()
+		if err != nil {
+			t.Logf("overlay add refused %q: %v %s", name, err, out)
+			continue
+		}
+		check := exec.Command(repo.GitPath, "check-attr", "-z", "filter", "--", name)
+		check.Dir, check.Env = repo.Root, repo.Env
+		if got, err := check.CombinedOutput(); err != nil || string(got) != name+"\x00filter\x00gitlocal-overlay\x00" {
+			t.Fatalf("overlay add succeeded but %q has no filter: %v %q", name, err, got)
+		}
+		edited := bytes.Replace(local, []byte("g\n"), []byte("edited\n"), 1)
+		if err := os.WriteFile(filepath.Join(repo.Root, name), edited, 0600); err != nil {
+			t.Fatal(err)
+		}
+		repo.Git("add", "--", name)
+		if staged := repo.Git("cat-file", "blob", ":"+name); bytes.Contains(staged, []byte("8080")) {
+			t.Fatalf("git add staged the overlay patch for %q: %q", name, staged)
+		}
+	}
+
+	attributes := filepath.Join(w.Common, "info", "attributes")
+	before, err := os.ReadFile(attributes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	overridden := append(append([]byte{}, before...), []byte("/app.conf -filter\n")...)
+	if err := os.WriteFile(attributes, overridden, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo.Root, "app.conf"), local, 0600); err != nil {
+		t.Fatal(err)
+	}
+	add := exec.Command(bin, "overlay", "add", "app", "--", "app.conf")
+	add.Dir, add.Env = repo.Root, repo.RunnerEnv()
+	if out, err := add.CombinedOutput(); err == nil {
+		t.Fatalf("overlay add accepted an attribute line that overrides its filter:\n%s", out)
+	}
+	if after, err := os.ReadFile(attributes); err != nil || !bytes.Equal(after, overridden) {
+		t.Fatalf("refused overlay add left attributes changed: %v\n%q", err, after)
+	}
 }

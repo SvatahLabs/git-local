@@ -3,6 +3,7 @@ package overlay
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -13,7 +14,14 @@ import (
 const attrBegin = "# >>> git-local managed overlays >>>\n"
 const attrEnd = "# <<< git-local managed overlays <<<\n"
 
-func attrPattern(path string) string {
+func attrPattern(path string) string { return gitQuote(attrLiteral(path)) }
+
+// legacyAttrPattern is the Go quoting of earlier releases. Git can't unquote
+// its \u and \x escapes, but a block written with it is still recognized so
+// the next add or remove can rewrite it.
+func legacyAttrPattern(path string) string { return strconv.Quote(attrLiteral(path)) }
+
+func attrLiteral(path string) string {
 	var b strings.Builder
 	b.WriteByte('/')
 	for i := 0; i < len(path); i++ {
@@ -23,10 +31,36 @@ func attrPattern(path string) string {
 		}
 		b.WriteByte(path[i])
 	}
-	return strconv.Quote(b.String())
+	return b.String()
+}
+
+// gitQuote produces the C-style quoting that Git's attribute parser accepts:
+// \" and \\ escapes, octal escapes for control bytes and DEL, and every other
+// byte, including UTF-8, unchanged.
+func gitQuote(s string) string {
+	var b strings.Builder
+	b.WriteByte('"')
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c == '"' || c == '\\':
+			b.WriteByte('\\')
+			b.WriteByte(c)
+		case c < 0x20 || c == 0x7f:
+			fmt.Fprintf(&b, "\\%03o", c)
+		default:
+			b.WriteByte(c)
+		}
+	}
+	b.WriteByte('"')
+	return b.String()
 }
 
 func attributeBlock(paths []string) ([]byte, error) {
+	return renderBlock(paths, attrPattern)
+}
+
+func renderBlock(paths []string, pattern func(string) string) ([]byte, error) {
 	if len(paths) == 0 {
 		return nil, nil
 	}
@@ -49,7 +83,7 @@ func attributeBlock(paths []string) ([]byte, error) {
 	var b strings.Builder
 	b.WriteString(attrBegin)
 	for _, p := range ordered {
-		b.WriteString(attrPattern(p))
+		b.WriteString(pattern(p))
 		b.WriteString(" filter=gitlocal-overlay\n")
 	}
 	b.WriteString(attrEnd)
@@ -70,7 +104,11 @@ func AttributeUserBytes(data []byte, oldPaths []string) ([]byte, error) {
 		return bytes.Clone(data), nil
 	}
 	if !bytes.HasPrefix(data, want) {
-		return nil, errors.New("managed overlay attributes block was changed")
+		legacy, err := renderBlock(oldPaths, legacyAttrPattern)
+		if err != nil || !bytes.HasPrefix(data, legacy) {
+			return nil, errors.New("managed overlay attributes block was changed")
+		}
+		want = legacy
 	}
 	return bytes.Clone(data[len(want):]), nil
 }

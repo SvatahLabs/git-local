@@ -6,7 +6,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 
 	"gitlocal/internal/gitexec"
@@ -84,6 +83,37 @@ func FilterConfig(executable string) ([]byte, error) {
 	if runtime.GOOS == "windows" && !strings.EqualFold(filepath.Ext(executable), ".exe") {
 		return nil, errors.New("Windows overlay filter executable must end in .exe")
 	}
+	if strings.IndexFunc(executable, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0 {
+		return nil, errors.New("overlay filter executable path contains a control character")
+	}
 	command := filterCommandForOS(executable, runtime.GOOS)
-	return []byte("[filter \"gitlocal-overlay\"]\n\tprocess = " + strconv.Quote(command) + "\n\trequired = true\n"), nil
+	return []byte("[filter \"gitlocal-overlay\"]\n\tprocess = " + configQuote(command) + "\n\trequired = true\n"), nil
+}
+
+// configQuote follows Git's config value quoting: only \" and \\ need escapes
+// inside double quotes, and every other byte, including UTF-8, is literal.
+func configQuote(s string) string {
+	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s) + `"`
+}
+
+func configUnquote(s string) (string, error) {
+	if len(s) < 2 || s[0] != '"' || s[len(s)-1] != '"' {
+		return "", errors.New("unquoted config value")
+	}
+	var b strings.Builder
+	for i := 1; i < len(s)-1; i++ {
+		c := s[i]
+		if c == '"' {
+			return "", errors.New("unescaped quote in config value")
+		}
+		if c == '\\' {
+			i++
+			if i == len(s)-1 || s[i] != '\\' && s[i] != '"' {
+				return "", errors.New("unsupported escape in config value")
+			}
+			c = s[i]
+		}
+		b.WriteByte(c)
+	}
+	return b.String(), nil
 }

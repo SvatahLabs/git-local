@@ -248,6 +248,12 @@ a damaged installation, restore those parts before staging or checking out
 affected files; an `overlay add` update also refuses a changed active filter.
 Installations from earlier releases used an absolute include path; doctor
 reports it, and the next `overlay add` or `overlay remove` rewrites it.
+After writing its attributes, `overlay add` asks Git (`git check-attr`)
+whether every overlaid path now uses the filter, and rolls back if not, for
+example when a later line in `.git/info/attributes` or a `.gitattributes` file
+sets `-filter` for that path. Paths with spaces, non-ASCII or control
+characters are quoted the way Git parses them; a filter executable whose path
+contains a control character is refused.
 
 If a pull fails because the upstream changed the overlay's lines, run
 `git local overlay status` to see the conflicting upstream blob and whether Git

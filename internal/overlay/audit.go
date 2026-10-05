@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 
 	"gitlocal/internal/gitexec"
@@ -25,7 +24,7 @@ func installedCommand(data []byte) (string, string, error) {
 		return "", "", errors.New("overlay filter configuration was changed")
 	}
 	encoded := string(data[len(start) : len(data)-len(end)])
-	command, err := strconv.Unquote(encoded)
+	command, err := configUnquote(encoded)
 	if err != nil || !strings.HasSuffix(command, " overlay filter-process") {
 		return "", "", errors.New("overlay filter configuration was changed")
 	}
