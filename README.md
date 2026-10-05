@@ -158,7 +158,11 @@ local content, run `git local overlay add <name> -- <file>` before staging it. S
 
 On Windows, build as `bin/git-local.exe`. `git -C <checkout> local init` and
 invocation from a subdirectory are supported. Initialization is idempotent; rerun
-it from the original checkout to resume an interrupted initialization. Unknown
+it from the original checkout to resume an interrupted initialization. If that
+checkout was removed, `git local recover <workspace-id> --abandon` (doctor shows
+the ID) discards its journal from any other checkout, along with the
+registration it had published. Init checks every other registered worktree
+before it writes its journal, so a failed check leaves nothing behind. Unknown
 or conflicting state is preserved and reported instead of overwritten.
 With `auto install` in the primary checkout, Git's post-checkout hook snapshots
 its latest selected files and seeds each new linked worktree with that selection

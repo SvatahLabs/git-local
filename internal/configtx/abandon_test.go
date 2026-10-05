@@ -196,3 +196,32 @@ func TestAbandonSeedQuarantinesUnrecognizedStageAndKeepsUserFiles(t *testing.T) 
 		t.Fatalf("quarantine manifest: %+v %v", manifest, err)
 	}
 }
+
+func TestPendingInitJournalOfRemovedCheckoutPointsToAbandon(t *testing.T) {
+	_, g, w := fixture(t)
+	ctx := context.Background()
+	id, err := storage.UUID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(w.Common, "gitlocal", "transactions"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	gone := filepath.Join(t.TempDir(), "gone")
+	journal := `{"schemaVersion":1,"kind":"init","identity":{"workspaceId":"` + id + `"},"workspace":{"adminPath":` + strconvQuote(filepath.Join(gone, "admin")) + `,"rootPath":` + strconvQuote(gone) + `}}`
+	if err := os.WriteFile(filepath.Join(w.Common, "gitlocal", "transactions", "init.json"), []byte(journal), 0600); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := PendingJournals(ctx, g, w.Root)
+	if err != nil || len(pending) != 1 || pending[0].Kind != "init" || pending[0].ID != id || !pending[0].AdminMissing {
+		t.Fatalf("pending: %+v %v", pending, err)
+	}
+	if action, _ := pending[0].Next(); action != "Run git local recover "+id+" --abandon." {
+		t.Fatalf("action: %s", action)
+	}
+	if kind, err := JournalKind(ctx, g, w.Root, id); err != nil || kind != "init" {
+		t.Fatalf("kind: %q %v", kind, err)
+	}
+}
+
+func strconvQuote(s string) string { b, _ := json.Marshal(s); return string(b) }

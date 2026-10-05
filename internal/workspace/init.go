@@ -45,6 +45,8 @@ type initJournal struct {
 	Workspace       Record     `json:"workspace"`
 	NewRepository   bool       `json:"newRepository"`
 	SelectionSchema int        `json:"selectionSchema,omitempty"`
+	// Outcome is set only on a journal archived by AbandonInit.
+	Outcome string `json:"outcome,omitempty"`
 }
 
 // Init is idempotent, and resumes only its own validated initialization journal.
@@ -187,6 +189,12 @@ func initialize(ctx context.Context, r *gitexec.Runner, cwd string, fault func(s
 			return nil, e
 		}
 		journal = initJournal{SchemaVersion: SchemaVersion, Kind: "init", Repository: repo, Identity: Identity{SchemaVersion, repo.RepositoryID, uuid}, Workspace: Record{SchemaVersion, uuid, time.Now().UTC().Format(time.RFC3339Nano), w.Admin, w.Root, "active"}, NewRepository: repoErr != nil, SelectionSchema: selection.SchemaVersion}
+		// Validate every other checkout before the journal exists: a failure
+		// after it would leave a journal that blocks every command.
+		w.RepositoryID, w.WorkspaceID = repo.RepositoryID, uuid
+		if err = checkDuplicates(ctx, r, w); err != nil {
+			return nil, err
+		}
 		if err = d.MkdirAll("transactions"); err != nil {
 			return nil, err
 		}
@@ -281,14 +289,23 @@ func publishJSON(d *storage.Dir, path string, v any) error {
 	return nil
 }
 func validateJournal(j initJournal, w *Context) error {
-	if (j.SelectionSchema != 0 && j.SelectionSchema != selection.SchemaVersion) || j.SchemaVersion != SchemaVersion || j.Kind != "init" || j.Repository.SchemaVersion != SchemaVersion || j.Identity.SchemaVersion != SchemaVersion || j.Workspace.SchemaVersion != SchemaVersion || !storage.ValidUUID(j.Repository.RepositoryID) || !storage.ValidUUID(j.Identity.WorkspaceID) || j.Identity.RepositoryID != j.Repository.RepositoryID || j.Workspace.WorkspaceID != j.Identity.WorkspaceID || j.Workspace.State != "active" {
+	if err := validateJournalFields(j); err != nil {
+		return err
+	}
+	if j.Workspace.Admin != w.Admin || j.Workspace.Root != w.Root {
+		return fmt.Errorf("%w: resume initialization from %s; moved or ambiguous mappings require explicit repair", storage.ErrConflict, j.Workspace.Root)
+	}
+	return nil
+}
+func validateJournalFields(j initJournal) error {
+	if j.Outcome != "" || (j.SelectionSchema != 0 && j.SelectionSchema != selection.SchemaVersion) || j.SchemaVersion != SchemaVersion || j.Kind != "init" || j.Repository.SchemaVersion != SchemaVersion || j.Identity.SchemaVersion != SchemaVersion || j.Workspace.SchemaVersion != SchemaVersion || !storage.ValidUUID(j.Repository.RepositoryID) || !storage.ValidUUID(j.Identity.WorkspaceID) || j.Identity.RepositoryID != j.Repository.RepositoryID || j.Workspace.WorkspaceID != j.Identity.WorkspaceID || j.Workspace.State != "active" {
 		return errors.New("invalid initialization journal; refusing automatic repair")
 	}
 	if _, err := time.Parse(time.RFC3339Nano, j.Workspace.CreatedAt); err != nil {
 		return errors.New("invalid initialization timestamp")
 	}
-	if j.Workspace.Admin != w.Admin || j.Workspace.Root != w.Root {
-		return fmt.Errorf("%w: resume initialization from %s; moved or ambiguous mappings require explicit repair", storage.ErrConflict, j.Workspace.Root)
+	if !filepath.IsAbs(j.Workspace.Admin) || !filepath.IsAbs(j.Workspace.Root) {
+		return errors.New("invalid initialization paths")
 	}
 	return nil
 }

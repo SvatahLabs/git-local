@@ -1387,7 +1387,8 @@ func abandonTransaction(c *cobra.Command, r *gitexec.Runner, cwd, id string) err
 	case "encrypt":
 		result, err = encryption.AbandonMigration(c.Context(), r, cwd, id)
 	case "init":
-		err = fmt.Errorf("%w: finish the initialization by running git local init in its checkout", storage.ErrConflict)
+		result.TransactionID, result.Kind = id, kind
+		result.Removed, err = workspace.AbandonInit(c.Context(), r, cwd, id)
 	default:
 		err = fmt.Errorf("transaction %s has unknown kind %q", id, kind)
 	}
@@ -1410,7 +1411,11 @@ func abandonTransaction(c *cobra.Command, r *gitexec.Runner, cwd, id string) err
 	}
 	out := c.OutOrStdout()
 	for _, name := range result.Removed {
-		if _, err := fmt.Fprintf(out, "Removed staging file %s; local history holds its content.\n", name); err != nil {
+		message := "Removed staging file %s; local history holds its content.\n"
+		if kind == "init" {
+			message = "Removed unpublished initialization metadata %s.\n"
+		}
+		if _, err := fmt.Fprintf(out, message, name); err != nil {
 			return err
 		}
 	}
