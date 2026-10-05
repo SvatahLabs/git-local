@@ -231,9 +231,16 @@ func anchor(ctx context.Context, r *gitexec.Runner, store string, m manifest, f 
 		return "", err
 	}
 	if err = point(ctx, f, "recovery-ref"); err != nil {
-		return "", err
+		return "", errors.Join(err, dropAnchor(ctx, r, store, m.Plan.DestinationWorkspaceID, m.ID, commit))
 	}
 	return commit, nil
+}
+
+// dropAnchor deletes a recovery ref that no journal will ever name. Such a
+// ref would block encryption migration as an unknown private ref.
+func dropAnchor(ctx context.Context, r *gitexec.Runner, store, workspace, id, commit string) error {
+	_, err := r.History(context.WithoutCancel(ctx), store, nil, "update-ref", "--no-deref", "-d", RecoveryRef(workspace, id), commit)
+	return err
 }
 func verifyAnchor(ctx context.Context, r *gitexec.Runner, store string, j journal) error {
 	ref := RecoveryRef(j.Manifest.Plan.DestinationWorkspaceID, j.ID)

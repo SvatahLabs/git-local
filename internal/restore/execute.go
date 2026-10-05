@@ -190,24 +190,33 @@ func execute(ctx context.Context, r *gitexec.Runner, cwd, sourceWorkspace, selec
 		if err != nil {
 			return err
 		}
-		result.RecoverySnapshot = j.RecoverySnapshot
-		if err = guard.recognize(ctx); err != nil {
-			return err
-		}
 		meta, err := openMeta(w.Common)
 		if err != nil {
-			return err
+			return errors.Join(err, dropAnchor(ctx, r, w.Store, w.WorkspaceID, id, j.RecoverySnapshot))
 		}
 		defer meta.Close()
+		// Until the journal exists nothing names the recovery ref, so a failure
+		// here drops it instead of pointing the user at a transaction with no
+		// journal.
+		beforeJournal := func(err error) error {
+			if _, statErr := meta.Lstat(journalPath(id)); statErr == nil {
+				return stopped(id, err)
+			}
+			return errors.Join(err, dropAnchor(ctx, r, w.Store, w.WorkspaceID, id, j.RecoverySnapshot))
+		}
+		if err = guard.recognize(ctx); err != nil {
+			return beforeJournal(err)
+		}
 		if err = point(ctx, f, "before-journal"); err != nil {
-			return err
+			return beforeJournal(err)
 		}
 		if err = meta.MkdirAll("transactions"); err != nil {
-			return err
+			return beforeJournal(err)
 		}
 		if err = writeJournal(meta, j); err != nil {
-			return stopped(id, err)
+			return beforeJournal(err)
 		}
+		result.RecoverySnapshot = j.RecoverySnapshot
 		if err = point(ctx, f, "journal"); err != nil {
 			return stopped(id, err)
 		}
