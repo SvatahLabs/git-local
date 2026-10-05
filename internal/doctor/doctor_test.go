@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"gitlocal/internal/configtx"
+	"gitlocal/internal/exclude"
 	"gitlocal/internal/gitexec"
 	"gitlocal/internal/history"
 	"gitlocal/internal/keymaterial"
@@ -424,4 +425,36 @@ func TestDoctorReportsSensitiveFileRuleNamingADirectory(t *testing.T) {
 		}
 	}
 	t.Fatalf("doctor did not report the kind mismatch: %+v", report.Findings)
+}
+
+func TestDoctorWarnsAboutManagedBlockWithoutStageRule(t *testing.T) {
+	repo, r, w := fixture(t)
+	path := filepath.Join(w.Common, "info", "exclude")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := strings.Replace(string(data), exclude.StagePattern+"\n", "", 1)
+	if legacy == string(data) {
+		t.Fatalf("managed block lacks the stage rule:\n%s", data)
+	}
+	if err := os.WriteFile(path, []byte(legacy), 0600); err != nil {
+		t.Fatal(err)
+	}
+	report, err := Run(ctx, r, repo.Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !has(report, "selection and ignores", "warning") || has(report, "exclusions", "error") {
+		t.Fatalf("doctor did not warn about the outdated block: %+v", report.Findings)
+	}
+	if _, err := configtx.Change(ctx, r, repo.Root, false, "notes"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := configtx.Change(ctx, r, repo.Root, true, "notes"); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(path); err != nil || !strings.Contains(string(data), exclude.StagePattern+"\n") {
+		t.Fatalf("selection change did not rewrite the block: %v\n%s", err, data)
+	}
 }

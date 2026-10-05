@@ -128,6 +128,7 @@ func guardFindingsJSON(findings []guard.Finding) []map[string]any {
 			"path": finding.Path, "workspaceId": finding.WorkspaceID,
 			"workspaceRoot": finding.WorkspaceRoot, "commit": finding.Commit,
 			"overlayName": finding.OverlayName, "overlayReason": finding.OverlayReason,
+			"staging": finding.Staging,
 		})
 	}
 	return result

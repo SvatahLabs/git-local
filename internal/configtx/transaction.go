@@ -534,7 +534,7 @@ func validateJournal(j Journal, repo, id string) error {
 	if err != nil {
 		return err
 	}
-	if !bytes.Equal(j.ExcludeAfter.Data, exclude.Render(user, patterns)) || !bytes.Equal(j.ExcludeUnion.Data, exclude.Render(user, union)) {
+	if !exclude.Rendered(j.ExcludeAfter.Data, user, patterns) || !exclude.Rendered(j.ExcludeUnion.Data, user, union) {
 		return errors.New("journal ignore images do not match selection rules")
 	}
 	return nil

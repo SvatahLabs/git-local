@@ -145,3 +145,22 @@ func TestIncompatibleWorkspaceRulesFail(t *testing.T) {
 		}
 	}
 }
+
+func TestManagedBlockIgnoresStagesAndAcceptsLegacyBlock(t *testing.T) {
+	patterns := []byte("/notes/secret\n")
+	block := Block(patterns)
+	if !bytes.Contains(block, []byte("\n"+StagePattern+"\n")) {
+		t.Fatalf("managed block lacks the stage rule: %q", block)
+	}
+	user := []byte("*.log\n")
+	legacy := append(append(append([]byte(Begin), patterns...), End...), user...)
+	if got, err := UserBytes(legacy, patterns); err != nil || !bytes.Equal(got, user) {
+		t.Fatalf("legacy block rejected: %v %q", err, got)
+	}
+	if !Outdated(legacy, patterns) || Outdated(Render(user, patterns), patterns) || Outdated(user, nil) {
+		t.Fatal("Outdated misreports the managed block")
+	}
+	if !Rendered(legacy, user, patterns) || !Rendered(Render(user, patterns), user, patterns) || Rendered(user, user, patterns) {
+		t.Fatal("Rendered misreports the managed block")
+	}
+}

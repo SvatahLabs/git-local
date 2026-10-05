@@ -1062,7 +1062,9 @@ func guardCommand() *cobra.Command {
 			return nil
 		}
 		for _, f := range findings {
-			if f.OverlayName != "" {
+			if f.Staging {
+				fmt.Fprintf(c.ErrOrStderr(), "git-local: refusing to commit %q: it is a git-local restore or seed staging file and may hold private content.\n  Unstage it: git restore --staged -- %s\n", f.Path, shellQuote(f.Path))
+			} else if f.OverlayName != "" {
 				fmt.Fprintf(c.ErrOrStderr(), "git-local: refusing to commit %q: %s (overlay %q, workspace %s).\n  Re-stage with git add -- %s, or update the overlay after resolving the conflict.\n", f.Path, f.OverlayReason, f.OverlayName, f.WorkspaceID, shellQuote(f.Path))
 			} else {
 				fmt.Fprintf(c.ErrOrStderr(), "git-local: refusing to commit %q: selected for local history by workspace %s (%s).\n  Unstage it: git restore --staged -- %s\n", f.Path, f.WorkspaceID, f.WorkspaceRoot, shellQuote(f.Path))
@@ -1099,7 +1101,9 @@ func guardCommand() *cobra.Command {
 			return nil
 		}
 		for _, f := range findings {
-			if f.OverlayName != "" {
+			if f.Staging {
+				fmt.Fprintf(c.ErrOrStderr(), "git-local: refusing to push commit %s: %q is a git-local restore or seed staging file and may hold private content.\n  Rewrite the commit to remove this path before pushing (for example, edit it with git rebase -i %s^).\n", f.Commit, f.Path, f.Commit)
+			} else if f.OverlayName != "" {
 				fmt.Fprintf(c.ErrOrStderr(), "git-local: refusing to push commit %s: %q %s (overlay %q, workspace %s).\n  Rewrite the commit to remove the overlay before pushing.\n", f.Commit, f.Path, f.OverlayReason, f.OverlayName, f.WorkspaceID)
 			} else {
 				fmt.Fprintf(c.ErrOrStderr(), "git-local: refusing to push commit %s: %q is selected for local history by workspace %s (%s).\n  Rewrite the commit to remove this path before pushing (for example, edit it with git rebase -i %s^).\n", f.Commit, f.Path, f.WorkspaceID, f.WorkspaceRoot, f.Commit)

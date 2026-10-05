@@ -200,12 +200,44 @@ func siblings(exceptions []string, emit func(string) error) error {
 	}
 	return walk(root, "")
 }
+// StagePattern ignores restore and seed staging files at any depth. An
+// interrupted operation keeps them beside a selected file, where the file's own
+// rule doesn't match, and they can hold decrypted content.
+const StagePattern = ".gitlocal-tmp-*"
+
 func Block(patterns []byte) []byte {
+	if len(patterns) == 0 {
+		return nil
+	}
+	b := append([]byte(Begin), StagePattern+"\n"...)
+	b = append(b, patterns...)
+	return append(b, []byte(End)...)
+}
+
+// legacyBlock is the block written by releases without StagePattern. It stays
+// accepted so existing repositories keep working; the next selection change
+// rewrites it.
+func legacyBlock(patterns []byte) []byte {
 	if len(patterns) == 0 {
 		return nil
 	}
 	b := append([]byte(Begin), patterns...)
 	return append(b, []byte(End)...)
+}
+
+// Outdated reports a valid managed block that lacks StagePattern.
+func Outdated(data, expected []byte) bool {
+	if len(expected) == 0 {
+		return false
+	}
+	_, err := UserBytes(data, expected)
+	return err == nil && !bytes.Contains(data, Block(expected))
+}
+
+// Rendered reports whether data is user followed by the current or legacy
+// managed block for patterns.
+func Rendered(data, user, patterns []byte) bool {
+	return bytes.Equal(data, Render(user, patterns)) || bytes.Equal(data, append(legacyBlock(patterns), user...))
 }
 
 // UserBytes verifies the exact managed block and returns unchanged bytes outside
@@ -229,7 +261,7 @@ func UserBytes(data, expected []byte) ([]byte, error) {
 		return nil, fmt.Errorf("%w: malformed managed ignore block", storage.ErrConflict)
 	}
 	stop += len(End)
-	if !bytes.Equal(data[start:stop], Block(expected)) {
+	if !bytes.Equal(data[start:stop], Block(expected)) && !bytes.Equal(data[start:stop], legacyBlock(expected)) {
 		return nil, fmt.Errorf("%w: managed ignore block was edited", storage.ErrConflict)
 	}
 	result := append([]byte{}, data[:start]...)

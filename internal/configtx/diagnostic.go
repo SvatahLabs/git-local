@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"gitlocal/internal/exclude"
 	"gitlocal/internal/gitexec"
 	"gitlocal/internal/selection"
 	"gitlocal/internal/storage"
@@ -38,6 +39,9 @@ type DiagnosticState struct {
 	ConfigErr      error
 	IgnoreWarnings []string
 	IgnoreErr      error
+	// IgnoreOutdated reports a valid managed ignore block written before it
+	// covered restore and seed staging files.
+	IgnoreOutdated bool
 	Recheck        func() error
 }
 
@@ -65,6 +69,10 @@ func ReadDiagnostic(ctx context.Context, r *gitexec.Runner, cwd string, fn func(
 	d.ConfigDigest, d.ConfigErr = s.stateDigest()
 	if d.ConfigErr == nil {
 		d.IgnoreWarnings, d.IgnoreErr = s.verify(ctx, s.w.WorkspaceID, d.Selection, false)
+		d.IgnoreOutdated, err = s.ignoreOutdated()
+		if err != nil {
+			return err
+		}
 	} else {
 		d.IgnoreErr = d.ConfigErr
 	}
@@ -171,4 +179,20 @@ func journalName(name string) (string, string, bool) {
 		}
 	}
 	return "", "", false
+}
+
+func (s *session) ignoreOutdated() (bool, error) {
+	before, err := readImage(s.common, "info/exclude")
+	if err != nil {
+		return false, err
+	}
+	all, err := states(s.sources, "", nil)
+	if err != nil {
+		return false, err
+	}
+	patterns, err := exclude.Compile(all)
+	if err != nil {
+		return false, err
+	}
+	return exclude.Outdated(before.Data, patterns), nil
 }

@@ -160,10 +160,16 @@ identities and retain common-store records after removal. Initialization leaves
 main-repository content, index, refs, objects and exclusions unchanged.
 Selections from all worktrees contribute to the shared `info/exclude`, so a path
 selected in one worktree may also be ignored by ordinary Git in another.
+The managed block also ignores `.gitlocal-tmp-*` at any depth: restore and
+linked-worktree seed stage each file under that name beside its target, and an
+interrupted operation keeps partial stages, which may hold decrypted content.
+`doctor` lists leftover stages, and warns when a block written by an earlier
+release lacks that rule; the next `track` or `untrack` adds it.
 `git add -f` can bypass that ignore rule. Run `git local hook install` to add
 pre-commit and pre-push guards on macOS, Linux or Git for Windows. Native Windows
 hook execution still awaits CI qualification. The guards reject additions or
-changes to paths selected by any active or retired workspace, and detect saved
+changes to paths selected by any active or retired workspace, and to
+`.gitlocal-tmp-*` staging files, and detect saved
 overlay patches that entered the index or a pushed commit without the filter;
 staged deletions remain allowed. Existing shell hooks keep their contents and run after the
 managed guard block. Use `git local hook status` to inspect protection and

@@ -16,7 +16,13 @@ import (
 
 type HookConflict struct {
 	Path, WorkspaceID, WorkspaceRoot string
+	// Staging marks a restore or seed staging file, which may hold private
+	// content of any workspace.
+	Staging bool
 }
+
+// StagingPath reports a restore or seed staging file name at any depth.
+func StagingPath(p string) bool { return strings.HasPrefix(path.Base(p), ".gitlocal-tmp-") }
 
 type GuardSnapshot struct {
 	Root, Common string
@@ -111,9 +117,13 @@ func (s GuardSnapshot) Check(paths []string) ([]HookConflict, error) {
 		if p == "" || strings.ContainsAny(p, "\x00\\") || path.IsAbs(p) || path.Clean(p) != p || p == ".." || strings.HasPrefix(p, "../") {
 			return nil, fmt.Errorf("invalid selected path %q", p)
 		}
+		if StagingPath(p) {
+			conflicts = append(conflicts, HookConflict{Path: p, Staging: true})
+			continue
+		}
 		for _, selected := range s.Selections {
 			if selectedAlias(selected.State, p) {
-				conflicts = append(conflicts, HookConflict{p, selected.WorkspaceID, selected.WorkspaceRoot})
+				conflicts = append(conflicts, HookConflict{Path: p, WorkspaceID: selected.WorkspaceID, WorkspaceRoot: selected.WorkspaceRoot})
 				break
 			}
 		}

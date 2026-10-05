@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"gitlocal/internal/configtx"
+	"gitlocal/internal/exclude"
 	"gitlocal/internal/gitexec"
 	"gitlocal/internal/guard"
 	"gitlocal/internal/history"
@@ -144,6 +145,16 @@ func Run(ctx context.Context, r *gitexec.Runner, cwd string) (Report, error) {
 		for _, warning := range d.IgnoreWarnings {
 			result.add("selection and ignores", "warning", warning, "")
 		}
+		if d.IgnoreOutdated {
+			result.add("selection and ignores", "warning", "managed ignore block does not ignore restore and seed staging files ("+exclude.StagePattern+")", "Run any git local track or untrack; the next selection change rewrites the block.")
+		}
+		if stages, e := leftoverStages(ctx, r, d.Workspace); e != nil {
+			result.add("staging files", "error", e.Error(), "Inspect the checkout for .gitlocal-tmp-* files.")
+		} else {
+			for _, stage := range stages {
+				result.add("staging files", "warning", fmt.Sprintf("leftover restore or seed staging file %q may hold private content", stage), "Check for an unfinished transaction first (git local recover). Otherwise inspect the file and delete it; never commit it.")
+			}
+		}
 		owner, ownerErr := selection.InspectOwnership(ctx, r, d.Workspace.Root, d.Workspace.Admin)
 		if ownerErr == nil {
 			ownerErr = owner.Check(d.Selection)
@@ -247,7 +258,9 @@ func Run(ctx context.Context, r *gitexec.Runner, cwd string) (Report, error) {
 				result.add("upstream history", "error", e.Error(), "Inspect local branches with upstreams.")
 			} else {
 				for _, leak := range leaks {
-					if leak.OverlayName != "" {
+					if leak.Staging {
+						result.add("upstream history", "warning", fmt.Sprintf("restore or seed staging file %q occurs in commit %s", leak.Path, leak.Commit), "Rewrite the branch to remove the file before pushing.")
+					} else if leak.OverlayName != "" {
 						result.add("upstream history", "warning", fmt.Sprintf("overlay %q on %q occurs in commit %s (workspace %s)", leak.OverlayName, leak.Path, leak.Commit, leak.WorkspaceID), "Rewrite the branch to remove the overlay before pushing.")
 					} else {
 						result.add("upstream history", "warning", fmt.Sprintf("selected path %q occurs in commit %s (workspace %s)", leak.Path, leak.Commit, leak.WorkspaceID), "Rewrite the branch before pushing, or remove the selection if this path is intentionally mainline.")
@@ -292,4 +305,22 @@ func sensitiveKindMismatches(w workspace.Context) ([]string, error) {
 		}
 	}
 	return paths, nil
+}
+
+// leftoverStages lists untracked restore and seed staging files in this
+// checkout, including ignored ones, which an interrupted operation can leave.
+func leftoverStages(ctx context.Context, r *gitexec.Runner, w workspace.Context) ([]string, error) {
+	// An ignore pattern rather than a pathspec: the runner forces literal
+	// pathspecs, and only this pattern is applied, so ignored stages are listed.
+	b, err := r.Main(ctx, w.Root, w.Admin, "ls-files", "-z", "--others", "--ignored", "--full-name", "--exclude="+exclude.StagePattern)
+	if err != nil {
+		return nil, err
+	}
+	var stages []string
+	for _, name := range strings.Split(string(b), "\x00") {
+		if name != "" {
+			stages = append(stages, name)
+		}
+	}
+	return stages, nil
 }
