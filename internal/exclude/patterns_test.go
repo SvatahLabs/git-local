@@ -43,9 +43,13 @@ func TestEffectiveUnionAgainstGit(t *testing.T) {
 		}
 	}
 	os.MkdirAll(filepath.Join(r.Root, ".git/info"), 0700)
+	ignoreCase, err := g.IgnoreCase(context.Background(), r.Root, filepath.Join(r.Root, ".git"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			patterns, err := Compile(tc.states)
+			patterns, err := Compile(tc.states, ignoreCase)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -92,11 +96,15 @@ func TestLiteralPatternBytes(t *testing.T) {
 	}
 	defer g.Close()
 	os.MkdirAll(filepath.Join(r.Root, ".git/info"), 0700)
+	ignoreCase, err := g.IgnoreCase(context.Background(), r.Root, filepath.Join(r.Root, ".git"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	names := []string{"a*?[]", ":(glob)*", "[!]", "-", "!", "#", "é", "è", "汉字", "a b", "a\tb", "x]y", "x[y", "x^y", "x-y"}
 	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
 			s := state([]selection.Rule{{Path: "notes", Kind: "directory"}}, "notes/"+name)
-			body, err := Compile([]selection.State{s})
+			body, err := Compile([]selection.State{s}, ignoreCase)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -140,7 +148,7 @@ func TestIncompatibleWorkspaceRulesFail(t *testing.T) {
 		{state([]selection.Rule{{Path: "notes", Kind: "file"}}), state([]selection.Rule{{Path: "notes/child", Kind: "file"}})},
 	}
 	for _, states := range cases {
-		if _, err := Compile(states); err == nil {
+		if _, err := Compile(states, false); err == nil {
 			t.Fatal("accepted ambiguous union")
 		}
 	}

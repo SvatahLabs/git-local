@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strings"
 
+	"gitlocal/internal/exclude"
 	"gitlocal/internal/gitexec"
 	"gitlocal/internal/selection"
 	"gitlocal/internal/storage"
@@ -105,6 +106,24 @@ type session struct {
 	common, meta *storage.Dir
 	lock         *storage.Lock
 	sources      []Source
+	// ignoreCase is the checkout's core.ignorecase, which shapes the
+	// generated ignore patterns.
+	ignoreCase bool
+}
+
+// compile returns the managed patterns for states under this checkout's
+// core.ignorecase, and the other setting's patterns when they differ: blocks
+// written by earlier releases, or before the setting changed, use those.
+func (s *session) compile(states []selection.State) ([]byte, [][]byte, error) {
+	want, err := exclude.Compile(states, s.ignoreCase)
+	if err != nil {
+		return nil, nil, err
+	}
+	other, err := exclude.Compile(states, !s.ignoreCase)
+	if err != nil || bytes.Equal(other, want) {
+		return want, nil, err
+	}
+	return want, [][]byte{other}, nil
 }
 
 func open(ctx context.Context, r *gitexec.Runner, cwd string) (*session, error) {
@@ -167,6 +186,9 @@ func openMode(ctx context.Context, r *gitexec.Runner, cwd string, readOnly bool)
 	}
 	w.RepositoryID = identity.RepositoryID
 	w.WorkspaceID = identity.WorkspaceID
+	if s.ignoreCase, err = r.IgnoreCase(ctx, w.Root, w.Admin); err != nil {
+		return nil, err
+	}
 	rel, err := filepath.Rel(w.Common, w.Exclude)
 	if err != nil || filepath.ToSlash(rel) != "info/exclude" {
 		return nil, errors.New("redirected exclusion path is unsupported")

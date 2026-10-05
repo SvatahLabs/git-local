@@ -42,11 +42,11 @@ func WithSelection(ctx context.Context, r *gitexec.Runner, cwd string, fn func(w
 	if err != nil {
 		return nil, err
 	}
-	patterns, err := exclude.Compile(all)
+	patterns, alternates, err := s.compile(all)
 	if err != nil {
 		return nil, err
 	}
-	if _, err = exclude.UserBytes(before.Data, patterns); err != nil {
+	if _, err = exclude.UserBytes(before.Data, patterns, alternates...); err != nil {
 		return nil, err
 	}
 	warnings, err := s.verify(ctx, s.w.WorkspaceID, state, false)

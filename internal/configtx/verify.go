@@ -7,7 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
+	"gitlocal/internal/exclude"
 	"gitlocal/internal/selection"
 	"gitlocal/internal/storage"
 	"gitlocal/internal/workspace"
@@ -75,6 +77,17 @@ func (s *session) verify(ctx context.Context, target string, next selection.Stat
 		return nil, err
 	}
 	warnings := []string{}
+	active, err := states(s.sources, target, &next)
+	if err != nil {
+		return warnings, err
+	}
+	// Exclusions are checked only once info/exclude holds the block for
+	// exactly these selections; the transitional union block still ignores
+	// paths the previous selection covered.
+	managed, err := s.managedLines(active)
+	if err != nil {
+		return warnings, err
+	}
 	for _, src := range s.sources {
 		record, err := src.record()
 		if err != nil {
@@ -153,8 +166,74 @@ func (s *session) verify(ctx context.Context, target string, next selection.Stat
 				}
 			}
 		}
+		// An excluded path that no workspace selects must not be ignored by
+		// the managed rules, or Git hides it and git clean -X deletes it.
+		excluded := []string{}
+		for _, path := range state.Exclude {
+			if managed == nil {
+				break
+			}
+			// Another workspace may select the path itself, which ignores
+			// everything below it too.
+			if selectedByAny(active, path) {
+				continue
+			}
+			for _, probe := range []string{path, path + "/.gitlocal-ignore-probe-" + token} {
+				if !selectedByAny(active, probe) {
+					excluded = append(excluded, probe)
+				}
+			}
+		}
+		matches, err := s.r.CheckIgnoreMatches(ctx, at.root, at.admin, excluded)
+		if err != nil {
+			return warnings, err
+		}
+		for _, path := range excluded {
+			match := matches[path]
+			if match.Ignored && filepath.Base(match.Source) == "exclude" && filepath.Base(filepath.Dir(match.Source)) == "info" && managed[match.Pattern] {
+				return warnings, &validationError{fmt.Errorf("%w: excluded path %q in workspace %s is still ignored by managed rule %q", storage.ErrConflict, filepath.ToSlash(path), src.ID, match.Pattern)}
+			}
+		}
 	}
 	return warnings, nil
+}
+
+func selectedByAny(active []selection.State, path string) bool {
+	for _, state := range active {
+		if state.Selected(path) {
+			return true
+		}
+	}
+	return false
+}
+
+// managedLines returns the pattern lines inside the managed block of
+// info/exclude, or nil when that block isn't the one for active.
+func (s *session) managedLines(active []selection.State) (map[string]bool, error) {
+	current, err := readImage(s.common, "info/exclude")
+	if err != nil {
+		return nil, err
+	}
+	want, alternates, err := s.compile(active)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := exclude.UserBytes(current.Data, want, alternates...); err != nil {
+		return nil, nil
+	}
+	lines := map[string]bool{}
+	inside := false
+	for _, line := range strings.Split(string(current.Data), "\n") {
+		switch {
+		case line+"\n" == exclude.Begin:
+			inside = true
+		case line+"\n" == exclude.End:
+			inside = false
+		case inside:
+			lines[line] = true
+		}
+	}
+	return lines, nil
 }
 func uniqueWarnings(in []string) []string {
 	seen := map[string]bool{}

@@ -115,11 +115,11 @@ func (s *session) stateDigest() (string, error) {
 	if e != nil {
 		return "", e
 	}
-	patterns, e := exclude.Compile(all)
+	patterns, alternates, e := s.compile(all)
 	if e != nil {
 		return "", e
 	}
-	if _, e = exclude.UserBytes(before.Data, patterns); e != nil {
+	if _, e = exclude.UserBytes(before.Data, patterns, alternates...); e != nil {
 		return "", e
 	}
 	b, e := json.Marshal(struct {

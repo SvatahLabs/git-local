@@ -96,7 +96,11 @@ func TestTrackUntrackAndUserIgnorePreservation(t *testing.T) {
 		t.Fatal("untrack overrode the user's own ignore")
 	}
 	bytesAfter, _ := os.ReadFile(w.Exclude)
-	body, err := exclude.Compile([]selection.State{selected})
+	ignoreCase, err := g.IgnoreCase(context.Background(), w.Root, w.Admin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := exclude.Compile([]selection.State{selected}, ignoreCase)
 	if err != nil {
 		t.Fatal(err)
 	}

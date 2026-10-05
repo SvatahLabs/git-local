@@ -57,7 +57,12 @@ func escape(s string) string {
 // byte-prefix glob partitions match all sibling names except explicit branches.
 // Git wildmatch operates on bytes, so even UTF-8 literal exceptions partition
 // correctly without needing negations or enumerating future files.
-func Compile(states []selection.State) ([]byte, error) {
+//
+// ignoreCase is the repository's core.ignorecase. Git then folds ASCII
+// letters in the file name and in literal pattern characters, but compares a
+// bracket class's members as written, so [!R]* would still match README.md.
+// The sibling partitions are therefore built from ASCII-lowercased names.
+func Compile(states []selection.State, ignoreCase bool) ([]byte, error) {
 	normalized := []selection.State{}
 	root := &node{}
 	aliases := map[string]string{}
@@ -124,7 +129,14 @@ func Compile(states []selection.State) ([]byte, error) {
 		}
 		sort.Strings(children)
 		if directory {
-			if err := siblings(children, func(pattern string) error { return emit("/" + escape(n.path) + "/" + pattern) }); err != nil {
+			exceptions := children
+			if ignoreCase {
+				exceptions = make([]string, len(children))
+				for i, name := range children {
+					exceptions[i] = asciiLower(name)
+				}
+			}
+			if err := siblings(exceptions, func(pattern string) error { return emit("/" + escape(n.path) + "/" + pattern) }); err != nil {
 				return err
 			}
 		}
@@ -139,6 +151,16 @@ func Compile(states []selection.State) ([]byte, error) {
 		return nil, err
 	}
 	return output.Bytes(), nil
+}
+
+func asciiLower(s string) string {
+	b := []byte(s)
+	for i, c := range b {
+		if c >= 'A' && c <= 'Z' {
+			b[i] = c + 'a' - 'A'
+		}
+	}
+	return string(b)
 }
 
 type chars struct {
@@ -226,25 +248,43 @@ func legacyBlock(patterns []byte) []byte {
 	return append(b, []byte(End)...)
 }
 
-// Outdated reports a valid managed block that lacks StagePattern.
-func Outdated(data, expected []byte) bool {
+// Outdated reports a valid managed block that isn't the current one: it lacks
+// StagePattern, or it was compiled for the other core.ignorecase setting.
+func Outdated(data, expected []byte, alternates ...[]byte) bool {
 	if len(expected) == 0 {
 		return false
 	}
-	_, err := UserBytes(data, expected)
+	_, err := UserBytes(data, expected, alternates...)
 	return err == nil && !bytes.Contains(data, Block(expected))
 }
 
 // Rendered reports whether data is user followed by the current or legacy
-// managed block for patterns.
-func Rendered(data, user, patterns []byte) bool {
-	return bytes.Equal(data, Render(user, patterns)) || bytes.Equal(data, append(legacyBlock(patterns), user...))
+// managed block for patterns or one of its alternates.
+func Rendered(data, user, patterns []byte, alternates ...[]byte) bool {
+	for _, p := range append([][]byte{patterns}, alternates...) {
+		if bytes.Equal(data, Render(user, p)) || bytes.Equal(data, append(legacyBlock(p), user...)) {
+			return true
+		}
+	}
+	return false
 }
 
 // UserBytes verifies the exact managed block and returns unchanged bytes outside
 // it. Missing/duplicate/edited markers fail closed. New blocks go before user
-// content, so later user negations keep their normal precedence.
-func UserBytes(data, expected []byte) ([]byte, error) {
+// content, so later user negations keep their normal precedence. alternates
+// are other accepted pattern sets: the same selections compiled for the other
+// core.ignorecase setting, which blocks from earlier releases use.
+func UserBytes(data, expected []byte, alternates ...[]byte) ([]byte, error) {
+	var err error
+	for _, p := range append([][]byte{expected}, alternates...) {
+		var user []byte
+		if user, err = userBytes(data, p); err == nil {
+			return user, nil
+		}
+	}
+	return nil, err
+}
+func userBytes(data, expected []byte) ([]byte, error) {
 	begin, end := []byte(strings.TrimSuffix(Begin, "\n")), []byte(strings.TrimSuffix(End, "\n"))
 	a, b := bytes.Count(data, begin), bytes.Count(data, end)
 	if a == 0 && b == 0 {

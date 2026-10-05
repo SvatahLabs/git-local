@@ -161,19 +161,19 @@ func prepare(s *session, current Source, next selection.State, beforeIgnore Imag
 	if err != nil {
 		return Journal{}, err
 	}
-	oldPatterns, err := exclude.Compile(oldStates)
+	oldPatterns, oldAlternates, err := s.compile(oldStates)
 	if err != nil {
 		return Journal{}, err
 	}
-	newPatterns, err := exclude.Compile(newStates)
+	newPatterns, _, err := s.compile(newStates)
 	if err != nil {
 		return Journal{}, err
 	}
-	both, err := exclude.Compile(append(append([]selection.State{}, oldStates...), newStates...))
+	both, _, err := s.compile(append(append([]selection.State{}, oldStates...), newStates...))
 	if err != nil {
 		return Journal{}, err
 	}
-	user, err := exclude.UserBytes(beforeIgnore.Data, oldPatterns)
+	user, err := exclude.UserBytes(beforeIgnore.Data, oldPatterns, oldAlternates...)
 	if err != nil {
 		return Journal{}, err
 	}
@@ -518,24 +518,35 @@ func validateJournal(j Journal, repo, id string) error {
 	if err != nil {
 		return err
 	}
-	oldPatterns, err := exclude.Compile(oldStates)
+	// The journal may have been written under either core.ignorecase setting.
+	oldPatterns, oldAlternate, err := compileEither(oldStates)
 	if err != nil {
 		return err
 	}
-	user, err := exclude.UserBytes(j.ExcludeBefore.Data, oldPatterns)
+	user, err := exclude.UserBytes(j.ExcludeBefore.Data, oldPatterns, oldAlternate)
 	if err != nil {
 		return err
 	}
-	patterns, err := exclude.Compile(newStates)
+	patterns, alternate, err := compileEither(newStates)
 	if err != nil {
 		return err
 	}
-	union, err := exclude.Compile(append(oldStates, newStates...))
+	union, unionAlternate, err := compileEither(append(oldStates, newStates...))
 	if err != nil {
 		return err
 	}
-	if !exclude.Rendered(j.ExcludeAfter.Data, user, patterns) || !exclude.Rendered(j.ExcludeUnion.Data, user, union) {
+	if !exclude.Rendered(j.ExcludeAfter.Data, user, patterns, alternate) || !exclude.Rendered(j.ExcludeUnion.Data, user, union, unionAlternate) {
 		return errors.New("journal ignore images do not match selection rules")
 	}
 	return nil
+}
+
+// compileEither compiles states for both core.ignorecase settings.
+func compileEither(states []selection.State) ([]byte, []byte, error) {
+	sensitive, err := exclude.Compile(states, false)
+	if err != nil {
+		return nil, nil, err
+	}
+	folded, err := exclude.Compile(states, true)
+	return sensitive, folded, err
 }

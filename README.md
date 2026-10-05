@@ -191,6 +191,13 @@ linked-worktree seed stage each file under that name beside its target, and an
 interrupted operation keeps partial stages, which may hold decrypted content.
 `doctor` lists leftover stages, and warns when a block written by an earlier
 release lacks that rule; the next `track` or `untrack` adds it.
+The generated rules follow the checkout's `core.ignorecase` (true by default on
+macOS and Windows), so a path you `untrack` inside a tracked directory stays
+visible to Git whatever its letter case. Earlier releases ignored such paths
+when `core.ignorecase` was true, which hid them from `git status` and let
+`git clean -X` delete them. Doctor reports an excluded path that the managed
+rules still ignore as an error, and warns about a block generated for the
+other setting; the next `track` or `untrack` rewrites it.
 `git add -f` can bypass that ignore rule. Run `git local hook install` to add
 pre-commit and pre-push guards on macOS, Linux or Git for Windows. Native Windows
 hook execution still awaits CI qualification. The guards reject additions or

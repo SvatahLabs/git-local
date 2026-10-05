@@ -112,7 +112,11 @@ func adoptStaged(ctx context.Context, r *gitexec.Runner, cwd, stage string, faul
 			active = append(active, selected)
 		}
 	}
-	patterns, err := exclude.Compile(active)
+	ignoreCase, err := r.IgnoreCase(ctx, w.Root, w.Admin)
+	if err != nil {
+		return empty, err
+	}
+	patterns, err := exclude.Compile(active, ignoreCase)
 	if err != nil {
 		return empty, err
 	}

@@ -40,8 +40,9 @@ type DiagnosticState struct {
 	ConfigErr      error
 	IgnoreWarnings []string
 	IgnoreErr      error
-	// IgnoreOutdated reports a valid managed ignore block written before it
-	// covered restore and seed staging files.
+	// IgnoreOutdated reports a valid managed ignore block that isn't the
+	// current one: written before it covered restore and seed staging files,
+	// or compiled for the other core.ignorecase setting.
 	IgnoreOutdated bool
 	Recheck        func() error
 }
@@ -205,9 +206,9 @@ func (s *session) ignoreOutdated() (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	patterns, err := exclude.Compile(all)
+	patterns, alternates, err := s.compile(all)
 	if err != nil {
 		return false, err
 	}
-	return exclude.Outdated(before.Data, patterns), nil
+	return exclude.Outdated(before.Data, patterns, alternates...), nil
 }

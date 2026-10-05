@@ -629,6 +629,28 @@ func requireVersion(v []byte) error {
 
 // CheckIgnore supplies only NUL-framed paths, never arbitrary stdin commands.
 func (r *Runner) CheckIgnore(ctx context.Context, root, admin string, paths []string) (map[string]bool, error) {
+	matches, err := r.CheckIgnoreMatches(ctx, root, admin, paths)
+	if err != nil {
+		return nil, err
+	}
+	result := map[string]bool{}
+	for path, match := range matches {
+		result[path] = match.Ignored
+	}
+	return result, nil
+}
+
+// IgnoreMatch is the last ignore rule Git applied to a path.
+type IgnoreMatch struct {
+	Ignored bool
+	Source  string
+	Line    int
+	Pattern string
+}
+
+// CheckIgnoreMatches reports, for every path, whether it is ignored and which
+// rule decided it.
+func (r *Runner) CheckIgnoreMatches(ctx context.Context, root, admin string, paths []string) (map[string]IgnoreMatch, error) {
 	var input bytes.Buffer
 	for _, path := range paths {
 		if strings.ContainsRune(path, 0) {
@@ -638,7 +660,7 @@ func (r *Runner) CheckIgnore(ctx context.Context, root, admin string, paths []st
 		input.WriteByte(0)
 	}
 	if len(paths) == 0 {
-		return map[string]bool{}, nil
+		return map[string]IgnoreMatch{}, nil
 	}
 	out, err := r.mainInput(ctx, root, admin, &input, "check-ignore", "--stdin", "-z", "--no-index", "--verbose", "--non-matching")
 	if err != nil {
@@ -651,14 +673,49 @@ func (r *Runner) CheckIgnore(ctx context.Context, root, admin string, paths []st
 	if len(fields) == 0 || len(fields[len(fields)-1]) != 0 || (len(fields)-1)%4 != 0 {
 		return nil, errors.New("malformed Git ignore output")
 	}
-	result := map[string]bool{}
+	result := map[string]IgnoreMatch{}
 	for i := 0; i < len(fields)-1; i += 4 {
 		pattern := fields[i+2]
-		result[strings.TrimPrefix(string(fields[i+3]), "./")] = len(pattern) > 0 && pattern[0] != '!'
+		line, _ := strconv.Atoi(string(fields[i+1]))
+		result[strings.TrimPrefix(string(fields[i+3]), "./")] = IgnoreMatch{Ignored: len(pattern) > 0 && pattern[0] != '!', Source: string(fields[i]), Line: line, Pattern: string(pattern)}
 	}
 	for _, path := range paths {
 		if _, ok := result[path]; !ok {
 			return nil, errors.New("missing Git ignore result")
+		}
+	}
+	return result, nil
+}
+
+// IgnoreCase reports the effective core.ignorecase of the checkout at root.
+// Git then matches ignore patterns case-insensitively, except inside bracket
+// classes.
+func (r *Runner) IgnoreCase(ctx context.Context, root, admin string) (bool, error) {
+	out, err := r.Main(ctx, root, admin, "config", "--null", "--list")
+	if err != nil {
+		return false, err
+	}
+	result := false
+	for _, record := range bytes.Split(out, []byte{0}) {
+		key, value, hasValue := strings.Cut(string(record), "\n")
+		if strings.ToLower(key) != "core.ignorecase" {
+			continue
+		}
+		if !hasValue {
+			result = true
+			continue
+		}
+		switch strings.ToLower(value) {
+		case "true", "yes", "on", "1":
+			result = true
+		case "false", "no", "off", "0", "":
+			result = false
+		default:
+			n, err := strconv.ParseInt(value, 0, 64)
+			if err != nil {
+				return false, fmt.Errorf("invalid core.ignorecase value %q", value)
+			}
+			result = n != 0
 		}
 	}
 	return result, nil

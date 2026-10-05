@@ -43,11 +43,11 @@ func ReadSelection(ctx context.Context, r *gitexec.Runner, cwd string, fn func(w
 	if err != nil {
 		return err
 	}
-	patterns, err := exclude.Compile(all)
+	patterns, alternates, err := s.compile(all)
 	if err != nil {
 		return err
 	}
-	if _, err = exclude.UserBytes(before.Data, patterns); err != nil {
+	if _, err = exclude.UserBytes(before.Data, patterns, alternates...); err != nil {
 		warnings = append(warnings, err.Error())
 	}
 	recheck := func() error {
