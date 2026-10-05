@@ -330,7 +330,11 @@ func Add(ctx context.Context, r *gitexec.Runner, cwd, name, given, executable st
 	if err != nil {
 		return empty, err
 	}
-	includeCount, legacy := managedIncludes(includes)
+	set := classifyIncludes(includes, p.Common)
+	if len(set.foreign) > 0 {
+		return empty, foreignIncludeError(set.foreign[0])
+	}
+	includeCount, legacy := set.relative, set.legacy()
 	if includeCount+len(legacy) > 1 {
 		return empty, errors.New("duplicate overlay filter include")
 	}
@@ -365,7 +369,7 @@ func Add(ctx context.Context, r *gitexec.Runner, cwd, name, given, executable st
 			return empty, errors.New("overlay filter configuration was changed")
 		}
 	}
-	_, installExists, err := loadInstallation(d)
+	previous, installExists, err := loadInstallation(d)
 	if err != nil {
 		return empty, err
 	}
@@ -378,7 +382,10 @@ func Add(ctx context.Context, r *gitexec.Runner, cwd, name, given, executable st
 		}
 	}
 	if len(paths) == 0 && (!installExists || !pendingFound) {
-		record := installation{SchemaVersion: 1, AttributesExisted: attrExists, AttributesMode: uint32(attrMode), ConfigExisted: configExists, ConfigMode: uint32(configMode), ConfigData: bytes.Clone(oldConfig), IncludePathExisted: includeCount+len(legacy) == 1, RequiredExisted: requiredExisted}
+		// With no active overlays, a leftover absolute include of this
+		// repository's config, or a required key an interrupted removal left
+		// behind, is ours, not the user's: an earlier record says so.
+		record := installation{SchemaVersion: 1, AttributesExisted: attrExists, AttributesMode: uint32(attrMode), ConfigExisted: configExists, ConfigMode: uint32(configMode), ConfigData: bytes.Clone(oldConfig), IncludePathExisted: includeCount == 1 && len(legacy) == 0 && (!installExists || previous.IncludePathExisted), RequiredExisted: requiredExisted && (!installExists || previous.RequiredExisted)}
 		if err := d.WriteJSON(installationFile, record); err != nil {
 			return empty, err
 		}

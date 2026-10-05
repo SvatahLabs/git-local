@@ -102,7 +102,11 @@ func Remove(ctx context.Context, r *gitexec.Runner, cwd, name string) (Manifest,
 	if err != nil {
 		return empty, err
 	}
-	includeCount, legacy := managedIncludes(includes)
+	set := classifyIncludes(includes, p.Common)
+	if len(set.foreign) > 0 {
+		return empty, foreignIncludeError(set.foreign[0])
+	}
+	includeCount, legacy := set.relative, set.legacy()
 	if includeCount+len(legacy) > 1 {
 		return empty, errors.New("duplicate overlay filter include")
 	}

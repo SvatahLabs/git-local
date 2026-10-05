@@ -101,11 +101,34 @@ func New(out, errOut io.Writer) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if setJSON(c, map[string]any{"workspaceId": w.WorkspaceID, "repositoryId": w.RepositoryID, "historyStore": w.Store}) {
-				return nil
+			// Init is the reconcile command: it also repairs the shared overlay
+			// filter installation, without creating an overlay version.
+			executable, err := os.Executable()
+			if err != nil {
+				return err
 			}
-			_, err = fmt.Fprintf(c.OutOrStdout(), "Initialized local workspace %s\nHistory store: %s\n", w.WorkspaceID, w.Store)
-			return err
+			migrated, err := overlay.Migrate(c.Context(), r, w.Root, w.Common, executable)
+			if migrated == nil {
+				migrated = []string{}
+			}
+			if err != nil {
+				err = fmt.Errorf("initialized local workspace %s, but the overlay filter needs repair: %w", w.WorkspaceID, err)
+			}
+			if setJSON(c, map[string]any{"workspaceId": w.WorkspaceID, "repositoryId": w.RepositoryID, "historyStore": w.Store, "overlayMigration": migrated}) {
+				return err
+			}
+			if err != nil {
+				return err
+			}
+			if _, err = fmt.Fprintf(c.OutOrStdout(), "Initialized local workspace %s\nHistory store: %s\n", w.WorkspaceID, w.Store); err != nil {
+				return err
+			}
+			for _, change := range migrated {
+				if _, err = fmt.Fprintf(c.OutOrStdout(), "Overlay filter: %s.\n", change); err != nil {
+					return err
+				}
+			}
+			return nil
 		},
 	}
 	init.Flags().StringVar(&seedFrom, "from", "", "Seed from the latest snapshot of a workspace UUID or main checkout")

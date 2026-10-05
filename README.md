@@ -324,8 +324,15 @@ remove` unsets both.
 attributes, relative include, required Git filter, and executable. If it reports
 a damaged installation, restore those parts before staging or checking out
 affected files; an `overlay add` update also refuses a changed active filter.
-Installations from earlier releases used an absolute include path; doctor
-reports it, and the next `overlay add` or `overlay remove` rewrites it.
+`git local init` repairs the shared filter installation without creating an
+overlay version: it rewrites an absolute include written by an earlier release
+(also after the checkout moved), recreates a missing include or filter
+configuration, adds the direct `required` key, and checks every overlaid path
+with `git check-attr`, undoing its changes if Git wouldn't apply the filter.
+Until then an unmoved earlier install keeps working: doctor warns and points to
+`git local init`, and `reset --hard` accepts it. An absolute include that no
+longer resolves, or one naming another repository's filter configuration, is
+refused.
 After writing its attributes, `overlay add` asks Git (`git check-attr`)
 whether every overlaid path now uses the filter, and rolls back if not, for
 example when a later line in `.git/info/attributes` or a `.gitattributes` file

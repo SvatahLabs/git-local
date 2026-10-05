@@ -3,6 +3,8 @@ package overlay
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -21,18 +23,51 @@ const filterInclude = "gitlocal/" + filterConfigName
 // unreadable include fails closed instead of leaving an undefined driver.
 const requiredKey = "filter.gitlocal-overlay.required"
 
-// managedIncludes counts the relative include and returns absolute includes
-// written by earlier releases, which stop resolving when the checkout moves.
-func managedIncludes(includes []string) (int, []string) {
-	count, legacy := 0, []string{}
+// includeSet classifies local include.path entries that name an overlay
+// filter config. Earlier releases wrote an absolute include, which stops
+// resolving when the checkout moves.
+type includeSet struct {
+	relative int
+	// own is an absolute include of exactly this repository's config file.
+	own []string
+	// stale is an absolute include of an overlay config that no longer
+	// exists: this repository's, before the checkout moved.
+	stale []string
+	// foreign is an absolute include of another repository's existing config.
+	foreign []string
+}
+
+// legacy returns the absolute includes that are this repository's.
+func (s includeSet) legacy() []string { return append(append([]string{}, s.own...), s.stale...) }
+func (s includeSet) count() int       { return s.relative + len(s.own) + len(s.stale) }
+
+func classifyIncludes(includes []string, commonPath string) includeSet {
+	var set includeSet
+	ownPath := filepath.Join(commonPath, "gitlocal", filterConfigName)
+	ownInfo, ownErr := os.Stat(ownPath)
 	for _, item := range includes {
 		if item == filterInclude {
-			count++
-		} else if filepath.IsAbs(item) && strings.HasSuffix(filepath.ToSlash(item), "/"+filterInclude) {
-			legacy = append(legacy, item)
+			set.relative++
+			continue
+		}
+		if !filepath.IsAbs(item) || !strings.HasSuffix(filepath.ToSlash(item), "/"+filterInclude) {
+			continue
+		}
+		info, err := os.Stat(item)
+		switch {
+		case filepath.Clean(item) == filepath.Clean(ownPath), err == nil && ownErr == nil && os.SameFile(info, ownInfo):
+			set.own = append(set.own, item)
+		case errors.Is(err, os.ErrNotExist):
+			set.stale = append(set.stale, item)
+		default:
+			set.foreign = append(set.foreign, item)
 		}
 	}
-	return count, legacy
+	return set
+}
+
+func foreignIncludeError(include string) error {
+	return fmt.Errorf("local include.path %s names another repository's overlay filter config; remove that include", include)
 }
 
 // localRequired reports whether the local config sets the direct required

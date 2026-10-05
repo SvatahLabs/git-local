@@ -230,8 +230,12 @@ func Run(ctx context.Context, r *gitexec.Runner, cwd string) (Report, error) {
 			if overlayErr != nil {
 				result.add("overlays", "error", overlayErr.Error(), "Inspect overlay registrations before retrying.")
 			} else if hasOverlays {
-				if e := overlay.AuditInstallation(ctx, r, cwd, snapshot.Common); e != nil {
-					result.add("overlays", "error", e.Error(), "Restore the required overlay filter, managed attributes and executable before staging or checking out files.")
+				if warnings, e := overlay.AuditInstallationWarnings(ctx, r, cwd, snapshot.Common); e != nil {
+					result.add("overlays", "error", e.Error(), "Restore the required overlay filter, managed attributes and executable before staging or checking out files; git local init repairs the include, filter configuration and required key.")
+				} else if len(warnings) > 0 {
+					for _, warning := range warnings {
+						result.add("overlays", "warning", warning, "Run git local init.")
+					}
 				} else {
 					result.add("overlays", "ok", "active overlay filter installation is intact", "")
 				}

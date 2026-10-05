@@ -60,7 +60,12 @@ func TestAuditInstallationDetectsFilterAndAttributeDrift(t *testing.T) {
 	repo.Git("config", "--local", "--fixed-value", "--unset-all", "include.path", filterInclude)
 	check("exactly one filter include")
 	repo.Git("config", "--local", "--add", "include.path", configPath)
-	check("absolute path")
+	// This repository's own absolute include (an unmoved earlier install)
+	// still works and is reported as a warning.
+	check("")
+	if warnings, err := AuditInstallationWarnings(ctx, r, repo.Root, w.Common); err != nil || len(warnings) != 1 || !strings.Contains(warnings[0], "absolute path") || !strings.Contains(warnings[0], "git local init") {
+		t.Fatalf("own absolute include: %v %v", warnings, err)
+	}
 	if _, err := Add(ctx, r, repo.Root, "port", "app.conf", executable); err != nil {
 		t.Fatalf("add did not migrate the absolute include: %v", err)
 	}

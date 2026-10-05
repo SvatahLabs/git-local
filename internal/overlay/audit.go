@@ -75,12 +75,8 @@ func AuditResetFilter(ctx context.Context, r *gitexec.Runner, cwd, admin, common
 	if err != nil {
 		return err
 	}
-	count, legacy := managedIncludes(includes)
-	if len(legacy) > 0 {
-		return legacyIncludeError(legacy[0])
-	}
-	if count != 1 {
-		return fmt.Errorf("overlay filter requires exactly one managed include; found %d", count)
+	if _, err := checkIncludes(classifyIncludes(includes, commonPath)); err != nil {
+		return err
 	}
 	config, exists, _, err := readOptional(d, filterConfigName, 1<<20)
 	if err != nil {
@@ -113,89 +109,115 @@ func AuditResetFilter(ctx context.Context, r *gitexec.Runner, cwd, admin, common
 	return nil
 }
 
+// checkIncludes accepts exactly one include of this repository's filter
+// config. An absolute include of this repository's own config (an unmoved
+// install from an earlier release) still works; it is returned as a warning.
+func checkIncludes(set includeSet) ([]string, error) {
+	if len(set.foreign) > 0 {
+		return nil, foreignIncludeError(set.foreign[0])
+	}
+	if len(set.stale) > 0 {
+		return nil, legacyIncludeError(set.stale[0])
+	}
+	if set.count() != 1 {
+		return nil, fmt.Errorf("active overlays require exactly one filter include; found %d; run git local init to restore it", set.count())
+	}
+	if len(set.own) == 1 {
+		return []string{"overlay filter include uses an absolute path (" + set.own[0] + ") written by an earlier release, which stops resolving if the checkout moves; run git local init to migrate it"}, nil
+	}
+	return nil, nil
+}
+
 // AuditInstallation checks the shared filter boundary for every active
 // overlay. It reads registration, Git config and attributes without changing
 // them, including when invoked by doctor from another worktree.
 func AuditInstallation(ctx context.Context, r *gitexec.Runner, cwd, commonPath string) error {
+	_, err := AuditInstallationWarnings(ctx, r, cwd, commonPath)
+	return err
+}
+
+// AuditInstallationWarnings is AuditInstallation that also returns findings
+// that leave the installation working, such as an unmigrated absolute include.
+func AuditInstallationWarnings(ctx context.Context, r *gitexec.Runner, cwd, commonPath string) ([]string, error) {
 	common, err := storage.OpenDir(commonPath)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer common.Close()
 	lock, err := common.LockExisting(ctx, "gitlocal/locks/repository.lock")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer lock.Close()
 	d, err := storage.OpenDir(filepath.Join(commonPath, "gitlocal"))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer d.Close()
 	paths, _, err := activePathsLocked(d, "", "", "", false)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if len(paths) == 0 {
-		return nil
+		return nil, nil
 	}
 	attributes, exists, _, err := readOptional(common, "info/attributes", 1<<20)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if !exists {
-		return errors.New("active overlays have no managed Git attributes")
+		return nil, errors.New("active overlays have no managed Git attributes")
 	}
 	if _, err := AttributeUserBytes(attributes, paths); err != nil {
-		return err
+		return nil, err
 	}
 	includes, err := localIncludes(ctx, r, cwd)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	count, legacy := managedIncludes(includes)
-	if len(legacy) > 0 {
-		return legacyIncludeError(legacy[0])
-	}
-	if count != 1 {
-		return fmt.Errorf("active overlays require exactly one filter include; found %d; run git local overlay remove <name> for each active overlay (saved versions and the working file are kept), then git local overlay add each again", count)
+	set := classifyIncludes(includes, commonPath)
+	warnings, err := checkIncludes(set)
+	if err != nil {
+		return nil, err
 	}
 	if exists, err := localRequired(ctx, r, cwd); err != nil {
-		return err
+		return nil, err
+	} else if !exists && len(set.own) == 0 {
+		return nil, errors.New("local Git config does not set " + requiredKey + ", so a missing include would fail open; run git local init to restore it")
 	} else if !exists {
-		return errors.New("local Git config does not set " + requiredKey + ", so a missing include would fail open; rerun git local overlay add for an active overlay to restore it")
+		warnings = append(warnings, "local Git config does not set "+requiredKey+" directly; run git local init to add it")
 	}
 	config, exists, _, err := readOptional(d, filterConfigName, 1<<20)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if !exists {
-		return errors.New("active overlays have no filter configuration file; run git local overlay remove <name> for each active overlay (saved versions and the working file are kept), then git local overlay add each again")
+		return nil, errors.New("active overlays have no filter configuration file; run git local init to restore it")
 	}
 	executable, command, err := installedCommand(config)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if !filterExecutableReady(executable) {
-		return fmt.Errorf("overlay filter executable is unavailable: %s", executable)
+		return nil, fmt.Errorf("overlay filter executable is unavailable: %s", executable)
 	}
 	if err := checkEffectiveFilter(ctx, r, cwd, command); err != nil {
-		return err
+		return nil, err
 	}
 	for _, path := range paths {
 		attrs, err := r.CheckAttributes(ctx, cwd, path)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if attrs["filter"] != "gitlocal-overlay" {
-			return fmt.Errorf("overlay path %q no longer uses the required filter", path)
+			return nil, fmt.Errorf("overlay path %q no longer uses the required filter", path)
 		}
 	}
-	return nil
+	return warnings, nil
 }
 
 func legacyIncludeError(include string) error {
-	return fmt.Errorf("overlay filter include uses an absolute path that stops resolving when the checkout moves: %s; rerun git local overlay add for an active overlay to migrate it", include)
+	return fmt.Errorf("overlay filter include uses an absolute path that no longer resolves (the checkout moved): %s; run git local init to migrate it", include)
 }
 
 func filterExecutableReady(path string) bool {

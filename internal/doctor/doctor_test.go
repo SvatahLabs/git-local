@@ -391,7 +391,22 @@ func TestDoctorReportsMissingAndAbsoluteOverlayInclude(t *testing.T) {
 		t.Fatal(err)
 	}
 	repo.Git("config", "--local", "--replace-all", "include.path", configPath)
-	overlayIssue("absolute path")
+	report, err := Run(ctx, r, repo.Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	warned := false
+	for _, finding := range report.Findings {
+		if finding.Check == "overlays" && finding.Severity == "error" {
+			t.Fatalf("own absolute include reported as an error: %+v", finding)
+		}
+		warned = warned || finding.Check == "overlays" && finding.Severity == "warning" && strings.Contains(finding.Message, "absolute path") && strings.Contains(finding.Action, "git local init")
+	}
+	if !warned {
+		t.Fatalf("doctor did not warn about the absolute include: %+v", report.Findings)
+	}
+	repo.Git("config", "--local", "--replace-all", "include.path", filepath.Join(t.TempDir(), "moved", ".git", "gitlocal", "overlay-filter.gitconfig"))
+	overlayIssue("no longer resolves")
 }
 
 func TestDoctorReportsSensitiveFileRuleNamingADirectory(t *testing.T) {
