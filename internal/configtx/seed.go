@@ -450,6 +450,9 @@ func (s *session) runSeed(ctx context.Context, files *storage.Dir, j *seedJourna
 		return nil, err
 	}
 	if j.Direction == "rollback" {
+		if err := s.writeSeed(*j); err != nil {
+			return nil, err
+		}
 		return nil, s.rollbackSeed(ctx, files, j, key)
 	}
 	if err := s.install(ctx, j.Config, j.Config.ExcludeUnion, false, f, "seed-union"); err != nil {
@@ -711,10 +714,10 @@ func RecoverSeed(ctx context.Context, r *gitexec.Runner, cwd, id string, rollbac
 		return result, errors.New("seed transaction already committed")
 	}
 	if rollback {
+		// runSeed records the direction only after its recognition,
+		// ownership and key checks pass, so a refused rollback leaves
+		// resume available.
 		j.Direction = "rollback"
-		if err := s.writeSeed(j); err != nil {
-			return result, err
-		}
 	}
 	files, err := storage.OpenDir(s.w.Root)
 	if err != nil {
