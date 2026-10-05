@@ -407,6 +407,25 @@ func fileMatches(files *storage.Dir, file SeedFile, name string, key []byte, ide
 	return true, hex.EncodeToString(h.Sum(nil)) == file.Blob, nil
 }
 
+// seedStageWriter adds fault points around each streamed stage write.
+type seedStageWriter struct {
+	ctx   context.Context
+	out   io.Writer
+	f     fault
+	index int
+}
+
+func (w seedStageWriter) Write(b []byte) (int, error) {
+	if err := point(w.ctx, w.f, fmt.Sprintf("before-seed-stage-write:%d", w.index)); err != nil {
+		return 0, err
+	}
+	n, err := w.out.Write(b)
+	if err != nil {
+		return n, err
+	}
+	return n, point(w.ctx, w.f, fmt.Sprintf("seed-stage-write:%d", w.index))
+}
+
 type limitedSeedBuffer struct{ bytes.Buffer }
 
 func (b *limitedSeedBuffer) Write(data []byte) (int, error) {
@@ -484,7 +503,12 @@ func (s *session) runSeed(ctx context.Context, files *storage.Dir, j *seedJourna
 			return warnings, e
 		}
 		if stageExists && !stageMatch {
-			return warnings, fmt.Errorf("%w: unrecognized seed staging bytes at %q", storage.ErrConflict, file.Stage)
+			// The journal reserved this random name and StageNamed creates it
+			// exclusively, so other bytes there are an interrupted write.
+			if err := files.Remove(file.Stage); err != nil {
+				return warnings, err
+			}
+			stageExists = false
 		}
 		if !stageExists {
 			if file.Mode == "120000" {
@@ -512,14 +536,24 @@ func (s *session) runSeed(ctx context.Context, files *storage.Dir, j *seedJourna
 					mode = 0755
 				}
 				e = files.StageNamed(file.Stage, mode, func(out io.Writer) error {
+					writer := seedStageWriter{ctx: ctx, out: out, f: f, index: index}
 					if file.PlainDigest != "" {
-						return secureblob.DecryptGitBlob(ctx, s.r, s.w.Store, file.Blob, out, key, identity)
+						return secureblob.DecryptGitBlob(ctx, s.r, s.w.Store, file.Blob, writer, key, identity)
 					}
-					return s.r.HistoryBlob(ctx, s.w.Store, file.Blob, out)
+					return s.r.HistoryBlob(ctx, s.w.Store, file.Blob, writer)
 				})
 				if e != nil {
 					return warnings, e
 				}
+			}
+		}
+		if file.Mode != "120000" {
+			mode := os.FileMode(0644)
+			if file.Mode == "100755" {
+				mode = 0755
+			}
+			if err := files.ChmodStaged(file.Stage, mode); err != nil {
+				return warnings, err
 			}
 		}
 		if err := files.SyncStaged(file.Stage); err != nil {
@@ -566,19 +600,25 @@ func (s *session) rollbackSeed(ctx context.Context, files *storage.Dir, j *seedJ
 	for i := len(j.Files) - 1; i >= 0; i-- {
 		file := j.Files[i]
 		identity := secureblob.Identity{RepositoryID: s.w.RepositoryID, WorkspaceID: j.Source, Path: file.Path, Mode: file.Mode}
-		for _, name := range []string{file.Path, file.Stage} {
-			exists, match, err := fileMatches(files, file, name, key, identity)
-			if err != nil {
+		exists, match, err := fileMatches(files, file, file.Path, key, identity)
+		if err != nil {
+			return err
+		}
+		if exists {
+			if !match {
+				return fmt.Errorf("%w: seed file changed at %q", storage.ErrConflict, file.Path)
+			}
+			if err := files.Remove(file.Path); err != nil {
 				return err
 			}
-			if exists {
-				if !match {
-					return fmt.Errorf("%w: seed file changed at %q", storage.ErrConflict, name)
-				}
-				if err := files.Remove(name); err != nil {
-					return err
-				}
+		}
+		// The stage belongs to the journal; partial or complete, it goes.
+		if _, err := files.Lstat(file.Stage); err == nil {
+			if err := files.Remove(file.Stage); err != nil {
+				return err
 			}
+		} else if !os.IsNotExist(err) {
+			return err
 		}
 	}
 	for i := len(j.Directories) - 1; i >= 0; i-- {

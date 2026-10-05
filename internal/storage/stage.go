@@ -29,5 +29,21 @@ func (d *Dir) StageNamed(name string, mode fs.FileMode, write func(io.Writer) er
 	return err
 }
 
+// ChmodStaged applies a journal-reserved stage's final mode again. A process
+// that died after the last write but before StageNamed's Chmod leaves complete
+// bytes at the 0600 creation mode.
+func (d *Dir) ChmodStaged(name string, mode fs.FileMode) error {
+	f, err := d.open(name, os.O_WRONLY, 0)
+	if err != nil {
+		return err
+	}
+	err = f.Chmod(mode)
+	closeErr := f.Close()
+	if err != nil {
+		return err
+	}
+	return closeErr
+}
+
 // MakeDirectory creates exactly one private directory, never accepts an existing one.
 func (d *Dir) MakeDirectory(name string) error { return d.mkdir(name) }
