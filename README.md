@@ -127,7 +127,9 @@ supported yet.** Until it is, a snapshot skips each file that matches a
 sensitive path only by spelling or kind and prints a warning naming it: no new
 plaintext is written, the skipped file keeps its last saved version (or stays
 absent if it was never saved), and every other file is saved as usual. Changes
-to skipped files go unsaved until the policy is corrected.
+to skipped files go unsaved until the policy is corrected. Untracking a skipped
+file, or renaming it to the sensitive path's exact spelling, drops its old
+entry; the renamed file is then saved encrypted.
 If the key is moved, `encrypt rebind-key` accepts its new absolute path only
 when the replacement bytes match the stored key fingerprint.
 

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"gitlocal/internal/gitexec"
 	"gitlocal/internal/keymaterial"
 	"gitlocal/internal/secureblob"
 	"gitlocal/internal/storage"
@@ -292,5 +293,107 @@ func TestSnapshotSkipsPathOnlyAliasingASensitiveRule(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestSnapshotDropsSkippedPathAfterUntrackOrRename(t *testing.T) {
+	for _, tc := range []struct {
+		name, rule, file, other string
+		change                  func(t *testing.T, g *gitexec.Runner, root string)
+		saved                   string // path saved encrypted afterwards, if any
+	}{
+		{"untrack", "notes/secret.txt", "notes/Secret.txt", "notes/plain.txt", func(t *testing.T, g *gitexec.Runner, root string) {
+			change(t, g, root, false, "notes/Secret.txt")
+		}, ""},
+		{"rename to the rule's spelling", "notes/secret.txt", "notes/Secret.txt", "notes/plain.txt", func(t *testing.T, g *gitexec.Runner, root string) {
+			if err := os.Remove(filepath.Join(root, "notes/Secret.txt")); err != nil {
+				t.Fatal(err)
+			}
+			write(t, root, "notes/secret.txt", []byte("TOKEN=alias-secret-v2\n"))
+		}, "notes/secret.txt"},
+		{"directory replaced by a file", "config/secrets", "config/secrets/token", "config/plain.txt", func(t *testing.T, g *gitexec.Runner, root string) {
+			if err := os.RemoveAll(filepath.Join(root, "config/secrets")); err != nil {
+				t.Fatal(err)
+			}
+			write(t, root, "config/secrets", []byte("TOKEN=alias-secret-v2\n"))
+		}, "config/secrets"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			repo, g, w := fixture(t)
+			parent := filepath.Dir(tc.other)
+			write(t, repo.Root, tc.file, []byte("TOKEN=alias-secret-v1\n"))
+			write(t, repo.Root, tc.other, []byte("plain v1\n"))
+			change(t, g, repo.Root, true, parent)
+			if _, err := Commit(ctx, g, repo.Root, "before policy"); err != nil {
+				t.Fatal(err)
+			}
+			keyPath := filepath.Join(t.TempDir(), "sensitive.key")
+			if err := keymaterial.Create(keyPath, repo.Root); err != nil {
+				t.Fatal(err)
+			}
+			policy, err := secureblob.PolicyForKey(keyPath, w.Root, w.Common, []secureblob.PathRule{{Path: tc.rule, Kind: "file"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			common, err := storage.OpenDir(w.Common)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := secureblob.WriteLocked(common, policy, w.Root, w.Common); err != nil {
+				t.Fatal(err)
+			}
+			common.Close()
+			tc.change(t, g, repo.Root)
+			write(t, repo.Root, tc.other, []byte("plain v2\n"))
+			if _, err := CommitScoped(ctx, g, repo.Root, "scoped", "", []string{parent}); err != nil {
+				t.Fatalf("scoped snapshot after %s: %v", tc.name, err)
+			}
+			write(t, repo.Root, tc.other, []byte("plain v3\n"))
+			result, err := Commit(ctx, g, repo.Root, "full")
+			if err != nil {
+				t.Fatalf("full snapshot after %s: %v", tc.name, err)
+			}
+			if len(result.Warnings) != 0 {
+				t.Fatalf("warnings: %v", result.Warnings)
+			}
+			write(t, repo.Root, tc.other, []byte("plain v4\n"))
+			if _, err := CommitScoped(ctx, g, repo.Root, "scoped other", "", []string{tc.other}); err != nil {
+				t.Fatalf("scoped snapshot of %q: %v", tc.other, err)
+			}
+			blob := func(content string) string {
+				out, err := g.History(ctx, w.Store, strings.NewReader(content), "hash-object", "--stdin")
+				if err != nil {
+					t.Fatal(err)
+				}
+				return strings.TrimSpace(string(out))
+			}
+			if _, err := g.History(ctx, w.Store, nil, "cat-file", "-e", blob("TOKEN=alias-secret-v2\n")); err == nil {
+				t.Fatal("new sensitive content was written as plaintext")
+			}
+			id, err := head(ctx, g, w.Store, Ref(w.WorkspaceID))
+			if err != nil {
+				t.Fatal(err)
+			}
+			tree, metadata, err := readPrevious(ctx, g, w.Store, id, w.RepositoryID, w.WorkspaceID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			files, err := readFiles(ctx, g, w.Store, tree)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if files[tc.other].ID != blob("plain v4\n") {
+				t.Fatalf("other file not saved: %+v", files)
+			}
+			if _, ok := files[tc.file]; ok {
+				t.Fatalf("old entry %q kept: %+v", tc.file, files)
+			}
+			if tc.saved != "" {
+				if _, ok := files[tc.saved]; !ok || metadata.EncryptedDigests[tc.saved] == "" {
+					t.Fatalf("%q not saved encrypted: %+v %v", tc.saved, files, metadata.EncryptedDigests)
+				}
+			}
+		})
 	}
 }

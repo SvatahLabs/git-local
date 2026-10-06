@@ -161,27 +161,37 @@ func commitWithOptions(ctx context.Context, r *gitexec.Runner, cwd, message, wri
 		// A path that falls under a sensitive rule only by spelling or kind
 		// (a policy from an earlier release) would be saved as plaintext. It
 		// is skipped instead: its last saved version is carried forward
-		// unchanged, and it isn't recorded as deleted.
+		// unchanged, and it isn't recorded as deleted. An untracked or renamed
+		// skipped path is dropped like any other.
 		skip := map[string]bool{}
-		for path, file := range oldFiles {
-			if rule, ok := secure.uncoveredRule(path); ok && inScope(scope, path) {
-				nextFiles[path] = file
-				skip[path] = true
-				skipped = append(skipped, skippedWarning(path, rule))
-			}
-		}
 		kept := entries[:0:0]
 		for _, entry := range entries {
 			if rule, ok := secure.uncoveredRule(entry.Path); ok {
-				if !skip[entry.Path] {
-					skip[entry.Path] = true
-					skipped = append(skipped, skippedWarning(entry.Path, rule))
-				}
+				skip[entry.Path] = true
+				skipped = append(skipped, skippedWarning(entry.Path, rule))
 				continue
 			}
 			kept = append(kept, entry)
 		}
 		entries = kept
+		captured := map[string]capturedComponent{}
+		for path := range nextFiles {
+			addComponents(captured, path)
+		}
+		for _, entry := range entries {
+			addComponents(captured, entry.Path)
+		}
+		for path, file := range oldFiles {
+			rule, ok := secure.uncoveredRule(path)
+			if !ok || !inScope(scope, path) || !state.Selected(path) || conflictsWithCaptured(captured, path) {
+				continue
+			}
+			nextFiles[path] = file
+			if !skip[path] {
+				skip[path] = true
+				skipped = append(skipped, skippedWarning(path, rule))
+			}
+		}
 		sort.Strings(skipped)
 		plainRegular := 0
 		for _, entry := range entries {
