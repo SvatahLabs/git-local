@@ -128,20 +128,23 @@ func encryptedBlobDigest(ctx context.Context, r *gitexec.Runner, store, blob str
 }
 
 func loadRestoreKey(w workspace.Context) (secureblob.Policy, []byte, error) {
-	common, err := storage.OpenDir(w.Common)
-	if err != nil {
+	policy, exists, err := readRestorePolicy(w)
+	if err != nil || !exists {
 		return secureblob.Policy{}, nil, err
-	}
-	defer common.Close()
-	policy, exists, err := secureblob.ReadLocked(common, w.Root, w.Common)
-	if err != nil {
-		return secureblob.Policy{}, nil, err
-	}
-	if !exists {
-		return secureblob.Policy{}, nil, nil
 	}
 	key, err := secureblob.LoadKey(policy, w.Root, w.Common)
 	return policy, key, err
+}
+
+// readRestorePolicy reads the published sensitive-file policy, if any,
+// without loading its key.
+func readRestorePolicy(w workspace.Context) (secureblob.Policy, bool, error) {
+	common, err := storage.OpenDir(w.Common)
+	if err != nil {
+		return secureblob.Policy{}, false, err
+	}
+	defer common.Close()
+	return secureblob.ReadLocked(common, w.Root, w.Common)
 }
 
 type symlinkContentValidator struct{ count int64 }

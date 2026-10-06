@@ -167,6 +167,10 @@ func planLocked(ctx context.Context, r *gitexec.Runner, cwd string, w workspace.
 			return err
 		}
 		data := planData{SchemaVersion: 1, RepositoryID: w.RepositoryID, DestinationWorkspaceID: w.WorkspaceID, SourceWorkspaceID: source.WorkspaceID, SourceSnapshot: source.ID, SourceHead: sourceHead, DestinationBaseline: baselineID, Selection: canonical, Requests: requests, Ownership: owner.Evidence, Overwrite: overwrite, Parents: []Parent{}, CreateDirectories: []string{}, Operations: []Operation{}}
+		published, _, err := readRestorePolicy(w)
+		if err != nil {
+			return err
+		}
 		beforeImages := map[string]Fingerprint{}
 		parents := map[string]Parent{}
 		createDirs := map[string]bool{}
@@ -239,6 +243,11 @@ func planLocked(ctx context.Context, r *gitexec.Runner, cwd string, w workspace.
 			// differ from the baseline, but recreating it needs no overwrite grant.
 			if dirty && before.Exists && !overwrite {
 				return fmt.Errorf("%w: local changes at %q require --overwrite", storage.ErrConflict, p)
+			}
+			// Their recovery copy would be the only plaintext the private
+			// store gains for a path snapshots skip.
+			if rule, ok := published.UncoveredAlias(p); ok && dirty && before.Exists {
+				return fmt.Errorf("%w: local changes at %q can't be kept as a recovery copy: it matches sensitive path %q only by spelling or kind and would be saved unencrypted; move the file aside first (see git local doctor)", storage.ErrConflict, p, rule)
 			}
 			op := Operation{Path: p, Action: "delete", Before: before, Dirty: dirty}
 			op.Encrypted = encrypted

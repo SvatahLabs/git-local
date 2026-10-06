@@ -129,7 +129,9 @@ plaintext is written, the skipped file keeps its last saved version (or stays
 absent if it was never saved), and every other file is saved as usual. Changes
 to skipped files go unsaved until the policy is corrected. Untracking a skipped
 file, or renaming it to the sensitive path's exact spelling, drops its old
-entry; the renamed file is then saved encrypted.
+entry; the renamed file is then saved encrypted. Restoring over unsaved changes
+to a skipped file is refused, because the recovery copy restore keeps would be
+plaintext; move the file aside first.
 If the key is moved, `encrypt rebind-key` accepts its new absolute path only
 when the replacement bytes match the stored key fingerprint.
 
