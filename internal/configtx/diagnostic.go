@@ -197,6 +197,57 @@ func journalName(name string) (string, string, bool) {
 	return "", "", false
 }
 
+// RefreshIgnore rewrites a valid managed ignore block that an earlier release
+// wrote (without StagePattern, or compiled for the other core.ignorecase
+// setting) as the current block for the same selections, keeping the bytes
+// outside it. It reports whether it rewrote the block, and undoes a rewrite
+// that fails verification.
+func RefreshIgnore(ctx context.Context, r *gitexec.Runner, cwd string) (bool, []string, error) {
+	s, err := open(ctx, r, cwd)
+	if err != nil {
+		return false, nil, err
+	}
+	defer s.close()
+	pending, err := s.pending()
+	if err != nil {
+		return false, nil, err
+	}
+	if len(pending) > 0 {
+		return false, nil, pendingError(pending[0])
+	}
+	if outdated, err := s.ignoreOutdated(); err != nil || !outdated {
+		return false, nil, err
+	}
+	current, err := readImage(s.common, "info/exclude")
+	if err != nil {
+		return false, nil, err
+	}
+	all, err := states(s.sources, "", nil)
+	if err != nil {
+		return false, nil, err
+	}
+	patterns, alternates, err := s.compile(all)
+	if err != nil {
+		return false, nil, err
+	}
+	user, err := exclude.UserBytes(current.Data, patterns, alternates...)
+	if err != nil {
+		return false, nil, err
+	}
+	mode := os.FileMode(current.Mode)
+	if err := s.common.AtomicWrite("info/exclude", exclude.Render(user, patterns), mode); err != nil {
+		return false, nil, err
+	}
+	warnings, err := s.verify(ctx, "", selection.Empty(), true)
+	if err != nil {
+		if undo := s.common.AtomicWrite("info/exclude", current.Data, mode); undo != nil {
+			return false, warnings, fmt.Errorf("%w; restoring info/exclude also failed: %v", err, undo)
+		}
+		return false, warnings, err
+	}
+	return true, warnings, nil
+}
+
 func (s *session) ignoreOutdated() (bool, error) {
 	before, err := readImage(s.common, "info/exclude")
 	if err != nil {

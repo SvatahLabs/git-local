@@ -144,7 +144,9 @@ func Run(ctx context.Context, r *gitexec.Runner, cwd string) (Report, error) {
 		} else {
 			result.add("exclusions", "ok", "managed exclusions and workspace selection inputs are consistent", "")
 		}
-		if d.IgnoreErr != nil {
+		if d.IgnoreErr != nil && d.IgnoreOutdated {
+			result.add("selection and ignores", "error", d.IgnoreErr.Error(), "Run git local init to rewrite the managed ignore block an earlier release wrote.")
+		} else if d.IgnoreErr != nil {
 			result.add("selection and ignores", "error", d.IgnoreErr.Error(), "Resolve selected path conflicts or overriding Git ignore rules before the next mutation.")
 		} else {
 			result.add("selection and ignores", "ok", "available active selections are safe and effectively ignored", "")
@@ -153,7 +155,7 @@ func Run(ctx context.Context, r *gitexec.Runner, cwd string) (Report, error) {
 			result.add("selection and ignores", "warning", warning, "")
 		}
 		if d.IgnoreOutdated {
-			result.add("selection and ignores", "warning", "managed ignore block was written by an earlier release: it may not ignore restore and seed staging files ("+exclude.StagePattern+"), or may not match core.ignorecase", "Run any git local track or untrack; the next selection change rewrites the block.")
+			result.add("selection and ignores", "warning", "managed ignore block was written by an earlier release: it may not ignore restore and seed staging files ("+exclude.StagePattern+"), or may not match core.ignorecase", "Run git local init, or any git local track or untrack, to rewrite the block.")
 		}
 		if stages, e := leftoverStages(ctx, r, d.Workspace); e != nil {
 			result.add("staging files", "error", e.Error(), "Inspect the checkout for .gitlocal-tmp-* files.")

@@ -114,14 +114,31 @@ func New(out, errOut io.Writer) *cobra.Command {
 			if err != nil {
 				err = fmt.Errorf("initialized local workspace %s, but the overlay filter needs repair: %w", w.WorkspaceID, err)
 			}
-			if setJSON(c, map[string]any{"workspaceId": w.WorkspaceID, "repositoryId": w.RepositoryID, "historyStore": w.Store, "overlayMigration": migrated}) {
+			// It also rewrites a managed ignore block an earlier release wrote.
+			var refreshed bool
+			var warnings []string
+			if err == nil {
+				refreshed, warnings, err = configtx.RefreshIgnore(c.Context(), r, cwd)
+				if err != nil {
+					err = fmt.Errorf("initialized local workspace %s, but the managed ignore block needs repair: %w", w.WorkspaceID, err)
+				}
+			}
+			if setJSON(c, map[string]any{"workspaceId": w.WorkspaceID, "repositoryId": w.RepositoryID, "historyStore": w.Store, "overlayMigration": migrated, "ignoreBlockRewritten": refreshed}, warnings...) {
 				return err
+			}
+			for _, warning := range warnings {
+				fmt.Fprintln(c.ErrOrStderr(), "Warning:", warning)
 			}
 			if err != nil {
 				return err
 			}
 			if _, err = fmt.Fprintf(c.OutOrStdout(), "Initialized local workspace %s\nHistory store: %s\n", w.WorkspaceID, w.Store); err != nil {
 				return err
+			}
+			if refreshed {
+				if _, err = fmt.Fprintln(c.OutOrStdout(), "Managed ignore block: rewritten for this release."); err != nil {
+					return err
+				}
 			}
 			for _, change := range migrated {
 				if _, err = fmt.Fprintf(c.OutOrStdout(), "Overlay filter: %s.\n", change); err != nil {

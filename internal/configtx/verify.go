@@ -191,7 +191,11 @@ func (s *session) verify(ctx context.Context, target string, next selection.Stat
 		for _, path := range excluded {
 			match := matches[path]
 			if match.Ignored && filepath.Base(match.Source) == "exclude" && filepath.Base(filepath.Dir(match.Source)) == "info" && managed[match.Pattern] {
-				return warnings, &validationError{fmt.Errorf("%w: excluded path %q in workspace %s is still ignored by managed rule %q", storage.ErrConflict, filepath.ToSlash(path), src.ID, match.Pattern)}
+				remedy := ""
+				if outdated, err := s.ignoreOutdated(); err == nil && outdated {
+					remedy = "; an earlier release wrote this block: run git local init to rewrite it"
+				}
+				return warnings, &validationError{fmt.Errorf("%w: excluded path %q in workspace %s is still ignored by managed rule %q%s", storage.ErrConflict, filepath.ToSlash(path), src.ID, match.Pattern, remedy)}
 			}
 		}
 	}
