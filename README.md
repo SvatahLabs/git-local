@@ -268,7 +268,10 @@ When Git removes a worktree directly, the next installed post-event hook
 retires eligible missing records while keeping their history. Ambiguous or
 unidentified registrations require `git local workspace prune` after repair. Use
 `git local workspace remove <path>` to save selected files, ask Git to remove
-the linked worktree, and retire it immediately. A `--no-checkout` worktree is
+the linked worktree, and retire it immediately. If that snapshot skipped a file
+(see the sensitive-file policy note above), removal is refused unless you pass
+`--force`, because Git would delete the skipped file's unsaved changes. A
+`--no-checkout` worktree is
 seeded after its first later checkout event; `git local init --from main` is
 available when no such event occurs. A failed pre-rebase snapshot
 stops the rebase; a failed post-event snapshot prints a warning after the Git

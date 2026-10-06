@@ -693,6 +693,9 @@ func New(out, errOut io.Writer) *cobra.Command {
 			if setJSON(c, map[string]any{"workspaceId": result.WorkspaceID, "snapshotChanged": result.SnapshotChanged, "removed": result.Removed, "retired": result.Retired, "transactionId": result.TransactionID}, result.Warnings...) {
 				return err
 			}
+			for _, warning := range result.Warnings {
+				fmt.Fprintln(c.ErrOrStderr(), "Warning:", warning)
+			}
 			if err != nil {
 				return err
 			}
@@ -700,7 +703,7 @@ func New(out, errOut io.Writer) *cobra.Command {
 			return err
 		})
 	}}
-	removeWorktree.Flags().BoolVar(&removeWorktreeForce, "force", false, "Allow Git to remove a dirty linked worktree after saving selected files")
+	removeWorktree.Flags().BoolVar(&removeWorktreeForce, "force", false, "Allow Git to remove a dirty linked worktree after saving selected files, discarding changes the snapshot skipped")
 	workspaceCommand.AddCommand(removeWorktree)
 	var pruneDryRun bool
 	prune := &cobra.Command{Use: "prune", Short: "Retire unregistered, unavailable workspaces while preserving history",

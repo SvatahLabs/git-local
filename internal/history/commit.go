@@ -22,9 +22,12 @@ import (
 )
 
 type Result struct {
-	ID           string
-	Changed      bool
-	Warnings     []string
+	ID       string
+	Changed  bool
+	Warnings []string
+	// Skipped lists paths whose current content wasn't saved because a
+	// sensitive rule covers them only by spelling or kind.
+	Skipped      []string
 	Subprocesses uint64
 }
 type fault func(string) error
@@ -76,8 +79,16 @@ func commitWithOptions(ctx context.Context, r *gitexec.Runner, cwd, message, wri
 	if err = ValidateWriter(writer); err != nil {
 		return result, err
 	}
-	var skipped []string
-	defer func() { result.Warnings = append(result.Warnings, skipped...) }()
+	skipped := map[string]string{}
+	defer func() {
+		for path := range skipped {
+			result.Skipped = append(result.Skipped, path)
+		}
+		sort.Strings(result.Skipped)
+		for _, path := range result.Skipped {
+			result.Warnings = append(result.Warnings, skippedWarning(path, skipped[path]))
+		}
+	}()
 	result.Warnings, err = configtx.WithSelection(ctx, r, cwd, func(w workspace.Context, state selection.State, recheck func() error) error {
 		secure, e := loadSecure(w)
 		if e != nil {
@@ -163,12 +174,10 @@ func commitWithOptions(ctx context.Context, r *gitexec.Runner, cwd, message, wri
 		// is skipped instead: its last saved version is carried forward
 		// unchanged, and it isn't recorded as deleted. An untracked or renamed
 		// skipped path is dropped like any other.
-		skip := map[string]bool{}
 		kept := entries[:0:0]
 		for _, entry := range entries {
 			if rule, ok := secure.uncoveredRule(entry.Path); ok {
-				skip[entry.Path] = true
-				skipped = append(skipped, skippedWarning(entry.Path, rule))
+				skipped[entry.Path] = rule
 				continue
 			}
 			kept = append(kept, entry)
@@ -187,12 +196,8 @@ func commitWithOptions(ctx context.Context, r *gitexec.Runner, cwd, message, wri
 				continue
 			}
 			nextFiles[path] = file
-			if !skip[path] {
-				skip[path] = true
-				skipped = append(skipped, skippedWarning(path, rule))
-			}
+			skipped[path] = rule
 		}
-		sort.Strings(skipped)
 		plainRegular := 0
 		for _, entry := range entries {
 			if entry.Mode&os.ModeSymlink == 0 && !secure.covers(entry.Path) {

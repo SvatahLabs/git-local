@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strconv"
+	"strings"
 
 	"gitlocal/internal/configtx"
 	"gitlocal/internal/gitexec"
@@ -60,20 +62,34 @@ func RemoveWorktree(ctx context.Context, r *gitexec.Runner, cwd, target string, 
 		return result, errors.New("target is not an initialized linked worktree")
 	}
 	saved, err := history.Commit(ctx, r, target, "Automatic local snapshot before worktree removal")
+	result.Warnings = append(result.Warnings, saved.Warnings...)
 	if err != nil {
 		return result, fmt.Errorf("snapshot linked worktree before removal: %w", err)
 	}
 	result.SnapshotChanged = saved.Changed
+	// Removal deletes ignored files too, so a skipped file's unsaved changes
+	// would be lost.
+	if len(saved.Skipped) > 0 && !force {
+		return result, fmt.Errorf("%w: the snapshot before removal skipped %s, whose changes would be lost; correct the sensitive-file policy (see git local doctor), or use --force to discard them", storage.ErrConflict, quoted(saved.Skipped))
+	}
 	if err := r.RemoveLinkedWorktree(ctx, w.Root, w.Admin, target, force); err != nil {
 		return result, fmt.Errorf("%w: Git refused to remove %q after the local snapshot; use --force only if other worktree changes may be discarded: %v", storage.ErrConflict, target, err)
 	}
 	result.Removed = true
 	retired, err := configtx.Retire(ctx, r, cwd, result.WorkspaceID)
 	result.TransactionID = retired.TransactionID
-	result.Warnings = retired.Warnings
+	result.Warnings = append(result.Warnings, retired.Warnings...)
 	if err != nil {
 		return result, fmt.Errorf("%w: Git removed worktree %s, but retirement needs recovery: %v; run git local workspace prune or git local recover", storage.ErrConflict, result.WorkspaceID, err)
 	}
 	result.Retired = true
 	return result, nil
+}
+
+func quoted(paths []string) string {
+	list := make([]string, len(paths))
+	for i, path := range paths {
+		list[i] = strconv.Quote(path)
+	}
+	return strings.Join(list, ", ")
 }
