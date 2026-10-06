@@ -117,3 +117,86 @@ func TestOverlayGuardRejectsOneDirectlyStagedHunk(t *testing.T) {
 		t.Fatalf("committed content: %q", got)
 	}
 }
+
+func TestContainsPatchIgnoresHunkThePreviousVersionCarries(t *testing.T) {
+	git := gitPath(t)
+	ctx := context.Background()
+	base := []byte("port = 80\na\nb\nc\nd\ne\nf\npassword = none\ntail")
+	local := []byte("port = 8080\na\nb\nc\nd\ne\nf\npassword = s3cret\ntail")
+	v := Version{Base: base, Local: local}
+	// Upstream adopted the port hunk; the candidate edits an unrelated line.
+	upstream := []byte("port = 8080\na\nb\nc\nd\ne\nf\npassword = none\ntail")
+	candidate := []byte("port = 8080\na\nb\nCHANGED\nd\ne\nf\npassword = none\ntail")
+	if got, err := ContainsPatch(ctx, git, v, candidate, upstream); err != nil || got {
+		t.Fatalf("adopted hunk reported: %v %v", got, err)
+	}
+	if got, err := ContainsPatch(ctx, git, v, candidate, base); err != nil || !got {
+		t.Fatalf("new port hunk missed: %v %v", got, err)
+	}
+	leaked := []byte("port = 8080\na\nb\nc\nd\ne\nf\npassword = s3cret\ntail")
+	if got, err := ContainsPatch(ctx, git, v, leaked, upstream); err != nil || !got {
+		t.Fatalf("password hunk on top of the adopted one missed: %v %v", got, err)
+	}
+}
+
+func TestOverlayGuardAllowsHunkAdoptedUpstream(t *testing.T) {
+	repo := testutil.New(t)
+	base := []byte("port = 80\na\nb\nc\nd\ne\nf\npassword = none\n")
+	if err := os.WriteFile(filepath.Join(repo.Root, "app.conf"), base, 0600); err != nil {
+		t.Fatal(err)
+	}
+	repo.Git("add", "app.conf")
+	repo.Git("commit", "-qm", "initial")
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	repo.Git("init", "-q", "--bare", remote)
+	repo.Git("remote", "add", "origin", remote)
+	repo.Git("push", "-q", "origin", "main")
+	bin := integrationBinary(t)
+	run := func(name string, args ...string) ([]byte, error) {
+		cmd := exec.Command(name, args...)
+		cmd.Dir, cmd.Env = repo.Root, repo.Env
+		if name == bin {
+			cmd.Env = repo.RunnerEnv()
+		}
+		return cmd.CombinedOutput()
+	}
+	if out, err := run(bin, "init"); err != nil {
+		t.Fatalf("init: %v\n%s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(repo.Root, "app.conf"), []byte("port = 8080\na\nb\nc\nd\ne\nf\npassword = s3cret\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"overlay", "add", "dev", "--", "app.conf"}, {"hook", "install"}} {
+		if out, err := run(bin, args...); err != nil {
+			t.Fatalf("%v: %v\n%s", args, err, out)
+		}
+	}
+	// A teammate commits the port change upstream.
+	teammate := filepath.Join(t.TempDir(), "teammate")
+	repo.Git("clone", "-q", "-b", "main", remote, teammate)
+	if err := os.WriteFile(filepath.Join(teammate, "app.conf"), []byte("port = 8080\na\nb\nc\nd\ne\nf\npassword = none\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	repo.At(teammate, "commit", "-qam", "use port 8080")
+	repo.At(teammate, "push", "-q", "origin", "main")
+	repo.Git("fetch", "-q", "origin")
+	repo.Git("reset", "-q", "--hard", "origin/main")
+	edited, err := os.ReadFile(filepath.Join(repo.Root, "app.conf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	edited = bytes.Replace(edited, []byte("\nc\n"), []byte("\nc2\n"), 1)
+	if err := os.WriteFile(filepath.Join(repo.Root, "app.conf"), edited, 0600); err != nil {
+		t.Fatal(err)
+	}
+	repo.Git("add", "app.conf")
+	if out, err := run(repo.GitPath, "commit", "-qm", "ordinary edit"); err != nil {
+		t.Fatalf("commit after the port hunk was adopted upstream: %v\n%s", err, out)
+	}
+	if got := repo.Git("show", "HEAD:app.conf"); bytes.Contains(got, []byte("s3cret")) || !bytes.Contains(got, []byte("c2\n")) {
+		t.Fatalf("committed content: %q", got)
+	}
+	if out, err := run(repo.GitPath, "push", "-q", "origin", "main"); err != nil {
+		t.Fatalf("push after the port hunk was adopted upstream: %v\n%s", err, out)
+	}
+}

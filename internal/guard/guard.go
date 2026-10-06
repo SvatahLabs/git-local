@@ -79,7 +79,12 @@ func Staged(ctx context.Context, r *gitexec.Runner, cwd, index string) ([]Findin
 			if err != nil {
 				return nil, err
 			}
-			if reason, err := overlayReason(ctx, r, version, candidate); err != nil {
+			// A merge commit builds on both sides.
+			previous, err := committedBlobs(ctx, r, snapshot.Root, staged, "HEAD", "MERGE_HEAD")
+			if err != nil {
+				return nil, err
+			}
+			if reason, err := overlayReason(ctx, r, version, candidate, previous); err != nil {
 				return nil, err
 			} else if reason != "" {
 				findings = append(findings, Finding{HookConflict: configtx.HookConflict{Path: staged, WorkspaceID: version.Manifest.WorkspaceID}, OverlayName: version.Manifest.Name, OverlayReason: reason})
@@ -107,8 +112,37 @@ func aliasPaths(paths []string, overlayPath string) []string {
 	return matched
 }
 
-func overlayReason(ctx context.Context, r *gitexec.Runner, version overlay.Version, candidate []byte) (string, error) {
-	contains, err := overlay.ContainsPatch(ctx, r.Executable(), version, candidate)
+// committedBlobs returns path's content in each revision that has it as a file.
+func committedBlobs(ctx context.Context, r *gitexec.Runner, root, path string, revisions ...string) ([][]byte, error) {
+	var result [][]byte
+	for _, rev := range revisions {
+		id, err := r.Guard(ctx, root, "", "rev-parse", "--verify", "--quiet", rev+":"+path)
+		var ge *gitexec.Error
+		if errors.As(err, &ge) && ge.Code == 1 {
+			continue // An unborn HEAD or a path the revision lacks.
+		}
+		if err != nil {
+			return nil, err
+		}
+		object := strings.TrimSpace(string(id))
+		kind, err := r.Guard(ctx, root, "", "cat-file", "-t", object)
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(string(kind)) != "blob" {
+			continue
+		}
+		data, err := r.Guard(ctx, root, "", "cat-file", "blob", object)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, data)
+	}
+	return result, nil
+}
+
+func overlayReason(ctx context.Context, r *gitexec.Runner, version overlay.Version, candidate []byte, previous [][]byte) (string, error) {
+	contains, err := overlay.ContainsPatch(ctx, r.Executable(), version, candidate, previous...)
 	if errors.Is(err, overlay.ErrConflict) {
 		return "content overlaps the saved overlay and cannot be verified", nil
 	}
@@ -192,13 +226,25 @@ func Push(ctx context.Context, r *gitexec.Runner, cwd, remote string, input io.R
 			if err != nil {
 				return nil, err
 			}
+			var parents []string
+			if len(versions) > 0 {
+				b, err := r.Guard(ctx, snapshot.Root, "", "rev-parse", commit+"^@")
+				if err != nil {
+					return nil, err
+				}
+				parents = strings.Fields(string(b))
+			}
 			for _, version := range versions {
 				for _, pushed := range aliasPaths(paths, version.Manifest.Path) {
 					candidate, err := r.Guard(ctx, snapshot.Root, "", "cat-file", "blob", commit+":"+pushed)
 					if err != nil {
 						return nil, err
 					}
-					reason, err := overlayReason(ctx, r, version, candidate)
+					previous, err := committedBlobs(ctx, r, snapshot.Root, pushed, parents...)
+					if err != nil {
+						return nil, err
+					}
+					reason, err := overlayReason(ctx, r, version, candidate, previous)
 					if err != nil {
 						return nil, err
 					}

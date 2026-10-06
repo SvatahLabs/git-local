@@ -164,30 +164,40 @@ func LoadForPaths(ctx context.Context, commonPath, owner string, paths []string)
 // ContainsPatch returns true when the candidate already carries the saved
 // patch or any one of its hunks: applying it changes nothing. A candidate with
 // only some hunks staged (git apply --cached, update-index, or a client that
-// skips filters) still leaks those. A conflicting candidate must be resolved
+// skips filters) still leaks those. previous holds the committed versions the
+// candidate builds on; a hunk one of them already carries was adopted
+// upstream, so it isn't a new leak. A conflicting candidate must be resolved
 // before a guard can certify that it is clean.
-func ContainsPatch(ctx context.Context, git string, v Version, candidate []byte) (bool, error) {
+func ContainsPatch(ctx context.Context, git string, v Version, candidate []byte, previous ...[]byte) (bool, error) {
 	if err := validateText(candidate); err != nil {
 		return false, err
 	}
-	applied, err := Apply(ctx, git, v.Base, v.Local, candidate)
-	if err != nil {
-		return false, err
-	}
-	if bytes.Equal(applied, candidate) {
+	leaks := func(local []byte) (bool, error) {
+		applied, err := Apply(ctx, git, v.Base, local, candidate)
+		if err != nil || !bytes.Equal(applied, candidate) {
+			return false, err
+		}
+		for _, p := range previous {
+			if validateText(p) != nil {
+				continue
+			}
+			// A version the hunk conflicts with doesn't carry it.
+			if applied, err := Apply(ctx, git, v.Base, local, p); err == nil && bytes.Equal(applied, p) {
+				return false, nil
+			}
+		}
 		return true, nil
+	}
+	if leak, err := leaks(v.Local); err != nil || leak {
+		return leak, err
 	}
 	versions, err := hunkVersions(ctx, git, v.Base, v.Local)
 	if err != nil || len(versions) < 2 {
 		return false, err
 	}
 	for _, local := range versions {
-		applied, err := Apply(ctx, git, v.Base, local, candidate)
-		if err != nil {
-			return false, err
-		}
-		if bytes.Equal(applied, candidate) {
-			return true, nil
+		if leak, err := leaks(local); err != nil || leak {
+			return leak, err
 		}
 	}
 	return false, nil
