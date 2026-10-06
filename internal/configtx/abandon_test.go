@@ -67,8 +67,11 @@ func TestAbandonConfigurationTransactionThatCannotRecover(t *testing.T) {
 	if err != nil || abandoned.Kind != "config" || abandoned.Quarantine != "" {
 		t.Fatalf("abandon: %+v %v", abandoned, err)
 	}
-	if after, _ := os.ReadFile(w.Exclude); !bytes.Equal(after, edited) {
-		t.Fatal("abandon changed info/exclude")
+	// The transitional block is replaced by the live selection's block; the
+	// external edit outside it stays.
+	after, _ := os.ReadFile(w.Exclude)
+	if !bytes.Contains(after, []byte("# external edit\n")) || bytes.Equal(after, edited) || bytes.Contains(after, []byte("/local")) {
+		t.Fatalf("abandon left info/exclude:\n%s", after)
 	}
 	if got := completedOutcome(t, w, "config-"+result.TransactionID+".json"); got != OutcomeAbandoned {
 		t.Fatalf("completed outcome %q", got)
@@ -92,6 +95,14 @@ func TestAbandonConfigurationTransactionThatCannotRecover(t *testing.T) {
 	}
 	if _, err := Recover(ctx, g, r.Root, result.TransactionID, false); err == nil {
 		t.Fatal("resume accepted an abandoned transaction")
+	}
+	for _, track := range []bool{true, false} {
+		if _, err := Change(ctx, g, r.Root, track, "local"); err != nil {
+			t.Fatalf("selection change (track=%v) after abandon: %v", track, err)
+		}
+	}
+	if final, _ := os.ReadFile(w.Exclude); !bytes.Contains(final, []byte("# external edit\n")) {
+		t.Fatalf("external edit lost:\n%s", final)
 	}
 }
 

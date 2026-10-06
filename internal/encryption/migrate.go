@@ -913,6 +913,10 @@ func AbandonMigration(ctx context.Context, r *gitexec.Runner, cwd, id string) (c
 		if err := matchHeads(ctx, r, w.Store, j.OldHeads); err != nil {
 			return result, fmt.Errorf("%w: the store in service isn't the original history (%v); run git local encrypt recover %s --rollback", storage.ErrConflict, err, id)
 		}
+	} else if err := applyRecordUpdates(meta, j); err != nil {
+		// Completed journals must describe the encrypted history in service
+		// before the prepared rewrites are quarantined.
+		return result, fmt.Errorf("%w: completed journals can't be updated for the encrypted history (%v); run git local encrypt recover %s --resume", storage.ErrConflict, err, id)
 	}
 	q, err := configtx.NewQuarantine(meta, id, "encrypt")
 	if err != nil {

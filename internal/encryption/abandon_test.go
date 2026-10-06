@@ -6,10 +6,12 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"gitlocal/internal/configtx"
 	"gitlocal/internal/history"
+	"gitlocal/internal/workspace"
 )
 
 func TestAbandonMigrationAfterPublicationQuarantinesStores(t *testing.T) {
@@ -104,4 +106,34 @@ func TestAbandonMigrationRefusesEncryptedStoreWithoutPolicy(t *testing.T) {
 	if err := RecoverMigration(ctx, r, root, id, "rollback"); err != nil {
 		t.Fatalf("rollback after refused abandon: %v", err)
 	}
+}
+
+func TestAbandonMigrationAfterPublicationAppliesRecordUpdates(t *testing.T) {
+	r, w, root, key, restoreID, preimage := restoredMigrationFixture(t)
+	ctx := context.Background()
+	id, err := migrate(ctx, r, root, key, []string{".env.local"}, func(point string) error {
+		if point == "policy-published" {
+			return errors.New("injected interruption")
+		}
+		return nil
+	})
+	if err == nil {
+		t.Fatal("fault missed")
+	}
+	if _, err := workspace.Init(ctx, r, root); err == nil || !strings.Contains(err.Error(), "git local recover "+id+" --abandon") {
+		t.Fatalf("pending migration error doesn't name abandon: %v", err)
+	}
+	hidden := key + ".away"
+	if err := os.Rename(key, hidden); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := AbandonMigration(ctx, r, root, id); err != nil {
+		t.Fatalf("abandon: %v", err)
+	}
+	if err := os.Rename(hidden, key); err != nil {
+		t.Fatal(err)
+	}
+	// The completed restore journal must describe the encrypted history now
+	// in service, not the quarantined plaintext one.
+	checkConvertedRestore(t, ctx, r, w, root, restoreID, preimage)
 }

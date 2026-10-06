@@ -120,7 +120,7 @@ func initialize(ctx context.Context, r *gitexec.Runner, cwd string, fault func(s
 				if strings.HasPrefix(entry.Name(), "encrypt-") && strings.HasSuffix(entry.Name(), ".json") {
 					id := strings.TrimSuffix(strings.TrimPrefix(entry.Name(), "encrypt-"), ".json")
 					if storage.ValidUUID(id) {
-						return nil, fmt.Errorf("%w: unfinished encryption migration %s; run git local encrypt recover %s --resume or --rollback", storage.ErrConflict, id, id)
+						return nil, fmt.Errorf("%w: unfinished encryption migration %s; run git local encrypt recover %s --resume or --rollback, or if both fail, git local recover %s --abandon", storage.ErrConflict, id, id, id)
 					}
 				}
 				if strings.HasPrefix(entry.Name(), "seed-") && strings.HasSuffix(entry.Name(), ".json") {

@@ -10,8 +10,10 @@ import (
 	"path/filepath"
 	"strings"
 
+	"gitlocal/internal/exclude"
 	"gitlocal/internal/gitexec"
 	"gitlocal/internal/secureblob"
+	"gitlocal/internal/selection"
 	"gitlocal/internal/storage"
 	"gitlocal/internal/workspace"
 )
@@ -21,9 +23,11 @@ import (
 const OutcomeAbandoned = "abandoned"
 
 // Abandon gives up a pending configuration or seed transaction without
-// resuming or rolling it back. Selection, ignore and destination files stay as
-// they are. A seed staging file is removed when it matches its recorded blob,
-// which local history still holds; any other staging bytes are quarantined.
+// resuming or rolling it back. Selection and destination files stay as they
+// are; a configuration transaction's managed ignore block is replaced by the
+// one for the live selections. A seed staging file is removed when it matches
+// its recorded blob, which local history still holds; any other staging bytes
+// are quarantined.
 func Abandon(ctx context.Context, r *gitexec.Runner, cwd, id string) (AbandonResult, error) {
 	result := AbandonResult{TransactionID: id}
 	if !storage.ValidUUID(id) {
@@ -59,11 +63,78 @@ func Abandon(ctx context.Context, r *gitexec.Runner, cwd, id string) (AbandonRes
 	if err := validateJournal(j, s.w.RepositoryID, id); err != nil {
 		return result, err
 	}
+	if result.Warnings, err = s.reinstallExclude(j); err != nil {
+		return result, err
+	}
 	j.Outcome = OutcomeAbandoned
 	if err := s.writeJournal(j); err != nil {
 		return result, err
 	}
 	return result, s.archive(ctx, j, nil)
+}
+
+// reinstallExclude replaces the managed block a stopped transaction left in
+// info/exclude, which the next selection change would reject as edited, with
+// the block for the live selections. Bytes outside the block are kept. A block
+// that matches none the transaction could have written is left with a warning.
+func (s *session) reinstallExclude(j Journal) ([]string, error) {
+	after := append([]Source{}, j.Sources...)
+	for i := range after {
+		if after[i].ID == j.WorkspaceID && j.Kind == "retirement" {
+			after[i].Record = j.After
+		} else if after[i].ID == j.WorkspaceID {
+			after[i].Selection = j.After
+		}
+	}
+	live, err := states(s.sources, "", nil)
+	if err != nil {
+		return nil, err
+	}
+	before, err := states(j.Sources, "", nil)
+	if err != nil {
+		return nil, err
+	}
+	next, err := states(after, "", nil)
+	if err != nil {
+		return nil, err
+	}
+	current, err := readImage(s.common, "info/exclude")
+	if err != nil {
+		return nil, err
+	}
+	var user []byte
+	found := !current.Exists
+	for _, set := range [][]selection.State{live, before, append(append([]selection.State{}, before...), next...), next, nil} {
+		if found {
+			break
+		}
+		patterns, alternates, err := s.compile(set)
+		if err != nil {
+			return nil, err
+		}
+		if data, e := exclude.UserBytes(current.Data, patterns, alternates...); e == nil {
+			user, found = data, true
+		}
+	}
+	if !found {
+		return []string{"info/exclude's managed block matches none the transaction wrote and was left as it is; restore the lines between the git-local markers by hand, then run git local doctor"}, nil
+	}
+	patterns, _, err := s.compile(live)
+	if err != nil {
+		return nil, err
+	}
+	data := exclude.Render(user, patterns)
+	if current.Exists && bytes.Equal(current.Data, data) {
+		return nil, nil
+	}
+	mode := os.FileMode(current.Mode)
+	if !current.Exists {
+		mode = 0600
+	}
+	if err := s.common.MkdirAll("info"); err != nil {
+		return nil, err
+	}
+	return nil, s.common.AtomicWrite("info/exclude", data, mode)
 }
 
 func abandonedAlready(meta *storage.Dir, id string) error {

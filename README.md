@@ -83,13 +83,16 @@ guards until it is resolved. `git local doctor` lists every pending journal
 command that resolves it. Use `recover <id> --resume` or `--rollback` first (for
 an encryption migration, `encrypt recover`). If neither can finish, for example
 because a file was edited after the interruption,
-`git local recover <id> --abandon` gives the transaction up: working files,
-selections and ignore rules stay as they are, staging files whose content local
+`git local recover <id> --abandon` gives the transaction up: working files and
+selections stay as they are, a configuration transaction's managed ignore block
+is replaced by the one for the current selections (lines outside it are kept),
+staging files whose content local
 history already holds are removed, and any other journal-reserved bytes are
 moved to `.git/gitlocal/quarantine/<id>/` with a `manifest.json` describing
 them. An abandoned encryption migration moves its prepared and replaced stores
 there instead of deleting them; before the policy is published, the original
-store must still be in service. The quarantine is never deleted automatically
+store must still be in service, and after it, completed restore and seed
+journals are first updated for the encrypted history. The quarantine is never deleted automatically
 and isn't included in backups; delete it once you've checked its contents. The
 abandoned journal is archived with outcome `abandoned`, and a restore keeps its
 recovery ref. Run `git local doctor` afterwards to check the result.

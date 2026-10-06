@@ -321,7 +321,7 @@ func (s *session) pending() ([]string, error) {
 		if strings.HasPrefix(name, "encrypt-") && strings.HasSuffix(name, ".json") {
 			id := strings.TrimSuffix(strings.TrimPrefix(name, "encrypt-"), ".json")
 			if storage.ValidUUID(id) && entry.Type().IsRegular() {
-				return nil, fmt.Errorf("%w: unfinished encryption migration %s; run git local encrypt recover %s --resume or --rollback", storage.ErrConflict, id, id)
+				return nil, fmt.Errorf("%w: unfinished encryption migration %s; run git local encrypt recover %s --resume or --rollback, or if both fail, git local recover %s --abandon", storage.ErrConflict, id, id, id)
 			}
 		}
 		prefix := "config-"
