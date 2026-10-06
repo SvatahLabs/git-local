@@ -171,7 +171,10 @@ invocation from a subdirectory are supported. Initialization is idempotent; reru
 it from the original checkout to resume an interrupted initialization. If that
 checkout was removed, `git local recover <workspace-id> --abandon` (doctor shows
 the ID) discards its journal from any other checkout, along with the
-registration it had published. Init checks every other registered worktree
+registration it had published. Abandon is refused while a checkout still holds
+that workspace identity, for example after the repository directory moved; run
+`git local init` in the moved checkout instead, which finishes the
+initialization where it is now. Init checks every other registered worktree
 before it writes its journal, so a failed check leaves nothing behind. Unknown
 or conflicting state is preserved and reported instead of overwritten.
 With `auto install` in the primary checkout, Git's post-checkout hook snapshots

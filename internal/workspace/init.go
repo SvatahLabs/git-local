@@ -139,7 +139,15 @@ func initialize(ctx context.Context, r *gitexec.Runner, cwd string, fault func(s
 		return nil, err
 	}
 	if journalErr == nil {
-		if err = validateJournal(journal, w); err != nil {
+		// The identity is published last, so a checkout that holds it and has
+		// moved since only needs the remaining steps, which find everything
+		// already published.
+		if idErr == nil && reflect.DeepEqual(id, journal.Identity) {
+			err = validateJournalFields(journal)
+		} else {
+			err = validateJournal(journal, w)
+		}
+		if err != nil {
 			return nil, err
 		}
 		if repoErr == nil && !reflect.DeepEqual(repo, journal.Repository) {

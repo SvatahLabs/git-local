@@ -71,6 +71,13 @@ func AbandonInit(ctx context.Context, r *gitexec.Runner, cwd, workspaceID string
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return removed, err
 	}
+	// A checkout that moved keeps its published identity in its new
+	// administrative directory; removing the registration would orphan it.
+	if admin, err := PublishedIdentityAdmin(w.Common, workspaceID); err != nil {
+		return removed, err
+	} else if admin != "" {
+		return removed, fmt.Errorf("%w: the checkout moved (its Git directory is now %s); run git local init in that checkout", storage.ErrConflict, admin)
+	}
 	base := filepath.Join("workspaces", workspaceID)
 	if _, err := d.Lstat(base); err == nil {
 		initialSelection := any(selection.Empty())
@@ -144,6 +151,42 @@ func AbandonInit(ctx context.Context, r *gitexec.Runner, cwd, workspaceID string
 		return removed, err
 	}
 	return removed, d.Remove("transactions/init.json")
+}
+
+// PublishedIdentityAdmin returns the Git administrative directory, the main
+// one or a linked worktree's, whose identity file names workspaceID, or "" if
+// none does. It reads the directories under the common directory, so it also
+// finds a checkout that moved.
+func PublishedIdentityAdmin(common, workspaceID string) (string, error) {
+	admins := []string{common}
+	entries, err := os.ReadDir(filepath.Join(common, "worktrees"))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			admins = append(admins, filepath.Join(common, "worktrees", entry.Name()))
+		}
+	}
+	for _, admin := range admins {
+		dir, err := storage.OpenDir(admin)
+		if err != nil {
+			return "", err
+		}
+		var id Identity
+		err = dir.ReadJSON("gitlocal-workspace.json", &id)
+		dir.Close()
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return "", err
+		}
+		if id.WorkspaceID == workspaceID {
+			return admin, nil
+		}
+	}
+	return "", nil
 }
 
 func matchesJSON(d *storage.Dir, path string, v any) error {

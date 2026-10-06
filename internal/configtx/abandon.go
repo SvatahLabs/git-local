@@ -240,7 +240,10 @@ type PendingJournal struct {
 	Outcome      string
 	Published    bool
 	AdminMissing bool
-	Err          error
+	// MovedTo is the administrative directory that now holds the identity of
+	// an initialization journal whose recorded checkout moved.
+	MovedTo string
+	Err     error
 }
 
 // Next returns the action that resolves the journal and the state behind it.
@@ -253,6 +256,8 @@ func (p PendingJournal) Next() (string, string) {
 	switch {
 	case p.Err != nil:
 		return "Inspect the transactions directory; don't delete journals blindly.", "journal can't be read: " + p.Err.Error()
+	case p.Kind == "init" && p.MovedTo != "":
+		return "Run git local init in the checkout whose Git directory is " + p.MovedTo + ".", "initialization of " + p.Root + " never finished and the checkout has moved"
 	case p.Kind == "init" && p.AdminMissing:
 		return "Run " + abandon + ".", "initialization of " + p.Root + " never finished and its Git administrative directory no longer exists"
 	case p.Kind == "init":
@@ -346,7 +351,13 @@ func PendingJournals(ctx context.Context, r *gitexec.Runner, cwd string) ([]Pend
 				if !filepath.IsAbs(record.Workspace.Admin) {
 					item.Err = errors.New("initialization journal has no administrative path")
 				} else if _, e := os.Stat(record.Workspace.Admin); errors.Is(e, os.ErrNotExist) {
-					item.AdminMissing = true
+					if admin, e := workspace.PublishedIdentityAdmin(w.Common, item.ID); e != nil {
+						item.Err = e
+					} else if admin != "" {
+						item.MovedTo = admin
+					} else {
+						item.AdminMissing = true
+					}
 				}
 			}
 			out = append(out, item)

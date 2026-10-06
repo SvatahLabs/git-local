@@ -235,4 +235,26 @@ func TestPendingInitJournalOfRemovedCheckoutPointsToAbandon(t *testing.T) {
 	}
 }
 
+func TestPendingInitJournalOfMovedCheckoutPointsToInit(t *testing.T) {
+	_, g, w := fixture(t)
+	ctx := context.Background()
+	if err := os.MkdirAll(filepath.Join(w.Common, "gitlocal", "transactions"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	// The journal names the checkout's old location, but its published
+	// identity is in this checkout's administrative directory.
+	gone := filepath.Join(t.TempDir(), "gone")
+	journal := `{"schemaVersion":1,"kind":"init","identity":{"workspaceId":"` + w.WorkspaceID + `"},"workspace":{"adminPath":` + strconvQuote(filepath.Join(gone, ".git")) + `,"rootPath":` + strconvQuote(gone) + `}}`
+	if err := os.WriteFile(filepath.Join(w.Common, "gitlocal", "transactions", "init.json"), []byte(journal), 0600); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := PendingJournals(ctx, g, w.Root)
+	if err != nil || len(pending) != 1 || pending[0].Kind != "init" || pending[0].AdminMissing {
+		t.Fatalf("pending: %+v %v", pending, err)
+	}
+	if action, _ := pending[0].Next(); strings.Contains(action, "--abandon") || !strings.Contains(action, "git local init") || !strings.Contains(action, w.Admin) {
+		t.Fatalf("action: %s", action)
+	}
+}
+
 func strconvQuote(s string) string { b, _ := json.Marshal(s); return string(b) }

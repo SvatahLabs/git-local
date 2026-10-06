@@ -117,3 +117,59 @@ func TestAbandonInitOfRemovedWorktree(t *testing.T) {
 		})
 	}
 }
+
+func TestAbandonInitRefusedAfterRepositoryMoved(t *testing.T) {
+	r := testutil.New(t)
+	r.Commit()
+	g := runner(t, r)
+	ctx := context.Background()
+	// The identity is published last, so only the journal's removal remains.
+	if _, err := initialize(ctx, g, r.Root, func(at string) error {
+		if at == "identity" {
+			return errors.New("injected interruption")
+		}
+		return nil
+	}); err == nil {
+		t.Fatal("fault missed")
+	}
+	common := filepath.Join(r.Root, ".git")
+	var j initJournal
+	d, err := storage.OpenDir(filepath.Join(common, "gitlocal"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = d.ReadJSON("transactions/init.json", &j)
+	d.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := j.Identity.WorkspaceID
+	parent, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	moved := filepath.Join(parent, "moved")
+	if err := os.Rename(r.Root, moved); err != nil {
+		t.Fatal(err)
+	}
+	r.Root = moved
+	if _, err := AbandonInit(ctx, g, moved, id); !errors.Is(err, storage.ErrConflict) {
+		t.Fatalf("abandon accepted the initialization of a moved checkout: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(moved, ".git", "gitlocal", "workspaces", id, "workspace.json")); err != nil {
+		t.Fatalf("published registration removed: %v", err)
+	}
+	w, err := Init(ctx, g, moved)
+	if err != nil {
+		t.Fatalf("init of the moved checkout: %v", err)
+	}
+	if w.WorkspaceID != id || w.Root != moved {
+		t.Fatalf("moved checkout identity: %s at %s, want %s at %s", w.WorkspaceID, w.Root, id, moved)
+	}
+	if _, err := os.Lstat(filepath.Join(moved, ".git", "gitlocal", "transactions", "init.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("journal remains: %v", err)
+	}
+	if again, err := Init(ctx, g, moved); err != nil || again.WorkspaceID != id {
+		t.Fatalf("init after relocation: %+v %v", again, err)
+	}
+}
