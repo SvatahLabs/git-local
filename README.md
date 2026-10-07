@@ -85,7 +85,8 @@ an encryption migration, `encrypt recover`). If neither can finish, for example
 because a file was edited after the interruption,
 `git local recover <id> --abandon` gives the transaction up: working files and
 selections stay as they are, a configuration transaction's managed ignore block
-is replaced by the one for the current selections (lines outside it are kept),
+is replaced by the one for the current selections (lines outside it are kept;
+abandon names any path that is no longer ignored and says it rewrote the block),
 staging files whose content local
 history already holds are removed, and any other journal-reserved bytes are
 moved to `.git/gitlocal/quarantine/<id>/` with a `manifest.json` describing

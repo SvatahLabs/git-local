@@ -44,6 +44,9 @@ type AbandonResult struct {
 	Quarantined   []QuarantineEntry
 	Removed       []string
 	Warnings      []string
+	// ExcludeRewritten is true when abandon replaced the managed block in
+	// info/exclude.
+	ExcludeRewritten bool
 }
 
 func quarantinePath(id string) string { return path.Join(QuarantineDir, id) }

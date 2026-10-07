@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"gitlocal/internal/exclude"
@@ -63,7 +64,7 @@ func Abandon(ctx context.Context, r *gitexec.Runner, cwd, id string) (AbandonRes
 	if err := validateJournal(j, s.w.RepositoryID, id); err != nil {
 		return result, err
 	}
-	if result.Warnings, err = s.reinstallExclude(j); err != nil {
+	if result.Warnings, result.ExcludeRewritten, err = s.reinstallExclude(j); err != nil {
 		return result, err
 	}
 	j.Outcome = OutcomeAbandoned
@@ -77,7 +78,9 @@ func Abandon(ctx context.Context, r *gitexec.Runner, cwd, id string) (AbandonRes
 // info/exclude, which the next selection change would reject as edited, with
 // the block for the live selections. Bytes outside the block are kept. A block
 // that matches none the transaction could have written is left with a warning.
-func (s *session) reinstallExclude(j Journal) ([]string, error) {
+// It warns about each pattern the rewrite stops ignoring, and reports whether
+// it rewrote the file.
+func (s *session) reinstallExclude(j Journal) ([]string, bool, error) {
 	after := append([]Source{}, j.Sources...)
 	for i := range after {
 		if after[i].ID == j.WorkspaceID && j.Kind == "retirement" {
@@ -88,21 +91,21 @@ func (s *session) reinstallExclude(j Journal) ([]string, error) {
 	}
 	live, err := states(s.sources, "", nil)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	before, err := states(j.Sources, "", nil)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	next, err := states(after, "", nil)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	current, err := readImage(s.common, "info/exclude")
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	var user []byte
+	var user, old []byte
 	found := !current.Exists
 	for _, set := range [][]selection.State{live, before, append(append([]selection.State{}, before...), next...), next, nil} {
 		if found {
@@ -110,31 +113,38 @@ func (s *session) reinstallExclude(j Journal) ([]string, error) {
 		}
 		patterns, alternates, err := s.compile(set)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		if data, e := exclude.UserBytes(current.Data, patterns, alternates...); e == nil {
-			user, found = data, true
+			user, old, found = data, patterns, true
 		}
 	}
 	if !found {
-		return []string{"info/exclude's managed block matches none the transaction wrote and was left as it is; restore the lines between the git-local markers by hand, then run git local doctor"}, nil
+		return []string{"info/exclude's managed block matches none the transaction wrote and was left as it is; restore the lines between the git-local markers by hand, then run git local doctor"}, false, nil
 	}
 	patterns, _, err := s.compile(live)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	data := exclude.Render(user, patterns)
 	if current.Exists && bytes.Equal(current.Data, data) {
-		return nil, nil
+		return nil, false, nil
+	}
+	var warnings []string
+	kept := strings.Split(string(patterns), "\n")
+	for _, line := range strings.Split(string(old), "\n") {
+		if line != "" && !strings.HasPrefix(line, "#") && !strings.HasPrefix(line, "!") && !slices.Contains(kept, line) {
+			warnings = append(warnings, fmt.Sprintf("info/exclude no longer ignores %s, which the abandoned transaction's block covered; it isn't selected, so git status may show it", line))
+		}
 	}
 	mode := os.FileMode(current.Mode)
 	if !current.Exists {
 		mode = 0600
 	}
 	if err := s.common.MkdirAll("info"); err != nil {
-		return nil, err
+		return warnings, false, err
 	}
-	return nil, s.common.AtomicWrite("info/exclude", data, mode)
+	return warnings, true, s.common.AtomicWrite("info/exclude", data, mode)
 }
 
 func abandonedAlready(meta *storage.Dir, id string) error {

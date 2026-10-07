@@ -1582,7 +1582,7 @@ func abandonTransaction(c *cobra.Command, r *gitexec.Runner, cwd, id string) err
 	if removed == nil {
 		removed = []string{}
 	}
-	if setJSON(c, map[string]any{"transactionId": id, "kind": kind, "abandoned": err == nil, "quarantine": result.Quarantine, "quarantined": quarantined, "removed": removed}, result.Warnings...) {
+	if setJSON(c, map[string]any{"transactionId": id, "kind": kind, "abandoned": err == nil, "quarantine": result.Quarantine, "quarantined": quarantined, "removed": removed, "excludeRewritten": result.ExcludeRewritten}, result.Warnings...) {
 		return err
 	}
 	for _, warning := range result.Warnings {
@@ -1612,6 +1612,10 @@ func abandonTransaction(c *cobra.Command, r *gitexec.Runner, cwd, id string) err
 		if _, err := fmt.Fprintf(out, "Quarantine: %s (kept until you delete it).\n", result.Quarantine); err != nil {
 			return err
 		}
+	}
+	if result.ExcludeRewritten {
+		_, err = fmt.Fprintf(out, "Abandoned %s transaction %s. Files were left as they are, but the managed block in info/exclude was rewritten for the current selections; run git local doctor to check the result.\n", kind, id)
+		return err
 	}
 	_, err = fmt.Fprintf(out, "Abandoned %s transaction %s. Files were left as they are; run git local doctor to check the result.\n", kind, id)
 	return err
