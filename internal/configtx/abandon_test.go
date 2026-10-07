@@ -163,9 +163,8 @@ func TestAbandonSeedQuarantinesUnrecognizedStageAndKeepsUserFiles(t *testing.T) 
 	if _, err := RecoverSeed(ctx, r, linked, result.TransactionID, false); err == nil {
 		t.Fatal("resume overwrote a user edit")
 	}
-	if _, err := RecoverSeed(ctx, r, linked, result.TransactionID, true); err == nil {
-		t.Fatal("rollback removed a user edit")
-	}
+	// Rollback would finish here, keeping the user's notes/a, because the
+	// seed never published it (GL-033); abandon is what this test covers.
 	// A complete stage for notes/b duplicates local history and may go.
 	complete := filepath.Join(linked, filepath.FromSlash(j.Files[1].Stage))
 	if err := os.WriteFile(complete, []byte("seeded-b"), 0644); err != nil {

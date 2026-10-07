@@ -190,6 +190,28 @@ func (d *Dir) Rename(old, new string) error {
 	}
 	return unix.Fsync(a)
 }
+
+// RenameNoReplace renames like Rename, but fails with an error matching
+// fs.ErrExist, changing nothing, if new already exists.
+func (d *Dir) RenameNoReplace(old, new string) error {
+	a, base, err := d.parent(old)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(a)
+	b, target, err := d.parent(new)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(b)
+	if err = renameNoReplace(a, base, b, target); err != nil {
+		return &os.LinkError{Op: "rename", Old: old, New: new, Err: err}
+	}
+	if err = unix.Fsync(b); err != nil {
+		return err
+	}
+	return unix.Fsync(a)
+}
 func (d *Dir) Remove(name string) error {
 	fd, base, err := d.parent(name)
 	if err != nil {

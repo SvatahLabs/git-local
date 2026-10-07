@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"io/fs"
 	"os"
 	"path"
 	"runtime"
@@ -579,7 +580,13 @@ func (s *session) runSeed(ctx context.Context, files *storage.Dir, j *seedJourna
 			}
 			return warnings, e
 		}
-		if err := files.Rename(file.Stage, file.Path); err != nil {
+		if err := point(ctx, f, fmt.Sprintf("seed-publish-%d", index)); err != nil {
+			return warnings, err
+		}
+		// A file created since the check above is never replaced.
+		if err := files.RenameNoReplace(file.Stage, file.Path); errors.Is(err, fs.ErrExist) {
+			return warnings, fmt.Errorf("%w: seed destination %s appeared", storage.ErrConflict, file.Path)
+		} else if err != nil {
 			return warnings, err
 		}
 		if err := point(ctx, f, fmt.Sprintf("seed-file-%d", index)); err != nil {
@@ -612,21 +619,25 @@ func (s *session) rollbackSeed(ctx context.Context, files *storage.Dir, j *seedJ
 		if err != nil {
 			return err
 		}
-		if exists {
-			if !match {
-				return fmt.Errorf("%w: seed file changed at %q", storage.ErrConflict, file.Path)
-			}
+		_, stageErr := files.Lstat(file.Stage)
+		if stageErr != nil && !os.IsNotExist(stageErr) {
+			return stageErr
+		}
+		// While the stage exists the seed never published this file, so a
+		// different file at its path was created by someone else and stays.
+		if exists && !match && stageErr != nil {
+			return fmt.Errorf("%w: seed file changed at %q", storage.ErrConflict, file.Path)
+		}
+		if exists && match {
 			if err := files.Remove(file.Path); err != nil {
 				return err
 			}
 		}
 		// The stage belongs to the journal; partial or complete, it goes.
-		if _, err := files.Lstat(file.Stage); err == nil {
+		if stageErr == nil {
 			if err := files.Remove(file.Stage); err != nil {
 				return err
 			}
-		} else if !os.IsNotExist(err) {
-			return err
 		}
 	}
 	for i := len(j.Directories) - 1; i >= 0; i-- {
@@ -636,7 +647,9 @@ func (s *session) rollbackSeed(ctx context.Context, files *storage.Dir, j *seedJ
 		} else if err != nil {
 			return err
 		}
-		if err := files.RemoveDirectory(name); err != nil {
+		// A directory the seed created stays when it now holds files the
+		// seed didn't write.
+		if err := files.RemoveDirectory(name); err != nil && !errors.Is(err, fs.ErrExist) {
 			return err
 		}
 	}

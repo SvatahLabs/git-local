@@ -200,6 +200,33 @@ func (d *Dir) Rename(old, new string) error {
 	}
 	return windows.MoveFileEx(src, dst, windows.MOVEFILE_REPLACE_EXISTING|windows.MOVEFILE_WRITE_THROUGH)
 }
+
+// RenameNoReplace renames like Rename, but fails with an error matching
+// fs.ErrExist, changing nothing, if new already exists.
+func (d *Dir) RenameNoReplace(old, new string) error {
+	a, err := d.guard(old)
+	if err != nil {
+		return err
+	}
+	defer a()
+	b, err := d.guard(new)
+	if err != nil {
+		return err
+	}
+	defer b()
+	src, err := windows.UTF16PtrFromString(filepath.Join(d.name, old))
+	if err != nil {
+		return err
+	}
+	dst, err := windows.UTF16PtrFromString(filepath.Join(d.name, new))
+	if err != nil {
+		return err
+	}
+	if err := windows.MoveFileEx(src, dst, windows.MOVEFILE_WRITE_THROUGH); err != nil {
+		return &os.LinkError{Op: "rename", Old: old, New: new, Err: err}
+	}
+	return nil
+}
 func (d *Dir) Remove(name string) error {
 	done, err := d.guard(name)
 	if err != nil {

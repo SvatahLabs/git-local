@@ -2,12 +2,14 @@ package configtx
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"gitlocal/internal/selection"
+	"gitlocal/internal/storage"
 	"gitlocal/internal/workspace"
 )
 
@@ -60,5 +62,31 @@ func TestSeedIntoEmptyLegacySelection(t *testing.T) {
 	}
 	if got := load(t, w).Include; len(got) != 1 || got[0].Path != "notes/a" {
 		t.Fatalf("selection: %+v", got)
+	}
+}
+
+// TestSeedNeverReplacesFileCreatedAfterItsCheck creates the destination
+// between the seed's existence check and its rename. The file is kept, the
+// seed reports a conflict, and rollback leaves the file alone.
+func TestSeedNeverReplacesFileCreatedAfterItsCheck(t *testing.T) {
+	_, linked, _, _, run := seedInto(t)
+	target := filepath.Join(linked, "notes", "a")
+	result, err := run("", func(at string) error {
+		if at == "seed-publish-0" {
+			return os.WriteFile(target, []byte("created meanwhile\n"), 0600)
+		}
+		return nil
+	})
+	if !errors.Is(err, storage.ErrConflict) || !strings.Contains(err.Error(), "notes/a") {
+		t.Fatalf("seed over a file created after its check: %v", err)
+	}
+	if data, err := os.ReadFile(target); err != nil || string(data) != "created meanwhile\n" {
+		t.Fatalf("the file created meanwhile was replaced: %q %v", data, err)
+	}
+	if _, err := run(result.TransactionID, nil); err != nil {
+		t.Fatalf("rollback: %v", err)
+	}
+	if data, err := os.ReadFile(target); err != nil || string(data) != "created meanwhile\n" {
+		t.Fatalf("rollback changed the file created meanwhile: %q %v", data, err)
 	}
 }

@@ -18,3 +18,17 @@ func localFilesystem(fd int) error {
 	}
 	return fmt.Errorf("unsupported filesystem type %#x", st.Type)
 }
+
+// renameNoReplace refuses an existing destination atomically. On a
+// filesystem without RENAME_NOREPLACE, a hard link, which fails when the
+// destination exists, followed by removing the old name does the same.
+func renameNoReplace(fromfd int, from string, tofd int, to string) error {
+	err := unix.Renameat2(fromfd, from, tofd, to, unix.RENAME_NOREPLACE)
+	if err != unix.EINVAL && err != unix.ENOSYS {
+		return err
+	}
+	if err := unix.Linkat(fromfd, from, tofd, to, 0); err != nil {
+		return err
+	}
+	return unix.Unlinkat(fromfd, from, 0)
+}
