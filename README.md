@@ -226,9 +226,11 @@ changes to paths selected by any active or retired workspace, and to
 `.gitlocal-tmp-*` staging files, and detect saved
 overlay patches that entered the index or a pushed commit without the filter,
 including a single hunk of a multi-hunk patch staged on its own. A hunk that
-the commit's previous version already holds (`HEAD`, a merge's other side, or a
-pushed commit's parent), for example because a teammate committed the same
-change upstream, isn't reported;
+the commit's previous version already holds (a parent of `HEAD`, `HEAD` itself
+once a remote has it, a merge's other side, or a pushed commit's parent), for
+example because a teammate committed the same change upstream, isn't reported.
+A hunk leaked by `git commit --no-verify` is still refused in the next commit,
+because the leaking `HEAD` isn't on a remote yet;
 staged deletions remain allowed. Paths that can never be selected, such as
 `aux.c`, `nul.txt`, names with a backslash or a trailing dot or space, or
 non-UTF-8 names, pass the guards unless the spelling Windows would resolve them
