@@ -161,6 +161,13 @@ func Push(ctx context.Context, r *gitexec.Runner, cwd, remote string, input io.R
 	if remote == "" {
 		return nil, errors.New("remote name is required")
 	}
+	return push(ctx, r, cwd, remote, input, false)
+}
+
+// push checks the commits that pre-push ref updates would publish. With full,
+// it checks each update's whole ancestry instead of excluding what the remote
+// is known to have.
+func push(ctx context.Context, r *gitexec.Runner, cwd, remote string, input io.Reader, full bool) ([]Finding, error) {
 	snapshot, err := configtx.LoadGuardSnapshot(ctx, r, cwd)
 	if errors.Is(err, configtx.ErrNoState) {
 		return nil, nil
@@ -190,22 +197,24 @@ func Push(ctx context.Context, r *gitexec.Runner, cwd, remote string, input io.R
 			continue
 		} // Deleting a remote ref cannot introduce a leak.
 		args := []string{"rev-list", local}
-		known := !allZero(upstream)
-		if known {
-			// The remote's old commit is missing when someone else pushed
-			// and this repository hasn't fetched since, as in a force push.
-			if known, err = hasCommit(ctx, r, snapshot.Root, upstream); err != nil {
-				return nil, err
+		if !full {
+			known := !allZero(upstream)
+			if known {
+				// The remote's old commit is missing when someone else pushed
+				// and this repository hasn't fetched since, as in a force push.
+				if known, err = hasCommit(ctx, r, snapshot.Root, upstream); err != nil {
+					return nil, err
+				}
 			}
-		}
-		if known {
-			args = append(args, "^"+upstream)
-		} else if !strings.ContainsAny(remote, "/\\") && remote != "." && remote != ".." {
-			// A new remote branch, or one whose old commit is unknown, may
-			// share ancestry with branches already on this remote. Exclude
-			// those known remote-tracking refs so an old, already-published
-			// leak does not block an unrelated new branch.
-			args = append(args, "--not", "--remotes="+remote)
+			if known {
+				args = append(args, "^"+upstream)
+			} else if !strings.ContainsAny(remote, "/\\") && remote != "." && remote != ".." {
+				// A new remote branch, or one whose old commit is unknown, may
+				// share ancestry with branches already on this remote. Exclude
+				// those known remote-tracking refs so an old, already-published
+				// leak does not block an unrelated new branch.
+				args = append(args, "--not", "--remotes="+remote)
+			}
 		}
 		b, err := r.Guard(ctx, snapshot.Root, "", args...)
 		if err != nil {
@@ -294,7 +303,7 @@ func AuditUpstream(ctx context.Context, r *gitexec.Runner, cwd string) ([]Findin
 			continue
 		}
 		input := strings.NewReader(fields[0] + " " + fields[2] + " " + fields[1] + " " + strings.Repeat("0", len(fields[2])) + "\n")
-		findings, err := Push(ctx, r, cwd, "upstream", input)
+		findings, err := push(ctx, r, cwd, "", input, true)
 		if err != nil {
 			return nil, err
 		}

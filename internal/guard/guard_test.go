@@ -80,3 +80,16 @@ func TestPushWithUnknownRemoteOldCommit(t *testing.T) {
 		t.Fatalf("clean force push to a URL: %+v %v", findings, err)
 	}
 }
+
+// TestAuditUpstreamScansRemoteNamedUpstream: doctor's audit promises a full
+// scan, so a leak already pushed to a remote that happens to be named
+// "upstream" must still be found.
+func TestAuditUpstreamScansRemoteNamedUpstream(t *testing.T) {
+	repo, r, ctx := guardRepo(t, "upstream")
+	leak := commitFile(t, repo, "notes.local", "leaked\n", true)
+	repo.Git("push", "-q", "upstream", "main")
+	findings, err := AuditUpstream(ctx, r, repo.Root)
+	if err != nil || len(findings) != 1 || findings[0].Commit != leak || findings[0].Path != "notes.local" {
+		t.Fatalf("audit: %+v %v", findings, err)
+	}
+}
