@@ -289,7 +289,10 @@ func prepareSeedUpdates(ctx context.Context, r *gitexec.Runner, w workspace.Cont
 	return updates, nil
 }
 
-func applyRecordUpdates(meta *storage.Dir, j migrationJournal) error {
+// applyRecordUpdates installs the prepared completed journals. A journal that
+// matches neither its version before nor after the migration is an error,
+// unless mismatch handles it.
+func applyRecordUpdates(meta *storage.Dir, j migrationJournal, mismatch func(name string) error) error {
 	for _, update := range append(append([]recordUpdate{}, j.SeedUpdates...), j.RestoreUpdates...) {
 		current, err := meta.ReadFile("transactions/completed/"+update.Name, 16<<20)
 		if err != nil {
@@ -300,7 +303,13 @@ func applyRecordUpdates(meta *storage.Dir, j migrationJournal) error {
 			continue
 		}
 		if actual != update.OldDigest {
-			return fmt.Errorf("%w: completed journal %q changed during migration", storage.ErrConflict, update.Name)
+			if mismatch == nil {
+				return fmt.Errorf("%w: completed journal %q changed during migration", storage.ErrConflict, update.Name)
+			}
+			if err := mismatch(update.Name); err != nil {
+				return err
+			}
+			continue
 		}
 		prepared, err := meta.ReadFile(filepath.Join(recordsName(j.ID), update.Name), 16<<20)
 		if err != nil || digestBytes(prepared) != update.NewDigest {
@@ -419,7 +428,7 @@ func publishMigration(ctx context.Context, r *gitexec.Runner, w workspace.Contex
 	if err := migratePoint(ctx, fault, "policy-published"); err != nil {
 		return err
 	}
-	if err := applyRecordUpdates(meta, j); err != nil {
+	if err := applyRecordUpdates(meta, j, nil); err != nil {
 		return err
 	}
 	if err := migratePoint(ctx, fault, "record-updates"); err != nil {
@@ -779,7 +788,7 @@ func RecoverMigration(ctx context.Context, r *gitexec.Runner, cwd, id, direction
 			return err
 		}
 	}
-	if err := applyRecordUpdates(meta, j); err != nil {
+	if err := applyRecordUpdates(meta, j, nil); err != nil {
 		return err
 	}
 	if err := removeOwnedStore(filepath.Join(base, recordsName(id))); err != nil {
@@ -909,18 +918,29 @@ func AbandonMigration(ctx context.Context, r *gitexec.Runner, cwd, id string) (c
 	if policyErr != nil && !errors.Is(policyErr, os.ErrNotExist) {
 		return result, policyErr
 	}
+	q, err := configtx.NewQuarantine(meta, id, "encrypt")
+	if err != nil {
+		return result, err
+	}
 	if !published {
 		if err := matchHeads(ctx, r, w.Store, j.OldHeads); err != nil {
 			return result, fmt.Errorf("%w: the store in service isn't the original history (%v); run git local encrypt recover %s --rollback", storage.ErrConflict, err, id)
 		}
-	} else if err := applyRecordUpdates(meta, j); err != nil {
+	} else if err := applyRecordUpdates(meta, j, func(name string) error {
+		// Something outside git-local changed this journal since the
+		// migration prepared its update. Neither version fits the encrypted
+		// history, and resuming needs the key, so keep it aside instead.
+		entry, err := q.QuarantineJournal(meta, "transactions/completed/"+name, "completed journal changed outside git-local during the migration; it matches neither its version before nor after it")
+		if err != nil {
+			return err
+		}
+		result.Quarantined = append(result.Quarantined, entry)
+		result.Warnings = append(result.Warnings, "completed journal "+name+" changed outside git-local during the migration and was quarantined; git local doctor reports what it described")
+		return nil
+	}); err != nil {
 		// Completed journals must describe the encrypted history in service
 		// before the prepared rewrites are quarantined.
 		return result, fmt.Errorf("%w: completed journals can't be updated for the encrypted history (%v); run git local encrypt recover %s --resume", storage.ErrConflict, err, id)
-	}
-	q, err := configtx.NewQuarantine(meta, id, "encrypt")
-	if err != nil {
-		return result, err
 	}
 	for _, item := range []struct{ name, reason string }{
 		{stageName(id), "encrypted history prepared by the migration"},

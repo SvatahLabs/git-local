@@ -92,7 +92,9 @@ moved to `.git/gitlocal/quarantine/<id>/` with a `manifest.json` describing
 them. An abandoned encryption migration moves its prepared and replaced stores
 there instead of deleting them; before the policy is published, the original
 store must still be in service, and after it, completed restore and seed
-journals are first updated for the encrypted history. The quarantine is never deleted automatically
+journals are first updated for the encrypted history (one changed outside
+git-local during the migration is quarantined instead, so abandon needs no key,
+and doctor reports the recovery ref its restore leaves). The quarantine is never deleted automatically
 and isn't included in backups; delete it once you've checked its contents. The
 abandoned journal is archived with outcome `abandoned`, and a restore keeps its
 recovery ref. Run `git local doctor` afterwards to check the result.

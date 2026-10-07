@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"gitlocal/internal/configtx"
@@ -13,9 +14,13 @@ import (
 	"gitlocal/internal/workspace"
 )
 
-// OrphanRef is a recovery ref that no restore journal names.
+// OrphanRef is a recovery ref that no restore journal names. Quarantine is
+// the quarantine directory holding its journal when an abandoned encryption
+// migration set the journal aside; the ref then still keeps that restore's
+// recovery snapshot.
 type OrphanRef struct {
 	Ref, WorkspaceID, ID, Commit string
+	Quarantine                   string
 }
 
 // OrphanRefs lists the recovery refs of restores that stopped after
@@ -67,7 +72,17 @@ func OrphanRefs(ctx context.Context, r *gitexec.Runner, w workspace.Context) ([]
 		if !strings.HasSuffix(string(object), "\n\nGit Local restore recovery "+id+"\n") {
 			continue
 		}
-		orphans = append(orphans, OrphanRef{Ref: ref, WorkspaceID: workspaceID, ID: id, Commit: commit})
+		orphan := OrphanRef{Ref: ref, WorkspaceID: workspaceID, ID: id, Commit: commit}
+		quarantines, err := meta.ReadDir(configtx.QuarantineDir)
+		if err != nil && !os.IsNotExist(err) {
+			return nil, err
+		}
+		for _, q := range quarantines {
+			if _, err := meta.Lstat(filepath.Join(configtx.QuarantineDir, q.Name(), "journals", filepath.Base(completedPath(id)))); err == nil {
+				orphan.Quarantine = filepath.Join(w.Common, "gitlocal", configtx.QuarantineDir, q.Name())
+			}
+		}
+		orphans = append(orphans, orphan)
 	}
 	return orphans, nil
 }
@@ -93,6 +108,9 @@ func AbandonOrphanRef(ctx context.Context, r *gitexec.Runner, cwd, id string) (c
 				return err
 			}
 			result.Removed = append(result.Removed, orphan.Ref)
+			if orphan.Quarantine != "" {
+				result.Warnings = append(result.Warnings, "the restore's journal is quarantined in "+orphan.Quarantine+"; its recovery snapshot "+orphan.Commit+" is no longer referenced")
+			}
 		}
 		if len(result.Removed) == 0 {
 			return os.ErrNotExist

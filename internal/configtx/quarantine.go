@@ -145,6 +145,23 @@ func (q *Quarantine) QuarantineFile(meta, files *storage.Dir, name, root, reason
 	return entry, files.Remove(name)
 }
 
+// QuarantineJournal moves a completed journal into the quarantine, under
+// journals/. Both live in <common>/gitlocal, so the move is a rename.
+func (q *Quarantine) QuarantineJournal(meta *storage.Dir, name, reason string) (QuarantineEntry, error) {
+	entry := QuarantineEntry{File: path.Join("journals", path.Base(name)), Source: name, Kind: "journal", Reason: reason}
+	if path.Dir(name) != "transactions/completed" || !strings.HasSuffix(name, ".json") {
+		return entry, fmt.Errorf("refusing to quarantine %q", name)
+	}
+	if err := meta.MkdirAll(path.Join(quarantinePath(q.TransactionID), "journals")); err != nil {
+		return entry, err
+	}
+	q.add(entry)
+	if err := q.Save(meta); err != nil {
+		return entry, err
+	}
+	return entry, meta.Rename(name, path.Join(quarantinePath(q.TransactionID), entry.File))
+}
+
 // QuarantineStore moves a directory owned by an encryption migration from
 // <common>/gitlocal into the quarantine. Both live in the same directory, so
 // the move is a rename and never copies or deletes bytes.
