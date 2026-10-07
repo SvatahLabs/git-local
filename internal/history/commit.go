@@ -27,7 +27,11 @@ type Result struct {
 	Warnings []string
 	// Skipped lists paths whose current content wasn't saved because a
 	// sensitive rule covers them only by spelling or kind.
-	Skipped      []string
+	Skipped []string
+	// Unsaved lists the skipped paths present in the checkout whose content
+	// or mode differs from the version carried forward (or that have none),
+	// so removing the checkout would lose them.
+	Unsaved      []string
 	Subprocesses uint64
 }
 type fault func(string) error
@@ -178,6 +182,14 @@ func commitWithOptions(ctx context.Context, r *gitexec.Runner, cwd, message, wri
 		for _, entry := range entries {
 			if rule, ok := secure.uncoveredRule(entry.Path); ok {
 				skipped[entry.Path] = rule
+				oldFile, carried := oldFiles[entry.Path]
+				changed, err := skippedChanged(ctx, r, w.Store, files, entry, oldFile, carried)
+				if err != nil {
+					return err
+				}
+				if changed {
+					result.Unsaved = append(result.Unsaved, entry.Path)
+				}
 				continue
 			}
 			kept = append(kept, entry)
@@ -456,4 +468,36 @@ func commitWithOptions(ctx context.Context, r *gitexec.Runner, cwd, message, wri
 		return nil
 	})
 	return result, err
+}
+
+// skippedChanged reports whether a skipped checkout entry differs from the
+// version that will be carried forward. It hashes without -w, so no object
+// (and no plaintext) is written to the private store.
+func skippedChanged(ctx context.Context, r *gitexec.Runner, store string, files *storage.Dir, entry selection.Entry, old fileValue, carried bool) (bool, error) {
+	mode := "100644"
+	if entry.Mode&os.ModeSymlink != 0 {
+		mode = "120000"
+	} else if entry.Mode&0111 != 0 {
+		mode = "100755"
+	}
+	if !carried || old.Mode != mode {
+		return true, nil
+	}
+	var id []byte
+	if mode == "120000" {
+		target, err := files.ReadLink(entry.Path)
+		if err != nil {
+			return false, err
+		}
+		if id, err = r.History(ctx, store, strings.NewReader(target), "hash-object", "--stdin", "--no-filters"); err != nil {
+			return false, err
+		}
+	} else if _, err := files.StreamStable(entry.Path, func(input io.Reader) error {
+		var e error
+		id, e = r.History(ctx, store, input, "hash-object", "--stdin", "--no-filters")
+		return e
+	}); err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(string(id)) != old.ID, nil
 }

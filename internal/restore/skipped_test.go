@@ -2,8 +2,10 @@ package restore
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"gitlocal/internal/keymaterial"
@@ -36,8 +38,8 @@ func TestRestoreOfSkippedPathWritesNoNewPlaintext(t *testing.T) {
 	}
 	common.Close()
 	write(t, repo.Root, "notes/Secret.txt", "TOKEN=unsaved-local-change\n")
-	if _, err := Execute(ctx, r, repo.Root, "", source, []string{"notes/Secret.txt"}, true); err == nil {
-		t.Fatal("restore over an unsaved skipped file succeeded")
+	if _, err := Execute(ctx, r, repo.Root, "", source, []string{"notes/Secret.txt"}, true); !errors.Is(err, storage.ErrConflict) || !strings.Contains(err.Error(), "can't be kept as a recovery copy") {
+		t.Fatalf("restore over an unsaved skipped file was not refused as a skipped path: %v", err)
 	}
 	objects, err := r.History(ctx, w.Store, nil, "cat-file", "--batch-all-objects", "--batch", "--unordered")
 	if err != nil {

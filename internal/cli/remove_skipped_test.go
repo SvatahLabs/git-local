@@ -13,7 +13,11 @@ import (
 	"gitlocal/internal/testutil"
 )
 
-func TestWorkspaceRemoveRefusesSkippedChangesUnlessForced(t *testing.T) {
+// skippedRemoveFixture gives a linked worktree seeded with notes/Secret.txt
+// under a policy from an earlier release that spells the rule differently, so
+// snapshots skip that file and carry its saved version forward.
+func skippedRemoveFixture(t *testing.T) (*testutil.Repo, string, func(root, path, content string)) {
+	t.Helper()
 	repo := testutil.New(t)
 	repo.Commit()
 	home := filepath.Join(repo.Root, "fixture-home")
@@ -44,6 +48,9 @@ func TestWorkspaceRemoveRefusesSkippedChangesUnlessForced(t *testing.T) {
 		t.Fatal(err)
 	}
 	successful(t, linked, "init", "--from", "main")
+	// The linked workspace saves its own copy before the policy exists, so a
+	// later skip has a version to carry forward.
+	successful(t, linked, "commit", "-m", "linked notes")
 	// A policy from an earlier release spelled the rule differently.
 	common := filepath.Join(repo.Root, ".git")
 	keyPath := filepath.Join(t.TempDir(), "sensitive.key")
@@ -62,6 +69,11 @@ func TestWorkspaceRemoveRefusesSkippedChangesUnlessForced(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir.Close()
+	return repo, linked, write
+}
+
+func TestWorkspaceRemoveRefusesSkippedChangesUnlessForced(t *testing.T) {
+	repo, linked, write := skippedRemoveFixture(t)
 	write(linked, "notes/Secret.txt", "TOKEN=unsaved\n")
 	code, out, diagnostic := callCLI(t, repo.Root, "workspace", "remove", linked)
 	if code == 0 || !strings.Contains(diagnostic, `skipped "notes/Secret.txt"`) || !strings.Contains(diagnostic, "Warning:") || !strings.Contains(diagnostic, "--force") {
@@ -87,5 +99,18 @@ func TestWorkspaceRemoveRefusesSkippedChangesUnlessForced(t *testing.T) {
 	}
 	if _, err := os.Stat(linked); !os.IsNotExist(err) {
 		t.Fatalf("forced removal left the worktree: %v", err)
+	}
+}
+
+// An unchanged skipped file loses nothing on removal, so no --force is needed
+// (which would also discard tracked-file edits).
+func TestWorkspaceRemoveAllowsUnchangedSkippedFile(t *testing.T) {
+	repo, linked, _ := skippedRemoveFixture(t)
+	code, out, diagnostic := callCLI(t, repo.Root, "workspace", "remove", linked)
+	if code != 0 || !strings.Contains(out, "Removed and retained workspace") || !strings.Contains(diagnostic, `skipped "notes/Secret.txt"`) {
+		t.Fatalf("removal with an unchanged skipped file (exit %d):\n%s\n%s", code, out, diagnostic)
+	}
+	if _, err := os.Stat(linked); !os.IsNotExist(err) {
+		t.Fatalf("removal left the worktree: %v", err)
 	}
 }
