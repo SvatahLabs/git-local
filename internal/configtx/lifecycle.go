@@ -78,8 +78,13 @@ func (s *session) registrations(ctx context.Context) ([]registration, error) {
 		}
 		path := strings.TrimSuffix(string(b), "\n")
 		path = strings.TrimSuffix(path, "\r")
-		if !filepath.IsAbs(path) || strings.ContainsAny(path, "\x00\r\n") {
+		if path == "" || strings.ContainsAny(path, "\x00\r\n") {
 			return nil, errors.New("unsupported worktree gitdir pointer")
+		}
+		if !filepath.IsAbs(path) {
+			// Git 2.48+ records it relative to the administrative directory
+			// with worktree.useRelativePaths or --relative-paths.
+			path = filepath.Join(s.w.Common, rel, filepath.FromSlash(path))
 		}
 		admins[filepath.Join(s.w.Common, rel)] = cleanRoot(filepath.Dir(path))
 	}

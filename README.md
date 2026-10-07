@@ -197,6 +197,10 @@ git -C <new-worktree> local init --from main
 git -C <another-new-worktree> local init --from <workspace-uuid> --paths notes/a notes/b
 ```
 
+Linked worktrees whose Git records use relative paths
+(`git worktree add --relative-paths` or `worktree.useRelativePaths`) work like
+any other.
+
 State lives in `<git-common-dir>/gitlocal/`, with a workspace identity file in
 each checkout's administrative directory. Linked worktrees have independent
 identities and retain common-store records after removal. Initialization leaves
