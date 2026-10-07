@@ -112,3 +112,77 @@ func TestRelativeWorktreePathsWork(t *testing.T) {
 		}
 	}
 }
+
+// linkedWorkspace adds and initializes a linked worktree at dir/linked that
+// selects its own notes.local.
+func linkedWorkspace(t *testing.T, repo *testutil.Repo, dir, branch string) string {
+	t.Helper()
+	linked := filepath.Join(dir, "linked")
+	repo.Git("worktree", "add", "-q", "-b", branch, linked)
+	linked, err := filepath.EvalSymlinks(linked)
+	if err != nil {
+		t.Fatal(err)
+	}
+	successful(t, linked, "init")
+	if err := os.WriteFile(filepath.Join(linked, "notes.local"), []byte("linked notes\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	successful(t, linked, "track", "notes.local")
+	return linked
+}
+
+// TestOfflineWorktreeIsUnavailableNotFatal: a worktree on an offline volume
+// fails stat with errors other than ENOENT or EACCES. Here its parent is
+// replaced by a file, so stat reports ENOTDIR. The other checkouts keep
+// working and are warned.
+func TestOfflineWorktreeIsUnavailableNotFatal(t *testing.T) {
+	repo := layoutRepo(t)
+	volume := filepath.Join(t.TempDir(), "volume")
+	if err := os.Mkdir(volume, 0700); err != nil {
+		t.Fatal(err)
+	}
+	linked := linkedWorkspace(t, repo, volume, "offline")
+	if err := os.Rename(volume, volume+".away"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(volume, []byte("not a directory\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(linked); err == nil || os.IsNotExist(err) || os.IsPermission(err) {
+		t.Fatalf("stat error is %v, want neither ENOENT nor EACCES", err)
+	}
+	unavailable := false
+	for _, w := range listWorkspaces(t, repo.Root) {
+		unavailable = unavailable || w.Root == linked && !w.Available && w.State == "unavailable"
+	}
+	if !unavailable {
+		t.Fatalf("workspace list: %+v", listWorkspaces(t, repo.Root))
+	}
+	if err := os.WriteFile(filepath.Join(repo.Root, "main.local"), []byte("main notes\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	code, _, diagnostic := callCLI(t, repo.Root, "track", "main.local")
+	if code != 0 || !strings.Contains(diagnostic, "unavailable") {
+		t.Fatalf("track beside an offline worktree: exit %d: %s", code, diagnostic)
+	}
+	code, _, diagnostic = callCLI(t, repo.Root, "init")
+	if code != 0 || !strings.Contains(diagnostic, linked) || !strings.Contains(diagnostic, "unavailable") {
+		t.Fatalf("init beside an offline worktree: exit %d: %s", code, diagnostic)
+	}
+	successful(t, repo.Root, "commit", "-m", "main notes")
+	successful(t, repo.Root, "status")
+	doctorReportsNoErrors(t, repo.Root)
+	// The volume comes back.
+	if err := os.Remove(volume); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(volume+".away", volume); err != nil {
+		t.Fatal(err)
+	}
+	successful(t, linked, "commit", "-m", "linked notes")
+	for _, w := range listWorkspaces(t, repo.Root) {
+		if !w.Available {
+			t.Fatalf("workspace still unavailable: %+v", w)
+		}
+	}
+}

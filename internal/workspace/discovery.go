@@ -24,7 +24,13 @@ type Context struct {
 	WorkspaceID  string
 	Head         string
 	Branch       string
+	// Warnings from Init about registered worktrees it had to skip.
+	Warnings []string
 }
+
+// StatRoot stats a registered worktree root. Tests replace it to simulate an
+// offline volume.
+var StatRoot = os.Stat
 
 func pathOutput(b []byte, cwd string) (string, error) {
 	s := strings.TrimSuffix(string(b), "\n")
@@ -107,10 +113,13 @@ func registeredRoots(ctx context.Context, r *gitexec.Runner, w *Context) ([]stri
 	for _, record := range bytes.Split(b, []byte{0}) {
 		if bytes.HasPrefix(record, []byte("worktree ")) {
 			p := string(record[len("worktree "):])
-			if resolved, e := filepath.EvalSymlinks(p); e == nil {
-				p = resolved
-			} else if !os.IsNotExist(e) && !os.IsPermission(e) {
-				return nil, e
+			// Any error means the worktree is unavailable: an offline volume
+			// reports ESTALE, ENOTCONN, EIO, ENOTDIR or ERROR_NOT_READY, not
+			// only ENOENT or EACCES.
+			if _, e := StatRoot(p); e == nil {
+				if resolved, e := filepath.EvalSymlinks(p); e == nil {
+					p = resolved
+				}
 			}
 			if filepath.Clean(p) != w.Common {
 				roots = append(roots, filepath.Clean(p))

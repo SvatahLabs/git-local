@@ -153,7 +153,7 @@ func (s *session) inventory(ctx context.Context) ([]WorkspaceInfo, error) {
 			item.Admin = reg.admin
 			item.Locked = reg.locked
 			item.Moved = cleanRoot(record.Root) != reg.root
-			if fi, e := os.Stat(reg.root); e == nil && fi.IsDir() {
+			if fi, e := workspace.StatRoot(reg.root); e == nil && fi.IsDir() {
 				admin, e := s.r.AdminAt(ctx, reg.root)
 				if e == nil && cleanRoot(admin) == cleanRoot(reg.admin) && reg.id == src.ID {
 					item.Available = true

@@ -66,10 +66,11 @@ func Run(ctx context.Context, r *gitexec.Runner, cwd, from string, paths []strin
 	if from != "main" && !storage.ValidUUID(from) {
 		return configtx.SeedResult{}, errors.New("--from requires main or a workspace UUID")
 	}
-	if _, err := workspace.Init(ctx, r, cwd); err != nil {
+	initialized, err := workspace.Init(ctx, r, cwd)
+	if err != nil {
 		return configtx.SeedResult{}, err
 	}
-	return configtx.Seed(ctx, r, cwd, func(w workspace.Context) (configtx.SeedPlan, error) {
+	result, err := configtx.Seed(ctx, r, cwd, func(w workspace.Context) (configtx.SeedPlan, error) {
 		result := configtx.SeedPlan{}
 		id := from
 		var err error
@@ -152,6 +153,8 @@ func Run(ctx context.Context, r *gitexec.Runner, cwd, from string, paths []strin
 		sort.Slice(result.Files, func(i, j int) bool { return result.Files[i].Path < result.Files[j].Path })
 		return result, nil
 	})
+	result.Warnings = append(initialized.Warnings, result.Warnings...)
+	return result, err
 }
 
 func Recover(ctx context.Context, r *gitexec.Runner, cwd, id string, rollback bool) (configtx.SeedResult, error) {

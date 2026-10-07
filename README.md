@@ -199,7 +199,10 @@ git -C <another-new-worktree> local init --from <workspace-uuid> --paths notes/a
 
 Linked worktrees whose Git records use relative paths
 (`git worktree add --relative-paths` or `worktree.useRelativePaths`) work like
-any other.
+any other. A registered worktree that can't be reached, whatever the error (a
+deleted directory, an unmounted drive, an offline network share), counts as
+unavailable: the other checkouts keep working and warn about it, and its saved
+rules stay in the shared ignore block.
 
 State lives in `<git-common-dir>/gitlocal/`, with a workspace identity file in
 each checkout's administrative directory. Linked worktrees have independent

@@ -120,9 +120,11 @@ func New(out, errOut io.Writer) *cobra.Command {
 			}
 			// It also rewrites a managed ignore block an earlier release wrote.
 			var refreshed bool
-			var warnings []string
+			warnings := w.Warnings
 			if err == nil {
-				refreshed, warnings, err = configtx.RefreshIgnore(c.Context(), r, cwd)
+				var refreshWarnings []string
+				refreshed, refreshWarnings, err = configtx.RefreshIgnore(c.Context(), r, cwd)
+				warnings = append(warnings, refreshWarnings...)
 				if err != nil {
 					err = fmt.Errorf("initialized local workspace %s, but the managed ignore block needs repair: %w", w.WorkspaceID, err)
 				}

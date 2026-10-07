@@ -28,11 +28,13 @@ func (s *session) locations(ctx context.Context) (map[string]location, error) {
 	}
 	found := map[string]location{}
 	for _, root := range roots {
-		if _, err = os.Stat(root); err != nil {
-			if os.IsNotExist(err) || os.IsPermission(err) {
-				continue
+		// Any error means the worktree is unavailable, as on an offline
+		// volume; its saved rules are kept without verification.
+		if _, err = workspace.StatRoot(root); err != nil {
+			if root == s.w.Root {
+				return nil, err
 			}
-			return nil, err
+			continue
 		}
 		admin := s.w.Admin
 		if root != s.w.Root {

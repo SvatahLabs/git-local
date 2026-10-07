@@ -400,11 +400,16 @@ func checkDuplicates(ctx context.Context, r *gitexec.Runner, w *Context) error {
 		return err
 	}
 	seen := map[string]string{w.WorkspaceID: w.Admin}
+	w.Warnings = nil
 	for _, root := range roots {
-		if _, e := os.Stat(root); os.IsNotExist(e) {
+		if _, e := StatRoot(root); e != nil {
+			if root == w.Root {
+				return e
+			}
+			if !os.IsNotExist(e) {
+				w.Warnings = append(w.Warnings, fmt.Sprintf("registered worktree %s is unavailable (%v); its identity was not checked", root, e))
+			}
 			continue
-		} else if e != nil {
-			return e
 		}
 		// Never propagate the caller's GIT_DIR into discovery of another checkout.
 		var e error
