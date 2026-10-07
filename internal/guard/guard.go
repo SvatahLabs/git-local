@@ -75,7 +75,9 @@ func Staged(ctx context.Context, r *gitexec.Runner, cwd, index string) ([]Findin
 			continue
 		}
 		for _, staged := range aliasPaths(paths, version.Manifest.Path) {
-			candidate, err := r.IndexBlob(ctx, snapshot.Root, index, staged)
+			// Read the blob directly: the path comes from Git, and an alias
+			// spelling such as conf\app.conf fails IndexBlob's checks.
+			candidate, err := r.Guard(ctx, snapshot.Root, index, "cat-file", "blob", ":0:"+staged)
 			if err != nil {
 				return nil, err
 			}

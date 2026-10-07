@@ -87,13 +87,20 @@ func ValidateSelectionPath(path string) error {
 }
 
 // PortableAlias maps a path that fails ValidateSelectionPath to the spelling a
-// Windows filesystem would resolve it to: backslashes separate components, and
-// trailing dots and spaces are dropped. Such a path can never be selected
-// itself, so guards compare this alias with AliasKey instead of rejecting it.
+// Windows filesystem would resolve it to: backslashes separate components,
+// repeated separators collapse, an NTFS stream suffix (name::$DATA,
+// name:stream) names the file itself, and trailing dots and spaces are
+// dropped. Such a path can never be selected itself, so guards compare this
+// alias with AliasKey instead of rejecting it.
 func PortableAlias(path string) string {
-	parts := strings.Split(strings.ReplaceAll(path, "\\", "/"), "/")
-	for i, part := range parts {
-		parts[i] = strings.TrimRight(part, ". ")
+	var parts []string
+	for _, part := range strings.Split(strings.ReplaceAll(path, "\\", "/"), "/") {
+		if i := strings.IndexByte(part, ':'); i >= 0 {
+			part = part[:i]
+		}
+		if part = strings.TrimRight(part, ". "); part != "" {
+			parts = append(parts, part)
+		}
 	}
 	return strings.Join(parts, "/")
 }

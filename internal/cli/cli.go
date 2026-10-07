@@ -1146,6 +1146,9 @@ func guardCommand() *cobra.Command {
 			return guardRepositoryError{err}
 		}
 		defer r.Close()
+		if err := checkHookRepository(c.Context(), r, cwd); err != nil {
+			return guardRepositoryError{err}
+		}
 		findings, err := guard.Staged(c.Context(), r, cwd, index)
 		if err != nil {
 			return guardRepositoryError{err}
@@ -1185,6 +1188,9 @@ func guardCommand() *cobra.Command {
 			return guardRepositoryError{err}
 		}
 		defer r.Close()
+		if err := checkHookRepository(c.Context(), r, cwd); err != nil {
+			return guardRepositoryError{err}
+		}
 		findings, err := guard.Push(c.Context(), r, cwd, args[0], c.InOrStdin())
 		if err != nil {
 			return guardRepositoryError{err}
@@ -1243,6 +1249,32 @@ func printHookLocation(c *cobra.Command, status hook.Status, names []string) {
 	if len(status.Tracked) > 0 {
 		fmt.Fprintf(c.OutOrStdout(), "tracked: %s\n", strings.Join(status.Tracked, ", "))
 	}
+}
+
+// checkHookRepository refuses a guard run whose GIT_DIR names a repository
+// other than the one the working directory belongs to, as with git
+// --git-dir=A --work-tree=B. The guard finds its repository from the working
+// directory, so it would otherwise check the wrong one.
+func checkHookRepository(ctx context.Context, r *gitexec.Runner, cwd string) error {
+	gitDir := os.Getenv("GIT_DIR")
+	if gitDir == "" {
+		return nil
+	}
+	if !filepath.IsAbs(gitDir) {
+		gitDir = filepath.Join(cwd, gitDir)
+	}
+	b, err := r.Guard(ctx, cwd, "", "rev-parse", "--absolute-git-dir")
+	found := strings.TrimSpace(string(b))
+	if err == nil {
+		want, wantErr := os.Stat(gitDir)
+		got, gotErr := os.Stat(found)
+		if wantErr == nil && gotErr == nil && os.SameFile(want, got) {
+			return nil
+		}
+	} else {
+		found = "no repository"
+	}
+	return fmt.Errorf("Git runs this hook for the repository at %s, but the working directory %s belongs to %s; run Git from that repository's worktree instead of with --git-dir and --work-tree", gitDir, cwd, found)
 }
 
 func guardRunner() (*gitexec.Runner, error) {

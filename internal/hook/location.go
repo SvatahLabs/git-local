@@ -3,9 +3,8 @@ package hook
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
-	"runtime"
-	"strings"
 
 	"gitlocal/internal/gitexec"
 	"gitlocal/internal/storage"
@@ -108,12 +107,23 @@ func resolveExisting(p string) string {
 	}
 }
 
-// within compares case-insensitively on macOS and Windows, whose default
-// filesystems are, so a differently cased path still counts as inside.
+// within reports whether p is root or inside it. It compares root with p's
+// existing ancestors by file identity, so it follows the filesystem's own
+// rules for case and Unicode normalization: a differently cased or normalized
+// spelling counts on a default macOS or Windows volume, but not on a
+// case-sensitive one. A root that doesn't exist is compared by path.
 func within(root, p string) bool {
-	if runtime.GOOS == "darwin" || runtime.GOOS == "windows" {
-		root, p = strings.ToLower(root), strings.ToLower(p)
+	rootInfo, err := os.Stat(root)
+	if err != nil {
+		rel, err := filepath.Rel(root, p)
+		return err == nil && (rel == "." || filepath.IsLocal(rel))
 	}
-	rel, err := filepath.Rel(root, p)
-	return err == nil && (rel == "." || filepath.IsLocal(rel))
+	for dir := filepath.Clean(p); ; dir = filepath.Dir(dir) {
+		if info, err := os.Stat(dir); err == nil && os.SameFile(rootInfo, info) {
+			return true
+		}
+		if filepath.Dir(dir) == dir {
+			return false
+		}
+	}
 }

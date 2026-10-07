@@ -241,7 +241,9 @@ Git's effective `core.hooksPath` directory. In a repository with no git-local
 state (no `<git-common-dir>/gitlocal` directory), `guard staged` and `guard push`
 succeed without output, so a hook directory shared with such repositories
 doesn't block their commits or pushes; partial or damaged state still fails
-closed.
+closed. A guard run whose `GIT_DIR` names another repository than the one its
+working directory belongs to (`git --git-dir=A --work-tree=B commit`) is
+refused, because the guard would check the wrong repository.
 Git's default hook directory is shared by linked worktrees, so one
 installation covers them. `hook install` and `auto install` refuse a hooks directory inside any
 worktree (for example `core.hooksPath=.githooks` or husky's `.husky`), where the
