@@ -375,8 +375,9 @@ value you now want, and run `git local overlay add <name> -- <file>`. The saved
 versions remain available throughout; `git restore` discards unstaged edits in
 that file, so preserve any unrelated edits first.
 
-Exit codes: `0` success, `1` operation failure/cancellation, `2` invalid usage,
-`3` conflict or recovery required. Alternate-index/object/configuration injection
+Exit codes: `0` success, `1` operation failure/cancellation, `2` invalid usage
+(including a mistyped subcommand, extra arguments or a malformed ID), `3`
+conflict or recovery required. Alternate-index/object/configuration injection
 contexts, including `git -c ... local`, are rejected.
 
 See the [public command reference](project/specifications/proposal/COMMANDS.md)

@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 	"gitlocal/internal/encryption"
 	"gitlocal/internal/gitexec"
+	"gitlocal/internal/storage"
 )
 
 func encryptionCommand() *cobra.Command {
@@ -75,6 +76,9 @@ func encryptionCommand() *cobra.Command {
 	recoverCommand := &cobra.Command{Use: "recover <transaction-id>", Short: "Resolve an interrupted encryption migration", Args: func(_ *cobra.Command, args []string) error {
 		if len(args) != 1 || resume == rollback {
 			return usageError{errors.New("encrypt recover requires one transaction ID and exactly one of --resume or --rollback")}
+		}
+		if !storage.ValidUUID(args[0]) {
+			return usageError{errors.New("invalid transaction ID")}
 		}
 		return nil
 	}, RunE: func(c *cobra.Command, args []string) error {

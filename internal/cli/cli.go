@@ -966,7 +966,7 @@ func hookCommand() *cobra.Command {
 		}
 		hooks.AddCommand(command)
 	}
-	hooks.AddCommand(&cobra.Command{Use: "status", Short: "Show installed guards", Args: cobra.NoArgs,
+	hooks.AddCommand(&cobra.Command{Use: "status", Short: "Show installed guards", Args: noArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
 			return inspectCommand(c, func(r *gitexec.Runner, cwd string) error {
 				status, err := hook.Inspect(c.Context(), r, cwd)
@@ -999,7 +999,7 @@ func autoCommand() *cobra.Command {
 	for _, action := range []string{"install", "uninstall"} {
 		action := action
 		var allowShared bool
-		command := &cobra.Command{Use: action, Args: cobra.NoArgs, Short: action + " automatic snapshot hooks", RunE: func(c *cobra.Command, _ []string) error {
+		command := &cobra.Command{Use: action, Args: noArgs, Short: action + " automatic snapshot hooks", RunE: func(c *cobra.Command, _ []string) error {
 			return inspectCommand(c, func(r *gitexec.Runner, cwd string) error {
 				var paths []string
 				var err error
@@ -1031,7 +1031,7 @@ func autoCommand() *cobra.Command {
 		}
 		auto.AddCommand(command)
 	}
-	auto.AddCommand(&cobra.Command{Use: "status", Args: cobra.NoArgs, Short: "Show automatic snapshot hooks", RunE: func(c *cobra.Command, _ []string) error {
+	auto.AddCommand(&cobra.Command{Use: "status", Args: noArgs, Short: "Show automatic snapshot hooks", RunE: func(c *cobra.Command, _ []string) error {
 		return inspectCommand(c, func(r *gitexec.Runner, cwd string) error {
 			status, err := hook.Inspect(c.Context(), r, cwd)
 			if err != nil {
@@ -1102,7 +1102,7 @@ func autoCommand() *cobra.Command {
 
 func guardCommand() *cobra.Command {
 	guards := &cobra.Command{Use: "guard", Short: "Check selected paths before commit or push"}
-	guards.AddCommand(&cobra.Command{Use: "staged", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
+	guards.AddCommand(&cobra.Command{Use: "staged", Args: noArgs, RunE: func(c *cobra.Command, _ []string) error {
 		cwd, err := os.Getwd()
 		if err != nil {
 			return guardRepositoryError{err}
@@ -1204,7 +1204,7 @@ func guardRunner() (*gitexec.Runner, error) {
 }
 func overlayCommand() *cobra.Command {
 	command := &cobra.Command{Use: "overlay", Short: "Keep named local patches on tracked files out of mainline commits"}
-	command.AddCommand(&cobra.Command{Use: "status", Short: "Inspect active patches and upstream conflicts", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
+	command.AddCommand(&cobra.Command{Use: "status", Short: "Inspect active patches and upstream conflicts", Args: noArgs, RunE: func(c *cobra.Command, _ []string) error {
 		return inspectCommand(c, func(r *gitexec.Runner, cwd string) error {
 			statuses, err := overlay.Inspect(c.Context(), r, cwd)
 			if err != nil {
@@ -1306,7 +1306,7 @@ func overlayCommand() *cobra.Command {
 			return err
 		})
 	}})
-	command.AddCommand(&cobra.Command{Use: "filter-process", Hidden: true, Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
+	command.AddCommand(&cobra.Command{Use: "filter-process", Hidden: true, Args: noArgs, RunE: func(c *cobra.Command, _ []string) error {
 		if jsonEnabled(c) {
 			return usageError{errors.New("overlay filter-process is a Git protocol command and does not accept --json")}
 		}
@@ -1347,6 +1347,7 @@ func Execute(ctx context.Context, args []string, out, errOut io.Writer) int {
 	c.SetArgs(args)
 	c.InitDefaultHelpCmd()
 	c.InitDefaultCompletionCmd()
+	enforceUsage(c)
 	_, _, findErr := c.Find(args)
 	if findErr != nil {
 		if jsonMode {
@@ -1387,6 +1388,49 @@ func Execute(ctx context.Context, args []string, out, errOut io.Writer) int {
 		fmt.Fprintf(errOut, "git local: %v\n", err)
 	}
 	return code
+}
+
+// enforceUsage makes every command honor the usage exit code: a group
+// command given an unknown subcommand, and any failed argument check, report
+// a usageError instead of printing help or a plain error.
+func enforceUsage(c *cobra.Command) {
+	if c.HasSubCommands() && !c.Runnable() {
+		c.Args = cobra.ArbitraryArgs
+		c.RunE = func(c *cobra.Command, args []string) error {
+			if len(args) != 0 {
+				return unknownCommand(c, args[0])
+			}
+			return c.Help()
+		}
+	} else if validate := c.Args; validate != nil {
+		c.Args = func(c *cobra.Command, args []string) error {
+			err := validate(c, args)
+			var usage usageError
+			if err != nil && !errors.As(err, &usage) {
+				return usageError{err}
+			}
+			return err
+		}
+	}
+	for _, child := range c.Commands() {
+		enforceUsage(child)
+	}
+}
+
+// noArgs rejects arguments as invalid usage.
+func noArgs(c *cobra.Command, args []string) error {
+	if len(args) != 0 {
+		return usageError{fmt.Errorf("%s accepts no arguments", strings.Replace(c.CommandPath(), "git-local", "git local", 1))}
+	}
+	return nil
+}
+
+func unknownCommand(c *cobra.Command, name string) error {
+	message := fmt.Sprintf("unknown command %q for %q", name, strings.Replace(c.CommandPath(), "git-local", "git local", 1))
+	if suggestions := c.SuggestionsFor(name); len(suggestions) != 0 {
+		message += "; did you mean " + strings.Join(suggestions, " or ") + "?"
+	}
+	return usageError{errors.New(message)}
 }
 
 func inspectCommand(c *cobra.Command, fn func(*gitexec.Runner, string) error) error {
