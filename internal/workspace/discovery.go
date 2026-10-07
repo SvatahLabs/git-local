@@ -204,6 +204,18 @@ func validateLayout(ctx context.Context, r *gitexec.Runner, w *Context) error {
 
 // RegisteredRoots lists current registrations; durable workspace records remain
 // authoritative for selections when a registered checkout is unavailable.
+// The main checkout comes first, unless the repository is bare.
 func RegisteredRoots(ctx context.Context, r *gitexec.Runner, w *Context) ([]string, error) {
 	return registeredRoots(ctx, r, w)
+}
+
+// Bare reports whether the repository is bare, so its worktrees are all
+// linked ones and it has no main checkout.
+func Bare(ctx context.Context, r *gitexec.Runner, w *Context) (bool, error) {
+	b, err := r.Main(ctx, w.Root, w.Admin, "worktree", "list", "--porcelain", "-z")
+	if err != nil {
+		return false, err
+	}
+	records := bytes.Split(b, []byte{0})
+	return len(records) > 1 && bytes.HasPrefix(records[0], []byte("worktree ")) && string(records[1]) == "bare", nil
 }

@@ -63,9 +63,6 @@ func retire(ctx context.Context, r *gitexec.Runner, cwd, id string, f fault) (Re
 	if target.ID == "" {
 		return Result{}, errors.New("unknown workspace UUID")
 	}
-	if err = s.retireEligible(ctx, id); err != nil {
-		return Result{}, err
-	}
 	record, err := target.record()
 	if err != nil {
 		return Result{}, err
@@ -73,6 +70,9 @@ func retire(ctx context.Context, r *gitexec.Runner, cwd, id string, f fault) (Re
 	result := Result{WorkspaceID: id}
 	if record.State == "retained" {
 		return result, nil
+	}
+	if err = s.retireEligible(ctx, id); err != nil {
+		return Result{}, err
 	}
 	before, err := readImage(s.common, "info/exclude")
 	if err != nil {

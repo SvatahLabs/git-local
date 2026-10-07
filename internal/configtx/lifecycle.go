@@ -28,7 +28,7 @@ type WorkspaceInfo struct {
 }
 type registration struct {
 	root, admin, id string
-	locked          bool
+	locked, bare    bool
 }
 
 func cleanRoot(p string) string {
@@ -47,18 +47,31 @@ func (s *session) registrations(ctx context.Context) ([]registration, error) {
 		value := string(field)
 		if strings.HasPrefix(value, "worktree ") {
 			regs = append(regs, registration{root: cleanRoot(strings.TrimPrefix(value, "worktree "))})
-		} else if value == "locked" || strings.HasPrefix(value, "locked ") {
+		} else if value == "locked" || strings.HasPrefix(value, "locked ") || value == "bare" {
 			if len(regs) == 0 {
 				return nil, errors.New("malformed worktree registration")
 			}
-			regs[len(regs)-1].locked = true
+			if value == "bare" {
+				regs[len(regs)-1].bare = true
+			} else {
+				regs[len(regs)-1].locked = true
+			}
 		}
+	}
+	// Git lists a bare repository first, though it has no worktree or
+	// identity of its own; only its linked worktrees count.
+	bare := len(regs) > 0 && regs[0].bare
+	if bare {
+		regs = regs[1:]
 	}
 	if len(regs) == 0 {
 		return nil, errors.New("missing Git worktree registrations")
 	}
 	// Administrative directories remain available when a worktree volume is offline.
-	admins := map[string]string{s.w.Common: regs[0].root}
+	admins := map[string]string{}
+	if !bare {
+		admins[s.w.Common] = regs[0].root
+	}
 	if s.w.Admin == s.w.Common {
 		admins[s.w.Common] = s.w.Root
 		regs[0].root = s.w.Root

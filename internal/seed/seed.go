@@ -18,6 +18,11 @@ import (
 )
 
 func mainWorkspace(ctx context.Context, r *gitexec.Runner, w workspace.Context) (string, error) {
+	if bare, err := workspace.Bare(ctx, r, &w); err != nil {
+		return "", err
+	} else if bare {
+		return "", errors.New("this is a worktree of a bare repository, which has no main checkout; use --from <workspace UUID> (see git local workspace list)")
+	}
 	roots, err := workspace.RegisteredRoots(ctx, r, &w)
 	if err != nil {
 		return "", err

@@ -205,7 +205,10 @@ unavailable: the other checkouts keep working and warn about it, and its saved
 rules stay in the shared ignore block. A registered worktree directory that is
 no longer a checkout (its `.git` file was deleted) is skipped by `init` with a
 warning naming `git worktree repair <path>`; if it holds a git-local
-workspace, `init` refuses until it is repaired.
+workspace, `init` refuses until it is repaired. In a bare repository's
+worktrees, every worktree is a linked one: there is no main checkout, so
+`init --from main` refuses (use a workspace UUID) and automatic seeding of new
+worktrees is skipped with a warning; removed worktrees retire as usual.
 
 State lives in `<git-common-dir>/gitlocal/`, with a workspace identity file in
 each checkout's administrative directory. Linked worktrees have independent

@@ -72,6 +72,11 @@ func Event(ctx context.Context, r *gitexec.Runner, cwd, event string) ([]string,
 		if err != nil {
 			return nil, err
 		}
+		if bare, err := workspace.Bare(ctx, r, w); err != nil {
+			return nil, err
+		} else if bare {
+			return []string{"this is a worktree of a bare repository, which has no main checkout to seed it from; run git local init here, or git local init --from <workspace UUID>"}, nil
+		}
 		roots, err := workspace.RegisteredRoots(ctx, r, w)
 		if err != nil {
 			return nil, err

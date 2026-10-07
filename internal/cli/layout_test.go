@@ -223,3 +223,67 @@ func TestRegisteredWorktreeThatIsNoCheckout(t *testing.T) {
 	successful(t, repo.Root, "init")
 	successful(t, linked, "status")
 }
+
+// TestBareRepositoryWorktreesRetire: Git lists a bare repository first among
+// its worktrees, though it isn't one. Removed linked worktrees must still be
+// retired, and --from main must say there is no main checkout.
+func TestBareRepositoryWorktreesRetire(t *testing.T) {
+	seed := testutil.New(t)
+	seed.Commit()
+	home := filepath.Join(t.TempDir(), "home")
+	if err := os.MkdirAll(home, 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", home)
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	bare := filepath.Join(dir, "repo.git")
+	seed.Git("clone", "-q", "--bare", seed.Root, bare)
+	add := func(name string, args ...string) string {
+		path := filepath.Join(dir, name)
+		seed.At(bare, append([]string{"worktree", "add", "-q"}, append(args, path)...)...)
+		return path
+	}
+	one := add("one", "-b", "one")
+	two := add("two", "-b", "two")
+	successful(t, one, "init")
+	successful(t, two, "init")
+	if err := os.WriteFile(filepath.Join(two, "notes.local"), []byte("two\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	successful(t, two, "track", "notes.local")
+	var twoID string
+	for _, w := range listWorkspaces(t, one) {
+		if w.Root == two {
+			twoID = w.ID
+		}
+	}
+	if len(listWorkspaces(t, one)) != 2 || twoID == "" {
+		t.Fatalf("workspaces: %+v", listWorkspaces(t, one))
+	}
+	seed.At(bare, "worktree", "remove", "--force", two)
+	if out := successful(t, one, "workspace", "prune", "--dry-run"); !strings.Contains(out, twoID) {
+		t.Fatalf("prune --dry-run: %s", out)
+	}
+	successful(t, one, "workspace", "retire", twoID)
+	successful(t, one, "workspace", "retire", twoID)
+	successful(t, one, "workspace", "prune")
+	for _, w := range listWorkspaces(t, one) {
+		if w.ID == twoID && w.State != "retained" {
+			t.Fatalf("removed workspace: %+v", w)
+		}
+	}
+	three := add("three", "-b", "three")
+	successful(t, three, "init")
+	successful(t, one, "workspace", "remove", three)
+	four := add("four", "-b", "four")
+	code, _, diagnostic := callCLI(t, four, "init", "--from", "main")
+	if code == 0 || !strings.Contains(diagnostic, "bare") {
+		t.Fatalf("init --from main in a bare repository's worktree: exit %d: %s", code, diagnostic)
+	}
+	doctorReportsNoErrors(t, one)
+}
