@@ -265,6 +265,11 @@ git-local binary's blocks, `hook install --allow-shared-hooks-dir` leaves them
 as they are and says so, and `hook status` reports them as installed by
 another repository; `hook uninstall` from a shared directory warns that the
 other repositories lose those hooks too.
+Install keeps an existing hook's file mode, so a hook you disabled by removing
+its execute bits stays disabled (`hook status` reports it), and adds its block
+only to `sh`, `bash`, `dash`, `ksh` or `zsh` hooks (directly or through
+`env`); for any other interpreter it refuses and explains how to call the
+guards from that hook.
 On a new branch, the pre-push guard excludes commits reachable from known
 remote-tracking branches; without those refs it scans the branch's full ancestry.
 Hooks protect against accidental leaks;

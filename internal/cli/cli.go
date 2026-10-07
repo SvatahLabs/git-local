@@ -1214,6 +1214,8 @@ func guardCommand() *cobra.Command {
 
 func hookState(status hook.Status, name string) string {
 	switch {
+	case slices.Contains(status.Disabled, name):
+		return "installed, but the hook file isn't executable, so Git skips it"
 	case slices.Contains(status.Others, name):
 		return "installed by another repository"
 	case status.Installed[name]:

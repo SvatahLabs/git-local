@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -32,7 +33,10 @@ type Status struct {
 	Installed map[string]bool
 	// Others names installed hooks in a shared Current that this repository
 	// has no record of: another repository installed them.
-	Others   []string
+	Others []string
+	// Disabled names installed hooks in Current that aren't executable, so
+	// Git skips them.
+	Disabled []string
 	Previous []string
 	Location Location
 	// Tracked names hook files in Current that the current worktree tracks.
@@ -100,20 +104,48 @@ func managed(data []byte, name string) bool {
 	start, end := markers(name)
 	return bytes.Contains(data, []byte(start)) && bytes.Contains(data, []byte(end))
 }
-func insert(data, addition []byte) ([]byte, error) {
+
+// posixShell reports whether a shebang line runs sh, bash, dash, ksh or zsh,
+// directly or through env.
+func posixShell(shebang string) bool {
+	fields := strings.Fields(strings.TrimPrefix(shebang, "#!"))
+	if len(fields) == 0 {
+		return false
+	}
+	interpreter := path.Base(fields[0])
+	if interpreter == "env" {
+		args := fields[1:]
+		for len(args) > 0 && strings.HasPrefix(args[0], "-") {
+			args = args[1:]
+		}
+		if len(args) == 0 {
+			return false
+		}
+		interpreter = path.Base(args[0])
+	}
+	switch interpreter {
+	case "sh", "bash", "dash", "ksh", "zsh":
+		return true
+	}
+	return false
+}
+
+// callInstead tells the user how to run git-local from a hook it can't edit.
+func callInstead(name string) string {
+	switch name {
+	case "pre-commit", "pre-push":
+		return "Instead, call `git local guard staged` from your pre-commit hook and `git local guard push \"$1\"` (passing the hook's standard input) from your pre-push hook."
+	}
+	return "Instead, call `git local commit --if-changed` from your " + name + " hook."
+}
+
+func insert(name string, data, addition []byte) ([]byte, error) {
 	if len(data) == 0 {
 		return append([]byte("#!/bin/sh\n"), addition...), nil
 	}
-	if !bytes.HasPrefix(data, []byte("#!")) {
-		return nil, errors.New("existing hook needs a POSIX shell shebang")
-	}
 	i := bytes.IndexByte(data, '\n')
-	if i < 0 {
-		return nil, errors.New("existing hook has no shebang newline")
-	}
-	shebang := string(data[:i])
-	if !strings.Contains(shebang, "sh") && !strings.Contains(shebang, "bash") && !strings.Contains(shebang, "zsh") {
-		return nil, errors.New("existing hook is not a shell script")
+	if !bytes.HasPrefix(data, []byte("#!")) || i < 0 || !posixShell(string(data[:i])) {
+		return nil, fmt.Errorf("%w: the existing %s hook is not a POSIX shell script (sh, bash, dash, ksh or zsh), so git-local can't add its block. %s", storage.ErrConflict, name, callInstead(name))
 	}
 	out := append([]byte{}, data[:i+1]...)
 	out = append(out, addition...)
@@ -342,7 +374,7 @@ func installNamed(ctx context.Context, r *gitexec.Runner, cwd, executable string
 		} else {
 			m.Records = append(m.Records, Record{name, dir, exists, mode(info, exists)})
 		}
-		updated, e := insert(old, block(name, executable))
+		updated, e := insert(name, old, block(name, executable))
 		if e != nil {
 			return nil, nil, e
 		}
@@ -392,9 +424,12 @@ func mode(info os.FileInfo, exists bool) uint32 {
 	}
 	return 0
 }
+
+// modeForInstall keeps an existing hook's mode, so a hook the user disabled
+// by removing its execute bits stays disabled.
 func modeForInstall(info os.FileInfo, exists bool) os.FileMode {
 	if exists {
-		return info.Mode().Perm() | 0111
+		return info.Mode().Perm()
 	}
 	return 0700
 }
@@ -565,6 +600,9 @@ func Inspect(ctx context.Context, r *gitexec.Runner, cwd string) (Status, error)
 		s.Installed[name] = e == nil && managed(data, name)
 		if s.Installed[name] && !recorded[name] && location.Kind == LocationShared {
 			s.Others = append(s.Others, name)
+		}
+		if info, e := os.Stat(filepath.Join(current, name)); s.Installed[name] && e == nil && runtime.GOOS != "windows" && info.Mode().Perm()&0111 == 0 {
+			s.Disabled = append(s.Disabled, name)
 		}
 	}
 	return s, nil
