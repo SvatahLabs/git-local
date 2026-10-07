@@ -153,6 +153,17 @@ func AbandonInit(ctx context.Context, r *gitexec.Runner, cwd, workspaceID string
 	return removed, d.Remove("transactions/init.json")
 }
 
+// IdentityError reports a worktree identity file that can't be read.
+type IdentityError struct {
+	Path string
+	Err  error
+}
+
+func (e *IdentityError) Error() string {
+	return "worktree identity file " + e.Path + " can't be read: " + e.Err.Error()
+}
+func (e *IdentityError) Unwrap() error { return e.Err }
+
 // PublishedIdentityAdmin returns the Git administrative directory, the main
 // one or a linked worktree's, whose identity file names workspaceID, or "" if
 // none does. It reads the directories under the common directory, so it also
@@ -180,7 +191,7 @@ func PublishedIdentityAdmin(common, workspaceID string) (string, error) {
 			continue
 		}
 		if err != nil {
-			return "", err
+			return "", &IdentityError{Path: filepath.Join(admin, "gitlocal-workspace.json"), Err: err}
 		}
 		if id.WorkspaceID == workspaceID {
 			return admin, nil
