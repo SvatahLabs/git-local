@@ -254,6 +254,12 @@ tracks wherever the directory is. With an existing hook manager, call
 "$1"` (passing the hook's standard input) from its pre-push hook instead.
 `hook status` and `auto status` report a worktree or shared hooks directory
 and any tracked hook files.
+Install and uninstall repair a hook file that no longer matches git-local's
+record of it, for example a hook a hook manager moved aside, a block removed by
+hand, or an interrupted install: install writes a fresh block, and uninstall
+drops the stale record, says so, and leaves the file alone. After
+`core.hooksPath` moves, `hook install` installs in the new directory, and
+`hook uninstall` removes the blocks from both.
 On a new branch, the pre-push guard excludes commits reachable from known
 remote-tracking branches; without those refs it scans the branch's full ancestry.
 Hooks protect against accidental leaks;

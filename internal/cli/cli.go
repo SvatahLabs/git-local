@@ -949,22 +949,25 @@ func hookCommand() *cobra.Command {
 			},
 			RunE: func(c *cobra.Command, _ []string) error {
 				return inspectCommand(c, func(r *gitexec.Runner, cwd string) error {
-					var paths []string
+					var paths, warnings []string
 					var err error
 					if action == "install" {
 						executable, e := os.Executable()
 						if e != nil {
 							return e
 						}
-						paths, err = hook.Install(c.Context(), r, cwd, executable, preCommit, prePush, allowShared)
+						paths, warnings, err = hook.Install(c.Context(), r, cwd, executable, preCommit, prePush, allowShared)
 					} else {
-						paths, err = hook.Uninstall(c.Context(), r, cwd, preCommit, prePush)
+						paths, warnings, err = hook.Uninstall(c.Context(), r, cwd, preCommit, prePush)
+					}
+					if setJSON(c, map[string]any{"action": action, "hookPaths": paths}, warnings...) {
+						return err
+					}
+					for _, warning := range warnings {
+						fmt.Fprintln(c.ErrOrStderr(), "Warning:", warning)
 					}
 					if err != nil {
 						return err
-					}
-					if setJSON(c, map[string]any{"action": action, "hookPaths": paths}) {
-						return nil
 					}
 					for _, p := range paths {
 						fmt.Fprintf(c.OutOrStdout(), "%s guard at %s.\n", strings.Title(action)+"ed", p)
@@ -1017,22 +1020,25 @@ func autoCommand() *cobra.Command {
 		var allowShared bool
 		command := &cobra.Command{Use: action, Args: noArgs, Short: action + " automatic snapshot hooks", RunE: func(c *cobra.Command, _ []string) error {
 			return inspectCommand(c, func(r *gitexec.Runner, cwd string) error {
-				var paths []string
+				var paths, warnings []string
 				var err error
 				if action == "install" {
 					executable, e := os.Executable()
 					if e != nil {
 						return e
 					}
-					paths, err = hook.InstallSnapshots(c.Context(), r, cwd, executable, allowShared)
+					paths, warnings, err = hook.InstallSnapshots(c.Context(), r, cwd, executable, allowShared)
 				} else {
-					paths, err = hook.UninstallSnapshots(c.Context(), r, cwd)
+					paths, warnings, err = hook.UninstallSnapshots(c.Context(), r, cwd)
+				}
+				if setJSON(c, map[string]any{"action": action, "hookPaths": paths}, warnings...) {
+					return err
+				}
+				for _, warning := range warnings {
+					fmt.Fprintln(c.ErrOrStderr(), "Warning:", warning)
 				}
 				if err != nil {
 					return err
-				}
-				if setJSON(c, map[string]any{"action": action, "hookPaths": paths}) {
-					return nil
 				}
 				for _, path := range paths {
 					if _, err := fmt.Fprintf(c.OutOrStdout(), "%s snapshot hook at %s.\n", strings.Title(action)+"ed", path); err != nil {

@@ -202,58 +202,65 @@ func names(preCommit, prePush bool) []string {
 // Install adds the guards to Git's effective hooks directory. A directory
 // inside a worktree is always refused; one outside the repository's common
 // directory needs allowShared.
-func Install(ctx context.Context, r *gitexec.Runner, cwd, executable string, preCommit, prePush, allowShared bool) ([]string, error) {
+//
+// A hook whose record and file disagree is reinstalled: a hook file that was
+// moved away or lost its block gets a new block and a fresh record, and a
+// block with no record in this repository's own hooks directory is adopted (a
+// crash between the writes, or a copy of this repository's hooks).
+func Install(ctx context.Context, r *gitexec.Runner, cwd, executable string, preCommit, prePush, allowShared bool) ([]string, []string, error) {
 	return installNamed(ctx, r, cwd, executable, names(preCommit, prePush), allowShared)
 }
 
-func InstallSnapshots(ctx context.Context, r *gitexec.Runner, cwd, executable string, allowShared bool) ([]string, error) {
+func InstallSnapshots(ctx context.Context, r *gitexec.Runner, cwd, executable string, allowShared bool) ([]string, []string, error) {
 	return installNamed(ctx, r, cwd, executable, snapshotEvents, allowShared)
 }
 
-func installNamed(ctx context.Context, r *gitexec.Runner, cwd, executable string, selected []string, allowShared bool) ([]string, error) {
+func installNamed(ctx context.Context, r *gitexec.Runner, cwd, executable string, selected []string, allowShared bool) ([]string, []string, error) {
+	var warnings []string
 	w, common, lock, err := open(ctx, r, cwd)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer common.Close()
 	defer lock.Close()
 	dir, err := directory(ctx, r, w)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	location, err := locate(ctx, r, w, dir)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := checkLocation(location, dir, allowShared); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	tracked, err := trackedHooks(ctx, r, w, dir, selected)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if len(tracked) > 0 {
-		return nil, fmt.Errorf("%w: hook files %s in %s are tracked by Git; installing would commit this machine's binary path. Call `git local guard staged` and `git local guard push \"$1\"` from those hooks instead", storage.ErrConflict, strings.Join(tracked, ", "), dir)
+		return nil, nil, fmt.Errorf("%w: hook files %s in %s are tracked by Git; installing would commit this machine's binary path. Call `git local guard staged` and `git local guard push \"$1\"` from those hooks instead", storage.ErrConflict, strings.Join(tracked, ", "), dir)
 	}
 	if err := os.MkdirAll(dir, 0700); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	d, err := storage.OpenDir(dir)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer d.Close()
 	executable, err = filepath.EvalSymlinks(executable)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if !filepath.IsAbs(executable) || strings.ContainsAny(executable, "\x00\r\n") {
-		return nil, errors.New("invalid git-local executable path")
+		return nil, nil, errors.New("invalid git-local executable path")
 	}
 	m, err := load(common)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	previous := Manifest{Records: append([]Record{}, m.Records...)}
 	installed := []string{}
 	legacyBackup := false
 	type plannedHook struct {
@@ -267,16 +274,16 @@ func installNamed(ctx context.Context, r *gitexec.Runner, cwd, executable string
 		info, e := d.Lstat(name)
 		exists := e == nil
 		if e != nil && !os.IsNotExist(e) {
-			return installed, e
+			return nil, nil, e
 		}
 		var old []byte
 		if exists {
 			if !info.Mode().IsRegular() {
-				return installed, fmt.Errorf("%w: %s is not a regular file", storage.ErrConflict, name)
+				return nil, nil, fmt.Errorf("%w: %s is not a regular file", storage.ErrConflict, name)
 			}
 			old, e = d.ReadFile(name, 1<<20)
 			if e != nil {
-				return installed, e
+				return nil, nil, e
 			}
 		}
 		before, beforeInfo, beforeExists := bytes.Clone(old), info, exists
@@ -284,17 +291,17 @@ func installNamed(ctx context.Context, r *gitexec.Runner, cwd, executable string
 			backupInfo, backupErr := d.Lstat("pre-commit.git-local-original")
 			if backupErr == nil {
 				if !backupInfo.Mode().IsRegular() {
-					return installed, fmt.Errorf("%w: old hook backup is not a regular file", storage.ErrConflict)
+					return nil, nil, fmt.Errorf("%w: old hook backup is not a regular file", storage.ErrConflict)
 				}
 				old, e = d.ReadFile("pre-commit.git-local-original", 1<<20)
 				if e != nil {
-					return installed, e
+					return nil, nil, e
 				}
 				info, exists, legacyBackup = backupInfo, true, true
 			} else if os.IsNotExist(backupErr) {
 				old, info, exists = nil, nil, false
 			} else {
-				return installed, backupErr
+				return nil, nil, backupErr
 			}
 		}
 		var record *Record
@@ -304,23 +311,30 @@ func installNamed(ctx context.Context, r *gitexec.Runner, cwd, executable string
 				break
 			}
 		}
+		if managed(old, name) && record == nil && location.Kind == LocationShared {
+			return nil, nil, fmt.Errorf("%w: unmanaged record for %s", storage.ErrConflict, name)
+		}
 		if managed(old, name) {
-			if record == nil {
-				return installed, fmt.Errorf("%w: unmanaged record for %s", storage.ErrConflict, name)
-			}
 			old, e = remove(old, name)
 			if e != nil {
-				return installed, e
+				return nil, nil, e
+			}
+			if record == nil {
+				// An unrecorded block in this repository's own directory:
+				// what remains without it is the hook that existed before.
+				existed := !bytes.Equal(old, []byte("#!/bin/sh\n"))
+				m.Records = append(m.Records, Record{name, dir, existed, mode(info, existed)})
 			}
 		} else if record != nil {
-			return installed, fmt.Errorf("%w: managed block was removed from %s", storage.ErrConflict, name)
-		}
-		if record == nil {
+			// The hook file was replaced or moved away since installation:
+			// what is there now is the hook to restore on uninstall.
+			record.Existed, record.Mode = exists, mode(info, exists)
+		} else {
 			m.Records = append(m.Records, Record{name, dir, exists, mode(info, exists)})
 		}
 		updated, e := insert(old, block(name, executable))
 		if e != nil {
-			return installed, e
+			return nil, nil, e
 		}
 		plan := plannedHook{name: name, updated: updated, before: before, mode: modeForInstall(info, exists), beforeExists: beforeExists}
 		if beforeExists {
@@ -342,23 +356,25 @@ func installNamed(ctx context.Context, r *gitexec.Runner, cwd, executable string
 				rollbackErr = errors.Join(rollbackErr, e)
 			}
 		}
-		return rollbackErr
+		return errors.Join(rollbackErr, save(common, previous))
+	}
+	// Record the hooks before writing them, so a crash in between leaves
+	// records whose blocks are missing, which install and uninstall repair.
+	if err := save(common, m); err != nil {
+		return nil, nil, errors.Join(err, save(common, previous))
 	}
 	for i, p := range plans {
 		if err := d.AtomicWrite(p.name, p.updated, p.mode); err != nil {
-			return nil, errors.Join(err, rollback(i))
+			return nil, nil, errors.Join(err, rollback(i))
 		}
 		installed = append(installed, filepath.Join(dir, p.name))
 	}
-	if err := save(common, m); err != nil {
-		return nil, errors.Join(err, rollback(len(plans)))
-	}
 	if legacyBackup {
 		if err := d.Remove("pre-commit.git-local-original"); err != nil {
-			return installed, err
+			return installed, warnings, err
 		}
 	}
-	return installed, nil
+	return installed, warnings, nil
 }
 func mode(info os.FileInfo, exists bool) uint32 {
 	if exists {
@@ -373,65 +389,122 @@ func modeForInstall(info os.FileInfo, exists bool) os.FileMode {
 	return 0700
 }
 
-func Uninstall(ctx context.Context, r *gitexec.Runner, cwd string, preCommit, prePush bool) ([]string, error) {
+// Uninstall removes the guards' managed blocks. A record whose hooks
+// directory, hook file or block is gone is dropped, and an unrecorded block in
+// the current hooks directory is removed unless the directory is shared.
+func Uninstall(ctx context.Context, r *gitexec.Runner, cwd string, preCommit, prePush bool) ([]string, []string, error) {
 	return uninstallNamed(ctx, r, cwd, names(preCommit, prePush))
 }
 
-func UninstallSnapshots(ctx context.Context, r *gitexec.Runner, cwd string) ([]string, error) {
+func UninstallSnapshots(ctx context.Context, r *gitexec.Runner, cwd string) ([]string, []string, error) {
 	return uninstallNamed(ctx, r, cwd, snapshotEvents)
 }
 
-func uninstallNamed(ctx context.Context, r *gitexec.Runner, cwd string, selected []string) ([]string, error) {
-	_, common, lock, err := open(ctx, r, cwd)
+func uninstallNamed(ctx context.Context, r *gitexec.Runner, cwd string, selected []string) ([]string, []string, error) {
+	w, common, lock, err := open(ctx, r, cwd)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer common.Close()
 	defer lock.Close()
 	m, err := load(common)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	current, err := directory(ctx, r, w)
+	if err != nil {
+		return nil, nil, err
+	}
+	currentLocation, err := locate(ctx, r, w, current)
+	if err != nil {
+		return nil, nil, err
 	}
 	wanted := map[string]bool{}
 	for _, n := range selected {
 		wanted[n] = true
 	}
+	records := append([]Record{}, m.Records...)
+	if currentLocation.Kind != LocationShared {
+		// Adopt blocks a crash left unrecorded in this repository's own
+		// hooks directory.
+		for _, name := range selected {
+			recorded := false
+			for _, record := range records {
+				recorded = recorded || record.Name == name && record.Directory == current
+			}
+			data, e := os.ReadFile(filepath.Join(current, name))
+			if !recorded && e == nil && managed(data, name) {
+				out, e := remove(data, name)
+				if e != nil {
+					return nil, nil, e
+				}
+				existed := !bytes.Equal(out, []byte("#!/bin/sh\n"))
+				info, e := os.Lstat(filepath.Join(current, name))
+				if e != nil {
+					return nil, nil, e
+				}
+				records = append(records, Record{name, current, existed, mode(info, existed)})
+			}
+		}
+	}
 	kept := []Record{}
 	removed := []string{}
-	for _, record := range m.Records {
+	var warnings []string
+	for i, record := range records {
 		if !wanted[record.Name] {
 			kept = append(kept, record)
 			continue
 		}
-		d, err := storage.OpenDir(record.Directory)
+		dropped, err := uninstallRecord(record)
 		if err != nil {
-			return removed, err
+			// Keep the records not yet handled, so a rerun can finish.
+			m.Records = append(kept, records[i:]...)
+			return removed, warnings, errors.Join(err, save(common, m))
 		}
-		data, err := d.ReadFile(record.Name, 1<<20)
-		if err != nil {
-			d.Close()
-			return removed, err
-		}
-		out, err := remove(data, record.Name)
-		if err != nil {
-			d.Close()
-			return removed, err
-		}
-		if record.Existed {
-			err = d.AtomicWrite(record.Name, out, os.FileMode(record.Mode))
-		} else if bytes.Equal(out, []byte("#!/bin/sh\n")) {
-			err = d.Remove(record.Name)
-		} else {
-			err = d.AtomicWrite(record.Name, out, 0700)
-		}
-		d.Close()
-		if err != nil {
-			return removed, err
+		if dropped != "" {
+			warnings = append(warnings, dropped)
+			continue
 		}
 		removed = append(removed, filepath.Join(record.Directory, record.Name))
 	}
 	m.Records = kept
-	return removed, save(common, m)
+	return removed, warnings, save(common, m)
+}
+
+// uninstallRecord removes one managed block. When the hooks directory, the
+// hook file or the block is gone, it changes nothing and explains why the
+// record is dropped.
+func uninstallRecord(record Record) (string, error) {
+	path := filepath.Join(record.Directory, record.Name)
+	d, err := storage.OpenDir(record.Directory)
+	if os.IsNotExist(err) {
+		return fmt.Sprintf("%s no longer exists; dropped its record", path), nil
+	}
+	if err != nil {
+		return "", err
+	}
+	defer d.Close()
+	data, err := d.ReadFile(record.Name, 1<<20)
+	if os.IsNotExist(err) {
+		return fmt.Sprintf("%s no longer exists; dropped its record", path), nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if !managed(data, record.Name) {
+		return fmt.Sprintf("%s no longer holds a git-local block; left it as it is", path), nil
+	}
+	out, err := remove(data, record.Name)
+	if err != nil {
+		return "", err
+	}
+	if record.Existed {
+		return "", d.AtomicWrite(record.Name, out, os.FileMode(record.Mode))
+	}
+	if bytes.Equal(out, []byte("#!/bin/sh\n")) {
+		return "", d.Remove(record.Name)
+	}
+	return "", d.AtomicWrite(record.Name, out, 0700)
 }
 
 func Inspect(ctx context.Context, r *gitexec.Runner, cwd string) (Status, error) {
