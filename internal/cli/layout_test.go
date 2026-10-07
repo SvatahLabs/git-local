@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -185,4 +186,40 @@ func TestOfflineWorktreeIsUnavailableNotFatal(t *testing.T) {
 			t.Fatalf("workspace still unavailable: %+v", w)
 		}
 	}
+}
+
+// TestRegisteredWorktreeThatIsNoCheckout: a registered worktree whose .git
+// file was deleted still exists as a directory. Init elsewhere skips it with
+// a warning naming the fix, unless it holds a git-local workspace.
+func TestRegisteredWorktreeThatIsNoCheckout(t *testing.T) {
+	repo := layoutRepo(t)
+	plain := filepath.Join(t.TempDir(), "plain")
+	repo.Git("worktree", "add", "-q", "-b", "plain", plain)
+	plain, err := filepath.EvalSymlinks(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(plain, ".git")); err != nil {
+		t.Fatal(err)
+	}
+	code, _, diagnostic := callCLI(t, repo.Root, "init")
+	if code != 0 || !strings.Contains(diagnostic, plain) || !strings.Contains(diagnostic, "git worktree repair "+plain) {
+		t.Fatalf("init beside a worktree with no .git file: exit %d: %s", code, diagnostic)
+	}
+	linked := linkedWorkspace(t, repo, t.TempDir(), "identified")
+	if err := os.Remove(filepath.Join(linked, ".git")); err != nil {
+		t.Fatal(err)
+	}
+	code, _, diagnostic = callCLI(t, repo.Root, "init")
+	if code != 3 || !strings.Contains(diagnostic, linked) || !strings.Contains(diagnostic, "git worktree repair "+linked) {
+		t.Fatalf("init beside an identified worktree with no .git file: exit %d: %s", code, diagnostic)
+	}
+	// Git repairs the .git file but exits 1, reporting it was broken.
+	repair := exec.Command(repo.GitPath, "worktree", "repair", linked)
+	repair.Dir, repair.Env = repo.Root, repo.Env
+	if out, err := repair.CombinedOutput(); err != nil && !strings.Contains(string(out), ".git file broken") {
+		t.Fatalf("git worktree repair: %v\n%s", err, out)
+	}
+	successful(t, repo.Root, "init")
+	successful(t, linked, "status")
 }

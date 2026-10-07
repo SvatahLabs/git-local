@@ -23,6 +23,10 @@ func TestInitChecksOtherWorktreesBeforeWritingItsJournal(t *testing.T) {
 	}
 	broken := filepath.Join(t.TempDir(), "broken")
 	r.Git("worktree", "add", "-q", "-b", "broken", broken)
+	// It holds a workspace, so init can't skip it (GL-084).
+	if _, err := Init(ctx, g, broken); err != nil {
+		t.Fatal(err)
+	}
 	gitfile, err := os.ReadFile(filepath.Join(broken, ".git"))
 	if err != nil {
 		t.Fatal(err)

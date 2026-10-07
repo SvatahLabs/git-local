@@ -202,7 +202,10 @@ Linked worktrees whose Git records use relative paths
 any other. A registered worktree that can't be reached, whatever the error (a
 deleted directory, an unmounted drive, an offline network share), counts as
 unavailable: the other checkouts keep working and warn about it, and its saved
-rules stay in the shared ignore block.
+rules stay in the shared ignore block. A registered worktree directory that is
+no longer a checkout (its `.git` file was deleted) is skipped by `init` with a
+warning naming `git worktree repair <path>`; if it holds a git-local
+workspace, `init` refuses until it is repaired.
 
 State lives in `<git-common-dir>/gitlocal/`, with a workspace identity file in
 each checkout's administrative directory. Linked worktrees have independent

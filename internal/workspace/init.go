@@ -394,6 +394,39 @@ func validateWorkspace(d *storage.Dir, w *Context) error {
 	_, err := selection.Canonical(selected)
 	return err
 }
+
+// registeredAdmin finds the administrative directory Git registered for a
+// linked worktree root from the gitdir pointers in the common directory,
+// without the checkout's .git file that Git's own lookup needs.
+func registeredAdmin(common, root string) (string, error) {
+	entries, err := os.ReadDir(filepath.Join(common, "worktrees"))
+	if os.IsNotExist(err) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	for _, entry := range entries {
+		admin := filepath.Join(common, "worktrees", entry.Name())
+		b, err := os.ReadFile(filepath.Join(admin, "gitdir"))
+		if err != nil {
+			continue
+		}
+		pointer := strings.TrimRight(string(b), "\r\n")
+		if !filepath.IsAbs(pointer) {
+			pointer = filepath.Join(admin, filepath.FromSlash(pointer))
+		}
+		dir := filepath.Dir(filepath.Clean(pointer))
+		if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+			dir = resolved
+		}
+		if dir == root {
+			return admin, nil
+		}
+	}
+	return "", nil
+}
+
 func checkDuplicates(ctx context.Context, r *gitexec.Runner, w *Context) error {
 	roots, err := registeredRoots(ctx, r, w)
 	if err != nil {
@@ -421,7 +454,21 @@ func checkDuplicates(ctx context.Context, r *gitexec.Runner, w *Context) error {
 			// gitfile resolver, with repository-selection environment removed.
 			adminPath, e = r.AdminAt(ctx, root)
 			if e != nil {
-				return e
+				// The directory exists but isn't a checkout any more, for
+				// example because its .git file was deleted.
+				registered, re := registeredAdmin(w.Common, root)
+				if re != nil {
+					return re
+				}
+				if registered != "" {
+					if _, re = os.Lstat(filepath.Join(registered, "gitlocal-workspace.json")); re == nil {
+						return fmt.Errorf("%w: registered worktree %s holds a git-local workspace but is not a Git checkout (%v); run git worktree repair %s to restore its .git file", storage.ErrConflict, root, e, root)
+					} else if !os.IsNotExist(re) {
+						return re
+					}
+				}
+				w.Warnings = append(w.Warnings, fmt.Sprintf("registered worktree %s is not a Git checkout (%v); skipped it. Run git worktree repair %s if it should be one, or git worktree remove --force %s", root, e, root, root))
+				continue
 			}
 		}
 		dir, e := storage.OpenDir(adminPath)
