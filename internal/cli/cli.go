@@ -1546,14 +1546,22 @@ func inspectionConflicts(s history.StatusResult) error {
 // safety checks.
 func abandonTransaction(c *cobra.Command, r *gitexec.Runner, cwd, id string) error {
 	kind, err := configtx.JournalKind(c.Context(), r, cwd, id)
+	if errors.Is(err, os.ErrNotExist) {
+		// A restore killed before writing its journal leaves only its
+		// recovery ref.
+		kind = "recovery-ref"
+		err = nil
+	}
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("no transaction %s", id)
-		}
 		return err
 	}
 	var result configtx.AbandonResult
 	switch kind {
+	case "recovery-ref":
+		result, err = restore.AbandonOrphanRef(c.Context(), r, cwd, id)
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("no transaction %s", id)
+		}
 	case "config", "seed":
 		result, err = configtx.Abandon(c.Context(), r, cwd, id)
 	case "restore":
@@ -1588,6 +1596,8 @@ func abandonTransaction(c *cobra.Command, r *gitexec.Runner, cwd, id string) err
 		message := "Removed staging file %s; local history holds its content.\n"
 		if kind == "init" {
 			message = "Removed unpublished initialization metadata %s.\n"
+		} else if kind == "recovery-ref" {
+			message = "Removed recovery ref %s; its restore stopped before writing a journal and changed no files.\n"
 		}
 		if _, err := fmt.Fprintf(out, message, name); err != nil {
 			return err

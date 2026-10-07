@@ -164,6 +164,13 @@ func Run(ctx context.Context, r *gitexec.Runner, cwd string) (Report, error) {
 				result.add("staging files", "warning", fmt.Sprintf("leftover restore or seed staging file %q may hold private content", stage), "Check for an unfinished transaction first (git local recover). Otherwise inspect the file and delete it; never commit it.")
 			}
 		}
+		if orphans, e := restore.OrphanRefs(ctx, r, d.Workspace); e != nil {
+			result.add("recovery refs", "error", e.Error(), "Inspect the history store's refs/gitlocal/recovery refs.")
+		} else {
+			for _, orphan := range orphans {
+				result.add("recovery refs", "warning", fmt.Sprintf("recovery ref %s has no journal: its restore stopped before writing one and changed no files; it blocks encryption migration", orphan.Ref), "Run git local recover "+orphan.ID+" --abandon.")
+			}
+		}
 		owner, ownerErr := selection.InspectOwnership(ctx, r, d.Workspace.Root, d.Workspace.Admin)
 		if ownerErr == nil {
 			ownerErr = owner.Check(d.Selection)
