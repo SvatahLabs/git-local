@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -992,17 +993,14 @@ func hookCommand() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				if setJSON(c, map[string]any{"currentDirectory": status.Current, "installed": status.Installed, "previousDirectories": status.Previous, "location": status.Location.Kind, "worktree": status.Location.Worktree, "tracked": status.Tracked}) {
+				if setJSON(c, map[string]any{"currentDirectory": status.Current, "installed": status.Installed, "installedByOtherRepository": append([]string{}, status.Others...), "previousDirectories": status.Previous, "location": status.Location.Kind, "worktree": status.Location.Worktree, "tracked": status.Tracked}) {
 					return nil
 				}
-				for _, name := range []string{"pre-commit", "pre-push"} {
-					state := "missing"
-					if status.Installed[name] {
-						state = "installed"
-					}
-					fmt.Fprintf(c.OutOrStdout(), "%s: %s (%s)\n", name, state, status.Current)
+				names := []string{"pre-commit", "pre-push"}
+				for _, name := range names {
+					fmt.Fprintf(c.OutOrStdout(), "%s: %s (%s)\n", name, hookState(status, name), status.Current)
 				}
-				printHookLocation(c, status)
+				printHookLocation(c, status, names)
 				for _, p := range status.Previous {
 					fmt.Fprintf(c.OutOrStdout(), "previous installation: %s\n", p)
 				}
@@ -1059,19 +1057,16 @@ func autoCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if setJSON(c, map[string]any{"currentDirectory": status.Current, "installed": status.Installed, "location": status.Location.Kind, "worktree": status.Location.Worktree, "tracked": status.Tracked}) {
+			if setJSON(c, map[string]any{"currentDirectory": status.Current, "installed": status.Installed, "installedByOtherRepository": append([]string{}, status.Others...), "location": status.Location.Kind, "worktree": status.Location.Worktree, "tracked": status.Tracked}) {
 				return nil
 			}
-			for _, name := range []string{"post-commit", "post-checkout", "pre-rebase", "post-rewrite"} {
-				state := "missing"
-				if status.Installed[name] {
-					state = "installed"
-				}
-				if _, err := fmt.Fprintf(c.OutOrStdout(), "%s: %s (%s)\n", name, state, status.Current); err != nil {
+			names := []string{"post-commit", "post-checkout", "pre-rebase", "post-rewrite"}
+			for _, name := range names {
+				if _, err := fmt.Fprintf(c.OutOrStdout(), "%s: %s (%s)\n", name, hookState(status, name), status.Current); err != nil {
 					return err
 				}
 			}
-			printHookLocation(c, status)
+			printHookLocation(c, status, names)
 			return nil
 		})
 	}})
@@ -1217,13 +1212,31 @@ func guardCommand() *cobra.Command {
 	return guards
 }
 
-// printHookLocation explains a hooks directory that install refuses by default.
-func printHookLocation(c *cobra.Command, status hook.Status) {
-	switch status.Location.Kind {
-	case hook.LocationWorktree:
+func hookState(status hook.Status, name string) string {
+	switch {
+	case slices.Contains(status.Others, name):
+		return "installed by another repository"
+	case status.Installed[name]:
+		return "installed"
+	}
+	return "missing"
+}
+
+// printHookLocation explains a hooks directory that install refuses by
+// default. It suggests the flag that allows a shared one only while one of
+// the named hooks is missing.
+func printHookLocation(c *cobra.Command, status hook.Status, names []string) {
+	missing := false
+	for _, name := range names {
+		missing = missing || !status.Installed[name]
+	}
+	switch {
+	case status.Location.Kind == hook.LocationWorktree:
 		fmt.Fprintf(c.OutOrStdout(), "hooks directory is inside the worktree %s; hook install refuses it because hook scripts there can be committed\n", status.Location.Worktree)
-	case hook.LocationShared:
+	case status.Location.Kind == hook.LocationShared && missing:
 		fmt.Fprintf(c.OutOrStdout(), "hooks directory is shared: it is outside this repository and other repositories may use it; hook install needs --allow-shared-hooks-dir\n")
+	case status.Location.Kind == hook.LocationShared:
+		fmt.Fprintf(c.OutOrStdout(), "hooks directory is shared: it is outside this repository and other repositories may use it\n")
 	}
 	if len(status.Tracked) > 0 {
 		fmt.Fprintf(c.OutOrStdout(), "tracked: %s\n", strings.Join(status.Tracked, ", "))

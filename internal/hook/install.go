@@ -26,10 +26,15 @@ type Record struct {
 }
 type Manifest struct{ Records []Record }
 type Status struct {
-	Current   string
+	Current string
+	// Installed is true for each hook in Current that holds a managed block,
+	// whoever wrote it.
 	Installed map[string]bool
-	Previous  []string
-	Location  Location
+	// Others names installed hooks in a shared Current that this repository
+	// has no record of: another repository installed them.
+	Others   []string
+	Previous []string
+	Location Location
 	// Tracked names hook files in Current that the current worktree tracks.
 	Tracked []string
 }
@@ -205,8 +210,9 @@ func names(preCommit, prePush bool) []string {
 //
 // A hook whose record and file disagree is reinstalled: a hook file that was
 // moved away or lost its block gets a new block and a fresh record, and a
-// block with no record in this repository's own hooks directory is adopted (a
-// crash between the writes, or a copy of this repository's hooks).
+// block with no record is adopted (a crash between the writes, or a copy of
+// this repository's hooks). In a shared directory, a block with no record
+// belongs to another repository; it is left as it is, with a warning.
 func Install(ctx context.Context, r *gitexec.Runner, cwd, executable string, preCommit, prePush, allowShared bool) ([]string, []string, error) {
 	return installNamed(ctx, r, cwd, executable, names(preCommit, prePush), allowShared)
 }
@@ -312,7 +318,11 @@ func installNamed(ctx context.Context, r *gitexec.Runner, cwd, executable string
 			}
 		}
 		if managed(old, name) && record == nil && location.Kind == LocationShared {
-			return nil, nil, fmt.Errorf("%w: unmanaged record for %s", storage.ErrConflict, name)
+			if !bytes.Contains(old, block(name, executable)) {
+				return nil, nil, fmt.Errorf("%w: %s in %s holds a git-local block that another repository installed for a different git-local binary; run git local hook install in that repository, or remove the block", storage.ErrConflict, name, dir)
+			}
+			warnings = append(warnings, fmt.Sprintf("%s in %s is already installed by another repository; left as it is", name, dir))
+			continue
 		}
 		if managed(old, name) {
 			old, e = remove(old, name)
@@ -450,6 +460,7 @@ func uninstallNamed(ctx context.Context, r *gitexec.Runner, cwd string, selected
 	kept := []Record{}
 	removed := []string{}
 	var warnings []string
+	sharedWarned := map[string]bool{}
 	for i, record := range records {
 		if !wanted[record.Name] {
 			kept = append(kept, record)
@@ -466,6 +477,10 @@ func uninstallNamed(ctx context.Context, r *gitexec.Runner, cwd string, selected
 			continue
 		}
 		removed = append(removed, filepath.Join(record.Directory, record.Name))
+		if location, e := locate(ctx, r, w, record.Directory); e == nil && location.Kind == LocationShared && !sharedWarned[record.Directory] {
+			sharedWarned[record.Directory] = true
+			warnings = append(warnings, fmt.Sprintf("%s is a shared hooks directory; other repositories using it lose these git-local hooks too", record.Directory))
+		}
 	}
 	m.Records = kept
 	return removed, warnings, save(common, m)
@@ -507,6 +522,8 @@ func uninstallRecord(record Record) (string, error) {
 	return "", d.AtomicWrite(record.Name, out, 0700)
 }
 
+// Inspect reports the hooks in the current hooks directory by their content,
+// so it also sees blocks that another repository installed there.
 func Inspect(ctx context.Context, r *gitexec.Runner, cwd string) (Status, error) {
 	w, err := workspace.Discover(ctx, r, cwd)
 	if err != nil {
@@ -529,17 +546,25 @@ func Inspect(ctx context.Context, r *gitexec.Runner, cwd string) (Status, error)
 	if err != nil {
 		return Status{}, err
 	}
-	tracked, err := trackedHooks(ctx, r, w, current, append([]string{"pre-commit", "pre-push"}, snapshotEvents...))
+	all := append([]string{"pre-commit", "pre-push"}, snapshotEvents...)
+	tracked, err := trackedHooks(ctx, r, w, current, all)
 	if err != nil {
 		return Status{}, err
 	}
 	s := Status{Current: current, Installed: map[string]bool{}, Location: location, Tracked: tracked}
+	recorded := map[string]bool{}
 	for _, record := range m.Records {
 		if record.Directory == current {
-			data, e := os.ReadFile(filepath.Join(record.Directory, record.Name))
-			s.Installed[record.Name] = e == nil && managed(data, record.Name)
+			recorded[record.Name] = true
 		} else {
 			s.Previous = append(s.Previous, filepath.Join(record.Directory, record.Name))
+		}
+	}
+	for _, name := range all {
+		data, e := os.ReadFile(filepath.Join(current, name))
+		s.Installed[name] = e == nil && managed(data, name)
+		if s.Installed[name] && !recorded[name] && location.Kind == LocationShared {
+			s.Others = append(s.Others, name)
 		}
 	}
 	return s, nil

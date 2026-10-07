@@ -260,6 +260,11 @@ hand, or an interrupted install: install writes a fresh block, and uninstall
 drops the stale record, says so, and leaves the file alone. After
 `core.hooksPath` moves, `hook install` installs in the new directory, and
 `hook uninstall` removes the blocks from both.
+In a shared directory where another repository already installed the same
+git-local binary's blocks, `hook install --allow-shared-hooks-dir` leaves them
+as they are and says so, and `hook status` reports them as installed by
+another repository; `hook uninstall` from a shared directory warns that the
+other repositories lose those hooks too.
 On a new branch, the pre-push guard excludes commits reachable from known
 remote-tracking branches; without those refs it scans the branch's full ancestry.
 Hooks protect against accidental leaks;
