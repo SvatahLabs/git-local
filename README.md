@@ -302,6 +302,9 @@ process supervisor: SIGTERM and SIGHUP stop it the same way, and a second
 signal ends it at once. It holds no permanent watcher state, and simultaneous
 event hooks use the same snapshot lock. `--json` returns one summary object
 when the watcher stops.
+A capture that conflicts, for example because a selected file is saved or Git
+rewrites the index during it, is skipped with a warning and retried at the
+next check; after five conflicts in a row the watcher exits with status 3.
 Direct `git reset` does not trigger these hooks. Use
 `git local reset --hard [revision]` to save changed selected files before
 resetting the main index and worktree. The command resolves the revision and

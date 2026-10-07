@@ -47,7 +47,7 @@ func TestWatchCapturesChangesAndStopsCleanly(t *testing.T) {
 		done <- watchTicks(ctx, r, repo.Root, ticks, func(result history.Result) error {
 			captured <- result
 			return nil
-		})
+		}, nil)
 	}()
 	var first, second history.Result
 	select {

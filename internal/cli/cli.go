@@ -1069,6 +1069,7 @@ func autoCommand() *cobra.Command {
 		return inspectCommand(c, func(r *gitexec.Runner, cwd string) error {
 			count := 0
 			latest := ""
+			var warnings []string
 			err := automatic.Watch(c.Context(), r, cwd, interval, func(result history.Result) error {
 				count++
 				latest = result.ID
@@ -1077,8 +1078,15 @@ func autoCommand() *cobra.Command {
 				}
 				_, err := fmt.Fprintf(c.OutOrStdout(), "Saved local snapshot %s.\n", result.ID)
 				return err
+			}, func(conflict error) {
+				warning := fmt.Sprintf("snapshot skipped: %v; retrying at the next check", conflict)
+				if jsonEnabled(c) {
+					warnings = append(warnings, warning)
+				} else {
+					fmt.Fprintln(c.ErrOrStderr(), "Warning:", warning)
+				}
 			})
-			if setJSON(c, map[string]any{"snapshots": count, "latestSnapshot": latest, "interval": interval.String()}) {
+			if setJSON(c, map[string]any{"snapshots": count, "latestSnapshot": latest, "interval": interval.String()}, warnings...) {
 				return err
 			}
 			return err
