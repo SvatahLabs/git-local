@@ -190,12 +190,21 @@ func Push(ctx context.Context, r *gitexec.Runner, cwd, remote string, input io.R
 			continue
 		} // Deleting a remote ref cannot introduce a leak.
 		args := []string{"rev-list", local}
-		if !allZero(upstream) {
+		known := !allZero(upstream)
+		if known {
+			// The remote's old commit is missing when someone else pushed
+			// and this repository hasn't fetched since, as in a force push.
+			if known, err = hasCommit(ctx, r, snapshot.Root, upstream); err != nil {
+				return nil, err
+			}
+		}
+		if known {
 			args = append(args, "^"+upstream)
 		} else if !strings.ContainsAny(remote, "/\\") && remote != "." && remote != ".." {
-			// A new remote branch may share ancestry with branches already on
-			// this remote. Exclude those known remote-tracking refs so an old,
-			// already-published leak does not block an unrelated new branch.
+			// A new remote branch, or one whose old commit is unknown, may
+			// share ancestry with branches already on this remote. Exclude
+			// those known remote-tracking refs so an old, already-published
+			// leak does not block an unrelated new branch.
 			args = append(args, "--not", "--remotes="+remote)
 		}
 		b, err := r.Guard(ctx, snapshot.Root, "", args...)
@@ -259,6 +268,16 @@ func Push(ctx context.Context, r *gitexec.Runner, cwd, remote string, input io.R
 }
 
 func allZero(id string) bool { return strings.Trim(id, "0") == "" }
+
+// hasCommit reports whether the repository has the commit id.
+func hasCommit(ctx context.Context, r *gitexec.Runner, root, id string) (bool, error) {
+	_, err := r.Guard(ctx, root, "", "cat-file", "-e", id+"^{commit}")
+	var ge *gitexec.Error
+	if errors.As(err, &ge) && (ge.Code == 1 || ge.Code == 128) {
+		return false, nil
+	}
+	return err == nil, err
+}
 
 // AuditUpstream scans local branches that declare an upstream. Doctor uses a
 // full ancestry scan so an already-pushed leak is visible too.

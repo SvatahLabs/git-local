@@ -272,6 +272,8 @@ only to `sh`, `bash`, `dash`, `ksh` or `zsh` hooks (directly or through
 guards from that hook.
 On a new branch, the pre-push guard excludes commits reachable from known
 remote-tracking branches; without those refs it scans the branch's full ancestry.
+It does the same when the remote's old commit isn't in this repository, as in
+a force push after someone else pushed and you haven't fetched.
 Hooks protect against accidental leaks;
 `--no-verify` on both commit and push bypasses them. A fresh clone needs its
 own hook installation. Server-side protection cannot see local selections.
