@@ -841,19 +841,29 @@ func New(out, errOut io.Writer) *cobra.Command {
 			}
 			defer r.Close()
 			if list {
-				ids, err := configtx.Pending(c.Context(), r, cwd)
+				// PendingJournals needs no session, so it also lists the
+				// encryption and initialization journals that block one.
+				pending, err := configtx.PendingJournals(c.Context(), r, cwd)
 				if err != nil {
 					return err
 				}
-				if setJSON(c, map[string]any{"transactionIds": ids}) {
+				ids := []string{}
+				transactions := []map[string]any{}
+				for _, p := range pending {
+					next, state := p.Next()
+					ids = append(ids, p.ID)
+					transactions = append(transactions, map[string]any{"id": p.ID, "kind": p.Kind, "workspaceId": p.WorkspaceID, "root": p.Root, "state": state, "next": next})
+				}
+				if setJSON(c, map[string]any{"transactionIds": ids, "transactions": transactions}) {
 					return nil
 				}
-				if len(ids) == 0 {
+				if len(pending) == 0 {
 					_, err = fmt.Fprintln(c.OutOrStdout(), "No unfinished transactions.")
 					return err
 				}
-				for _, id := range ids {
-					if _, err = fmt.Fprintln(c.OutOrStdout(), id); err != nil {
+				for _, p := range pending {
+					next, state := p.Next()
+					if _, err = fmt.Fprintf(c.OutOrStdout(), "%s %s: %s.\n  %s\n", p.ID, p.Kind, state, next); err != nil {
 						return err
 					}
 				}
@@ -1074,7 +1084,11 @@ func autoCommand() *cobra.Command {
 				count++
 				latest = result.ID
 				if jsonEnabled(c) {
+					warnings = append(warnings, result.Warnings...)
 					return nil
+				}
+				for _, warning := range result.Warnings {
+					fmt.Fprintln(c.ErrOrStderr(), "Warning:", warning)
 				}
 				_, err := fmt.Fprintf(c.OutOrStdout(), "Saved local snapshot %s.\n", result.ID)
 				return err
@@ -1109,7 +1123,11 @@ func autoCommand() *cobra.Command {
 			return err
 		}
 		defer r.Close()
-		return automatic.Event(c.Context(), r, cwd, args[0])
+		warnings, err := automatic.Event(c.Context(), r, cwd, args[0])
+		for _, warning := range warnings {
+			fmt.Fprintln(c.ErrOrStderr(), "git-local: warning:", warning)
+		}
+		return err
 	}})
 	return auto
 }

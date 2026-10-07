@@ -51,64 +51,69 @@ func hasIdentity(admin string) (bool, error) {
 
 // Event captures changed local files. A post-checkout in a newly created
 // linked worktree first snapshots the main checkout, then seeds the new one.
-func Event(ctx context.Context, r *gitexec.Runner, cwd, event string) error {
+// It returns the warnings of the snapshots, seed and reconciliation it ran.
+func Event(ctx context.Context, r *gitexec.Runner, cwd, event string) ([]string, error) {
 	if event != "post-commit" && event != "post-checkout" && event != "pre-rebase" && event != "post-rewrite" {
-		return errors.New("invalid automatic snapshot event")
+		return nil, errors.New("invalid automatic snapshot event")
 	}
 	admin, err := adminPath(ctx, r, cwd)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	initialized, err := hasIdentity(admin)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if !initialized {
 		if event != "post-checkout" {
-			return nil
+			return nil, nil
 		}
 		w, err := workspace.Discover(ctx, r, cwd)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		roots, err := workspace.RegisteredRoots(ctx, r, w)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if len(roots) == 0 || filepath.Clean(roots[0]) == w.Root {
-			return errors.New("main checkout identity is missing; cannot seed this worktree")
+			return nil, errors.New("main checkout identity is missing; cannot seed this worktree")
 		}
 		mainAdmin, err := r.AdminAt(ctx, roots[0])
 		if err != nil {
-			return err
+			return nil, err
 		}
 		mainInitialized, err := hasIdentity(mainAdmin)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if !mainInitialized {
-			return errors.New("initialize the main checkout before creating linked worktrees")
+			return nil, errors.New("initialize the main checkout before creating linked worktrees")
 		}
-		if _, err := history.Commit(ctx, r, roots[0], "Automatic local snapshot before worktree bootstrap"); err != nil {
-			return fmt.Errorf("snapshot main checkout before worktree bootstrap: %w", err)
+		saved, err := history.Commit(ctx, r, roots[0], "Automatic local snapshot before worktree bootstrap")
+		warnings := saved.Warnings
+		if err != nil {
+			return warnings, fmt.Errorf("snapshot main checkout before worktree bootstrap: %w", err)
 		}
-		if _, err := seed.Run(ctx, r, cwd, "main", nil); err != nil {
-			return fmt.Errorf("seed new worktree from main: %w", err)
+		seeded, err := seed.Run(ctx, r, cwd, "main", nil)
+		warnings = append(warnings, seeded.Warnings...)
+		if err != nil {
+			return warnings, fmt.Errorf("seed new worktree from main: %w", err)
 		}
-		return reconcile(ctx, r, cwd)
+		return reconcile(ctx, r, cwd, warnings)
 	}
-	if _, err = history.Commit(ctx, r, cwd, "Automatic local snapshot after Git "+event); err != nil {
-		return err
+	saved, err := history.Commit(ctx, r, cwd, "Automatic local snapshot after Git "+event)
+	if err != nil || event == "pre-rebase" {
+		return saved.Warnings, err
 	}
-	if event == "pre-rebase" {
-		return nil
-	}
-	return reconcile(ctx, r, cwd)
+	return reconcile(ctx, r, cwd, saved.Warnings)
 }
 
-func reconcile(ctx context.Context, r *gitexec.Runner, cwd string) error {
-	if _, err := configtx.Prune(ctx, r, cwd, false); err != nil {
-		return fmt.Errorf("reconcile removed worktrees: %w", err)
+func reconcile(ctx context.Context, r *gitexec.Runner, cwd string, warnings []string) ([]string, error) {
+	pruned, err := configtx.Prune(ctx, r, cwd, false)
+	warnings = append(warnings, pruned.Warnings...)
+	if err != nil {
+		return warnings, fmt.Errorf("reconcile removed worktrees: %w", err)
 	}
-	return nil
+	return warnings, nil
 }

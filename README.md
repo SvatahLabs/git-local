@@ -134,9 +134,10 @@ to skipped files go unsaved until the policy is corrected. Untracking a skipped
 file, or renaming it to the sensitive path's exact spelling, drops its old
 entry; the renamed file is then saved encrypted. Restoring over unsaved changes
 to a skipped file is refused, because the recovery copy restore keeps would be
-plaintext; move the file aside first. Automatic snapshots (event hooks and
-`auto watch`) don't show the skip warning; `git local doctor` reports the
-policy. `workspace remove` refuses when a skipped file has changes that weren't
+plaintext; move the file aside first. Automatic snapshots print the skip
+warning too: event hooks on Git's output, and `auto watch` when it saves a
+snapshot; `git local doctor` reports the policy. `workspace remove` refuses
+when a skipped file has changes that weren't
 saved; an unchanged or deleted skipped file doesn't block removal.
 If the key is moved, `encrypt rebind-key` accepts its new absolute path only
 when the replacement bytes match the stored key fingerprint.
