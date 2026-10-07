@@ -32,6 +32,9 @@ import (
 
 type usageError struct{ error }
 type guardRepositoryError struct{ error }
+
+func (e guardRepositoryError) Unwrap() error { return e.error }
+
 type guardViolation struct{ error }
 
 // Version is replaced by release builds; source builds identify themselves as dev.
@@ -784,6 +787,9 @@ func New(out, errOut io.Writer) *cobra.Command {
 				if setJSON(c, map[string]any{"revision": revision, "commit": result.Commit, "snapshotId": result.SnapshotID, "snapshotChanged": result.SnapshotChanged, "reset": result.Reset}, result.Warnings...) {
 					return err
 				}
+				for _, warning := range result.Warnings {
+					fmt.Fprintln(c.ErrOrStderr(), "Warning:", warning)
+				}
 				if err != nil {
 					return err
 				}
@@ -1369,12 +1375,12 @@ func Execute(ctx context.Context, args []string, out, errOut io.Writer) int {
 		switch {
 		case errors.As(err, &usage):
 			code, kind = 2, "usage"
+		case errors.Is(err, context.Canceled):
+			code, kind = 1, "canceled"
 		case errors.Is(err, storage.ErrConflict), errors.As(err, &repositoryError):
 			code, kind = 3, "conflict"
 		case errors.As(err, &violation):
 			code, kind = 1, "guard_violation"
-		case errors.Is(err, context.Canceled):
-			code, kind = 1, "canceled"
 		default:
 			code, kind = 1, "operation"
 		}
