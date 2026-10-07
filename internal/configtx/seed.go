@@ -258,6 +258,11 @@ func validateSeed(j seedJournal, repo, workspaceID string) error {
 	if err := decode(j.Config.Before.Data, &before); err != nil {
 		return err
 	}
+	// A schema-1 selection from an earlier release has no exclude list.
+	before, err := selection.Canonical(before)
+	if err != nil {
+		return err
+	}
 	if !before.SemanticEqual(selection.Empty()) {
 		return errors.New("seed destination was not empty")
 	}
