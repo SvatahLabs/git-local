@@ -298,7 +298,8 @@ To capture changes between Git events, run `git local auto watch` in that
 checkout. It saves an initial snapshot, then checks every five minutes by
 default; `--interval 30s` changes the period. This is a foreground process for
 one worktree. Stop it with Ctrl-C, or stop its service if you run it under a
-process supervisor. It holds no permanent watcher state, and simultaneous
+process supervisor: SIGTERM and SIGHUP stop it the same way, and a second
+signal ends it at once. It holds no permanent watcher state, and simultaneous
 event hooks use the same snapshot lock. `--json` returns one summary object
 when the watcher stops.
 Direct `git reset` does not trigger these hooks. Use
