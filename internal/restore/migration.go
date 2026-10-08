@@ -103,7 +103,9 @@ func RewriteCompletedRecovery(ctx context.Context, r *gitexec.Runner, w workspac
 			if err != nil {
 				return RewrittenRecovery{}, err
 			}
-			if actual != op.Before {
+			// A symlink preimage records the link's own permission bits (0755
+			// on macOS); blob fingerprints use 0777.
+			if !imageEqual(actual, op.Before) {
 				return RewrittenRecovery{}, fmt.Errorf("restore preimage %q differs from anchor", op.Path)
 			}
 			if isSensitive {
@@ -129,7 +131,7 @@ func RewriteCompletedRecovery(ctx context.Context, r *gitexec.Runner, w workspac
 			if err != nil {
 				return RewrittenRecovery{}, err
 			}
-			if actual != m.Post[i] {
+			if !imageEqual(actual, m.Post[i]) {
 				return RewrittenRecovery{}, fmt.Errorf("restore postimage %q differs from anchor", op.Path)
 			}
 			oldFile, _, err := history.SnapshotFileFromStore(ctx, r, w, w.Store, p.SourceWorkspaceID, oldSource, op.Path)
@@ -241,7 +243,7 @@ func VerifyMigratedRecovery(ctx context.Context, r *gitexec.Runner, w workspace.
 			if err != nil {
 				return err
 			}
-			if actual != image {
+			if !imageEqual(actual, image) {
 				return fmt.Errorf("migrated restore image %q differs from recovery evidence", op.Path)
 			}
 		}
