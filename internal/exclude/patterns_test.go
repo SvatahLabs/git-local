@@ -165,7 +165,7 @@ func TestManagedBlockIgnoresStagesAndAcceptsLegacyBlock(t *testing.T) {
 	if got, err := UserBytes(legacy, patterns); err != nil || !bytes.Equal(got, user) {
 		t.Fatalf("legacy block rejected: %v %q", err, got)
 	}
-	if !Outdated(legacy, patterns) || Outdated(Render(user, patterns), patterns) || Outdated(user, nil) {
+	if !Outdated(legacy, patterns) || Outdated(Render(user, patterns), patterns) || !Outdated(user, nil) || Outdated(Render(user, nil), nil) {
 		t.Fatal("Outdated misreports the managed block")
 	}
 	if !Rendered(legacy, user, patterns) || !Rendered(Render(user, patterns), user, patterns) || Rendered(user, user, patterns) {

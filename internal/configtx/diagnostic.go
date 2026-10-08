@@ -235,12 +235,24 @@ func RefreshIgnore(ctx context.Context, r *gitexec.Runner, cwd string) (bool, []
 		return false, nil, err
 	}
 	mode := os.FileMode(current.Mode)
+	if !current.Exists {
+		// A repository with no selections from an earlier release, or one
+		// created without Git's template, may have no info/exclude yet.
+		mode = 0600
+		if err := s.common.MkdirAll("info"); err != nil {
+			return false, nil, err
+		}
+	}
 	if err := s.common.AtomicWrite("info/exclude", exclude.Render(user, patterns), mode); err != nil {
 		return false, nil, err
 	}
 	warnings, err := s.verify(ctx, "", selection.Empty(), true)
 	if err != nil {
-		if undo := s.common.AtomicWrite("info/exclude", current.Data, mode); undo != nil {
+		undo := s.common.AtomicWrite("info/exclude", current.Data, mode)
+		if !current.Exists {
+			undo = s.common.Remove("info/exclude")
+		}
+		if undo != nil {
 			return false, warnings, fmt.Errorf("%w; restoring info/exclude also failed: %v", err, undo)
 		}
 		return false, warnings, err

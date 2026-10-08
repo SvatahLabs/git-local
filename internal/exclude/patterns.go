@@ -248,11 +248,10 @@ func legacyBlock(patterns []byte) []byte {
 }
 
 // Outdated reports a valid managed block that isn't the current one: it lacks
-// StagePattern, or it was compiled for the other core.ignorecase setting.
+// StagePattern, or it was compiled for the other core.ignorecase setting. A
+// missing block with no selections is outdated too: earlier releases wrote
+// none, and git local init now always writes one.
 func Outdated(data, expected []byte, alternates ...[]byte) bool {
-	if len(expected) == 0 {
-		return false
-	}
 	_, err := UserBytes(data, expected, alternates...)
 	return err == nil && !bytes.Contains(data, Block(expected))
 }

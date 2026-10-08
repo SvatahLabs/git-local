@@ -155,7 +155,7 @@ func Run(ctx context.Context, r *gitexec.Runner, cwd string) (Report, error) {
 			result.add("selection and ignores", "warning", warning, "")
 		}
 		if d.IgnoreOutdated {
-			result.add("selection and ignores", "warning", "managed ignore block was written by an earlier release: it may not ignore restore and seed staging files ("+exclude.StagePattern+"), or may not match core.ignorecase", "Run git local init, or any git local track or untrack, to rewrite the block.")
+			result.add("selection and ignores", "warning", "managed ignore block is missing or was written by an earlier release: it may not ignore restore and seed staging files ("+exclude.StagePattern+"), or may not match core.ignorecase", "Run git local init, or any git local track or untrack, to rewrite the block.")
 		}
 		if stages, e := leftoverStages(ctx, r, d.Workspace); e != nil {
 			result.add("staging files", "error", e.Error(), "Inspect the checkout for .gitlocal-tmp-* files.")

@@ -220,7 +220,9 @@ worktrees is skipped with a warning; removed worktrees retire as usual.
 State lives in `<git-common-dir>/gitlocal/`, with a workspace identity file in
 each checkout's administrative directory. Linked worktrees have independent
 identities and retain common-store records after removal. Initialization leaves
-main-repository content, index, refs, objects and exclusions unchanged.
+main-repository content, index, refs and objects unchanged; in `info/exclude`
+it only adds the managed block when it is missing (it ignores staging files
+even before anything is selected), keeping every other line.
 Selections from all worktrees contribute to the shared `info/exclude`, so a path
 selected in one worktree may also be ignored by ordinary Git in another.
 The managed block also ignores `.gitlocal-tmp-*` at any depth: restore and
