@@ -369,7 +369,10 @@ removes the patch when staging and reapplies it on checkout. Overlapping edits
 fail with a conflict instead of silently choosing a version. Overlays require
 Git with a POSIX shell for the filter command (Git for Windows supplies one),
 a regular UTF-8 file of at most 1 MiB, and no existing line-ending, ident or
-content filter on that path. Native Windows overlay behavior still awaits CI
+content filter on that path, including system attributes. `overlay add`
+refuses while the effective `core.autocrlf` is `true` or `input` (Git for
+Windows sets `true` by default): run `git config core.autocrlf false` in the
+repository first. `doctor` flags existing overlays when it is set later. Native Windows overlay behavior still awaits CI
 qualification.
 
 **`git archive` applies active overlays.** Git runs the smudge filter for

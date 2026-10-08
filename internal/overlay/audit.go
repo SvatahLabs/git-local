@@ -213,6 +213,11 @@ func AuditInstallationWarnings(ctx context.Context, r *gitexec.Runner, cwd, comm
 			return nil, fmt.Errorf("overlay path %q no longer uses the required filter", path)
 		}
 	}
+	if value, err := autocrlf(ctx, r, cwd); err != nil {
+		return nil, err
+	} else if value != "" {
+		return nil, fmt.Errorf("core.autocrlf=%s converts line endings of overlay paths %s, so checkouts conflict and git add can fail; run git config core.autocrlf false in this repository", value, strings.Join(paths, ", "))
+	}
 	return warnings, nil
 }
 

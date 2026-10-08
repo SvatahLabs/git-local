@@ -170,7 +170,9 @@ func (r *Runner) CheckAttributes(ctx context.Context, cwd, path string) (map[str
 	if path == "" || filepath.IsAbs(path) || strings.ContainsAny(path, "\x00\r\n\\") || strings.HasPrefix(path, "../") || strings.Contains(path, "/../") {
 		return nil, errors.New("invalid attribute path")
 	}
-	b, err := r.run(ctx, cwd, false, nil, nil, nil, "check-attr", "-z", "filter", "text", "eol", "ident", "--", path)
+	// System attributes count too: Git for Windows ships some, and they
+	// convert line endings as much as the repository's own.
+	b, err := r.run(ctx, cwd, false, []string{"GIT_ATTR_NOSYSTEM=0"}, nil, nil, "check-attr", "-z", "filter", "text", "eol", "ident", "--", path)
 	if err != nil {
 		return nil, err
 	}

@@ -326,6 +326,11 @@ func Add(ctx context.Context, r *gitexec.Runner, cwd, name, given, executable st
 			return empty, fmt.Errorf("existing %s attribute requires a separate conversion policy", key)
 		}
 	}
+	if value, err := autocrlf(ctx, r, p.Root); err != nil {
+		return empty, err
+	} else if value != "" {
+		return empty, fmt.Errorf("core.autocrlf=%s converts line endings, which overlays can't compose with; run git config core.autocrlf false in this repository first", value)
+	}
 	includes, err := localIncludes(ctx, r, p.Root)
 	if err != nil {
 		return empty, err
