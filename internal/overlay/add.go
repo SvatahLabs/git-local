@@ -21,6 +21,11 @@ func repositoryPath(root, cwd, given string) (string, error) {
 	if given == "" || filepath.IsAbs(given) || strings.ContainsRune(given, 0) {
 		return "", errors.New("overlay path must be relative to this checkout")
 	}
+	// The working directory may be a logical path through a symlink, such as
+	// /tmp on macOS, while Git reports the physical root.
+	if resolved, err := filepath.EvalSymlinks(cwd); err == nil {
+		cwd = resolved
+	}
 	abs, err := filepath.Abs(filepath.Join(cwd, given))
 	if err != nil {
 		return "", err
