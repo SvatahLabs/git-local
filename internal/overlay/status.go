@@ -1,6 +1,7 @@
 package overlay
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -18,6 +19,33 @@ type Status struct {
 	UpstreamRef    string
 	UpstreamBlob   string
 	Upstream       string
+	// Adopted counts the patch's Hunks that the upstream version of the file
+	// already carries, for example because a teammate committed the same
+	// change. Such an overlay is stale and should be saved again.
+	Adopted, Hunks int
+}
+
+// adoptedHunks counts the hunks of v that the committed version already
+// carries, out of all of them.
+func adoptedHunks(ctx context.Context, git string, v Version, committed []byte) (int, int, error) {
+	versions, err := hunkVersions(ctx, git, v.Base, v.Local)
+	if err != nil {
+		return 0, 0, err
+	}
+	if len(versions) == 0 {
+		versions = [][]byte{v.Local}
+	}
+	if validateText(committed) != nil {
+		return 0, len(versions), nil
+	}
+	adopted := 0
+	for _, local := range versions {
+		// A version the hunk conflicts with doesn't carry it.
+		if applied, err := Apply(ctx, git, v.Base, local, committed); err == nil && bytes.Equal(applied, committed) {
+			adopted++
+		}
+	}
+	return adopted, len(versions), nil
 }
 
 func activeVersions(ctx context.Context, commonPath, id string) ([]Version, error) {
@@ -154,6 +182,9 @@ func Inspect(ctx context.Context, r *gitexec.Runner, cwd string) ([]Status, erro
 					return nil, err
 				} else {
 					s.Upstream = "ready"
+				}
+				if s.Adopted, s.Hunks, err = adoptedHunks(ctx, r.Executable(), v, blob); err != nil {
+					return nil, err
 				}
 			}
 		}

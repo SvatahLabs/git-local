@@ -20,6 +20,10 @@ type Finding struct {
 	Commit, OverlayName, OverlayReason string
 }
 
+// OverlapReason is the overlay finding that re-staging can't fix: the content
+// overlaps the saved patch, so the overlay has to be saved again.
+const OverlapReason = "content overlaps the saved overlay and cannot be verified"
+
 func names(data []byte) ([]string, error) {
 	if len(data) == 0 {
 		return nil, nil
@@ -178,7 +182,7 @@ func committedBlobs(ctx context.Context, r *gitexec.Runner, root, path string, r
 func overlayReason(ctx context.Context, r *gitexec.Runner, version overlay.Version, candidate []byte, previous [][]byte) (string, error) {
 	contains, err := overlay.ContainsPatch(ctx, r.Executable(), version, candidate, previous...)
 	if errors.Is(err, overlay.ErrConflict) {
-		return "content overlaps the saved overlay and cannot be verified", nil
+		return OverlapReason, nil
 	}
 	if err != nil {
 		return "", err

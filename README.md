@@ -429,6 +429,9 @@ file with `git restore -- <file>`, complete the pull, edit the file to the local
 value you now want, and run `git local overlay add <name> -- <file>`. The saved
 versions remain available throughout; `git restore` discards unstaged edits in
 that file, so preserve any unrelated edits first.
+When the upstream branch already holds some of an overlay's hunks, for
+example because a teammate committed the same change, `overlay status` and
+`doctor` report the overlay as stale with the same remove, edit and add steps.
 
 Exit codes: `0` success, `1` operation failure/cancellation, `2` invalid usage
 (including a mistyped subcommand, extra arguments or a malformed ID), `3`

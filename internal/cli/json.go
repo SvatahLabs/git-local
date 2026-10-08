@@ -141,7 +141,7 @@ func overlayStatusesJSON(statuses []overlay.Status) []map[string]any {
 			"name": status.Name, "path": status.Path, "version": status.Version,
 			"working": status.Working, "index": status.Index,
 			"upstreamRef": status.UpstreamRef, "upstreamBlob": status.UpstreamBlob,
-			"upstream": status.Upstream,
+			"upstream": status.Upstream, "adoptedHunks": status.Adopted, "hunks": status.Hunks,
 		})
 	}
 	return result

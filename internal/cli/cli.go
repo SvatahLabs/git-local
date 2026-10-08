@@ -1164,6 +1164,8 @@ func guardCommand() *cobra.Command {
 		for _, f := range findings {
 			if f.Staging {
 				fmt.Fprintf(c.ErrOrStderr(), "git-local: refusing to commit %q: it is a git-local restore or seed staging file and may hold private content.\n  Unstage it: git restore --staged -- %s\n", f.Path, shellQuote(f.Path))
+			} else if f.OverlayName != "" && f.OverlayReason == guard.OverlapReason {
+				fmt.Fprintf(c.ErrOrStderr(), "git-local: refusing to commit %q: %s (overlay %q, workspace %s).\n  Re-staging can't help; save the overlay again against the current file: %s.\n", f.Path, f.OverlayReason, f.OverlayName, f.WorkspaceID, resaveSteps(f.OverlayName, f.Path))
 			} else if f.OverlayName != "" {
 				fmt.Fprintf(c.ErrOrStderr(), "git-local: refusing to commit %q: %s (overlay %q, workspace %s).\n  Re-stage with git add -- %s, or update the overlay after resolving the conflict.\n", f.Path, f.OverlayReason, f.OverlayName, f.WorkspaceID, shellQuote(f.Path))
 			} else {
@@ -1318,6 +1320,11 @@ func overlayCommand() *cobra.Command {
 						}
 					}
 				}
+				if s.Adopted > 0 {
+					if _, err := fmt.Fprintf(c.OutOrStdout(), "\n  %d of %d hunks are already upstream, so the overlay is stale; save it again without them: %s", s.Adopted, s.Hunks, resaveSteps(s.Name, s.Path)); err != nil {
+						return err
+					}
+				}
 				if _, err := fmt.Fprintln(c.OutOrStdout()); err != nil {
 					return err
 				}
@@ -1421,6 +1428,11 @@ func overlayCommand() *cobra.Command {
 	return command
 }
 func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'" }
+
+// resaveSteps tells how to save an overlay again against the current file.
+func resaveSteps(name, path string) string {
+	return fmt.Sprintf("git local overlay remove %s, edit %s to the local value you want, then git local overlay add %s -- %s", name, path, name, shellQuote(path))
+}
 
 func Execute(ctx context.Context, args []string, out, errOut io.Writer) int {
 	jsonMode := wantsJSON(args)

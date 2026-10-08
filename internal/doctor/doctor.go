@@ -252,6 +252,15 @@ func Run(ctx context.Context, r *gitexec.Runner, cwd string) (Report, error) {
 				} else {
 					result.add("overlays", "ok", "active overlay filter installation is intact", "")
 				}
+				// Inspection needs an initialized worktree; its errors are
+				// overlay status's to report.
+				if statuses, e := overlay.Inspect(ctx, r, cwd); e == nil {
+					for _, s := range statuses {
+						if s.Adopted > 0 {
+							result.add("overlays", "warning", fmt.Sprintf("overlay %s on %s is stale: %d of its %d hunks are already in %s", s.Name, s.Path, s.Adopted, s.Hunks, s.UpstreamRef), fmt.Sprintf("Save it again without them: git local overlay remove %s, edit %s to the local value you want, then git local overlay add %s -- %s.", s.Name, s.Path, s.Name, s.Path))
+						}
+					}
+				}
 			}
 			if len(snapshot.Selections) == 0 && !hasOverlays {
 				return result, nil
