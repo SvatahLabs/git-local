@@ -133,7 +133,9 @@ func (r *Runner) IndexBlob(ctx context.Context, cwd, index, path string) ([]byte
 		}
 		extra = []string{"GIT_INDEX_FILE=" + index}
 	}
-	return r.run(ctx, cwd, false, extra, nil, nil, "cat-file", "blob", ":"+path)
+	// ":0:" names stage zero explicitly: ":"+path would read a path such as
+	// 0:foo as stage 0 of foo.
+	return r.run(ctx, cwd, false, extra, nil, nil, "cat-file", "blob", ":0:"+path)
 }
 
 func (r *Runner) IndexMode(ctx context.Context, cwd, index, path string) (string, error) {
