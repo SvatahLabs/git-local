@@ -253,7 +253,9 @@ once a remote has it, a merge's other side, or a pushed commit's parent), for
 example because a teammate committed the same change upstream, isn't reported.
 A hunk leaked by `git commit --no-verify` is still refused in the next commit,
 because the leaking `HEAD` isn't on a remote yet;
-staged deletions remain allowed. Paths that can never be selected, such as
+staged deletions remain allowed. Components that look like Windows 8.3 short
+names (`PROGRA~1`, `NAME~1.EXT`) can't be selected on any platform. Paths that
+can never be selected, such as
 `aux.c`, `nul.txt`, names with a backslash or a trailing dot or space, or
 non-UTF-8 names, pass the guards unless the spelling Windows would resolve them
 to (backslash as separator, trailing dots and spaces dropped) aliases a

@@ -15,6 +15,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -64,6 +65,10 @@ func validRelative(path string) error {
 	return nil
 }
 
+// shortName matches a Windows 8.3 short name: a tilde and digits ending the
+// stem, with at most one extension.
+var shortName = regexp.MustCompile(`~[0-9]+(\.[^.]*)?$`)
+
 // ValidateSelectionPath deliberately applies portable name restrictions on every
 // platform. Rejecting ambiguous aliases is safer than silently normalizing names.
 func ValidateSelectionPath(path string) error {
@@ -77,6 +82,11 @@ func ValidateSelectionPath(path string) error {
 		folded := AliasKey(c)
 		if folded == ".git" || strings.HasPrefix(folded, "git~") || strings.TrimRight(folded, ". ") != folded || runtime.GOOS == "windows" && strings.ContainsAny(c, ":<>\"|?*") {
 			return fmt.Errorf("unsupported path component %q", c)
+		}
+		// An NTFS 8.3 short name such as PROGRA~1 or NAME~1.EXT can resolve
+		// to a different long name, which alias checks can't see.
+		if shortName.MatchString(c) {
+			return fmt.Errorf("unsupported path component %q: it has the form of a Windows 8.3 short name", c)
 		}
 		stem := strings.SplitN(strings.ToUpper(c), ".", 2)[0]
 		if stem == "CON" || stem == "PRN" || stem == "AUX" || stem == "NUL" || len(stem) == 4 && (strings.HasPrefix(stem, "COM") || strings.HasPrefix(stem, "LPT")) && stem[3] >= '1' && stem[3] <= '9' {
