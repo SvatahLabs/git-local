@@ -1353,14 +1353,18 @@ func overlayCommand() *cobra.Command {
 	}}
 	show.Flags().Uint32Var(&showVersion, "version", 0, "Saved version number (default: latest)")
 	command.AddCommand(show)
-	command.AddCommand(&cobra.Command{Use: "remove <name>", Short: "Deactivate a patch while keeping its file and versions", Args: func(_ *cobra.Command, args []string) error {
+	var removeWorkspace string
+	remove := &cobra.Command{Use: "remove <name>", Short: "Deactivate a patch while keeping its file and versions", Args: func(_ *cobra.Command, args []string) error {
 		if len(args) != 1 {
 			return usageError{errors.New("overlay remove requires one name")}
+		}
+		if removeWorkspace != "" && !storage.ValidUUID(removeWorkspace) {
+			return usageError{errors.New("invalid workspace UUID")}
 		}
 		return nil
 	}, RunE: func(c *cobra.Command, args []string) error {
 		return inspectCommand(c, func(r *gitexec.Runner, cwd string) error {
-			m, err := overlay.Remove(c.Context(), r, cwd, args[0])
+			m, err := overlay.RemoveFor(c.Context(), r, cwd, removeWorkspace, args[0])
 			if err != nil {
 				return err
 			}
@@ -1370,7 +1374,9 @@ func overlayCommand() *cobra.Command {
 			_, err = fmt.Fprintf(c.OutOrStdout(), "Removed overlay %s for %s; working file and saved versions remain.\n", m.Name, m.Path)
 			return err
 		})
-	}})
+	}}
+	remove.Flags().StringVar(&removeWorkspace, "workspace", "", "Remove an overlay of this retained workspace UUID (a removed worktree)")
+	command.AddCommand(remove)
 	command.AddCommand(&cobra.Command{Use: "add <name> -- <file>", Short: "Save a versioned local patch for a tracked text file", Args: func(c *cobra.Command, args []string) error {
 		if len(args) != 2 || c.Flags().ArgsLenAtDash() != 1 {
 			return usageError{errors.New("overlay add requires a name and -- <file>")}

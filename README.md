@@ -387,7 +387,10 @@ The commit and push guards don't cover archives. See the
 [overlay implementation contract](project/specifications/proposal/OVERLAY_PLAN.md)
 for remaining broader qualification. `overlay remove`
 leaves the working file and saved versions intact; the former patch becomes an
-ordinary edit that Git can stage.
+ordinary edit that Git can stage. An overlay of a removed and retained linked
+worktree is removed from any other checkout with
+`git local overlay remove <name> --workspace <uuid>`, which also restores the
+attributes and filter configuration after the last overlay.
 
 The filter driver lives in `.git/gitlocal/overlay-filter.gitconfig`, included
 from the local Git config through the relative path

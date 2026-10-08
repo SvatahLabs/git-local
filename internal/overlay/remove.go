@@ -10,12 +10,22 @@ import (
 
 	"gitlocal/internal/gitexec"
 	"gitlocal/internal/storage"
+	"gitlocal/internal/workspace"
 )
 
 // Remove deactivates one named overlay without changing its working file or
 // deleting immutable versions. A "removing" manifest keeps the filter closed
 // if the shared attributes/config update is interrupted; rerunning resumes it.
 func Remove(ctx context.Context, r *gitexec.Runner, cwd, name string) (Manifest, error) {
+	return RemoveFor(ctx, r, cwd, "", name)
+}
+
+// RemoveFor removes an overlay of workspace owner, or of the current
+// workspace when owner is empty. Another workspace's overlay can be removed
+// only once that workspace is retained: its worktree is gone, so nothing else
+// can remove it, and its attribute line, filter and hook requirement would
+// otherwise stay forever.
+func RemoveFor(ctx context.Context, r *gitexec.Runner, cwd, owner, name string) (Manifest, error) {
 	var empty Manifest
 	if !validName.MatchString(name) || name == "." || name == ".." {
 		return empty, errors.New("invalid overlay name")
@@ -42,12 +52,26 @@ func Remove(ctx context.Context, r *gitexec.Runner, cwd, name string) (Manifest,
 		return empty, err
 	}
 	defer d.Close()
-	manifestPath := filepath.Join(prefix(p.WorkspaceID, name), "manifest.json")
+	if owner == "" || owner == p.WorkspaceID {
+		owner = p.WorkspaceID
+	} else {
+		if !storage.ValidUUID(owner) {
+			return empty, errors.New("invalid workspace UUID")
+		}
+		var record workspace.Record
+		if err := d.ReadJSON(filepath.Join("workspaces", owner, "workspace.json"), &record); err != nil {
+			return empty, err
+		}
+		if record.State != "retained" {
+			return empty, fmt.Errorf("%w: workspace %s is %s; remove its overlay from that worktree, or retire the workspace first", storage.ErrConflict, owner, record.State)
+		}
+	}
+	manifestPath := filepath.Join(prefix(owner, name), "manifest.json")
 	var m Manifest
 	if err := d.ReadJSON(manifestPath, &m); err != nil {
 		return empty, err
 	}
-	if err := checkManifest(m, p.WorkspaceID, name); err != nil {
+	if err := checkManifest(m, owner, name); err != nil {
 		return empty, err
 	}
 	if m.State == "removed" {
@@ -56,7 +80,7 @@ func Remove(ctx context.Context, r *gitexec.Runner, cwd, name string) (Manifest,
 	if _, err := readVersion(d, m, m.Version); err != nil {
 		return empty, err
 	}
-	paths, pending, err := activePathsLocked(d, p.WorkspaceID, name, m.Path, true)
+	paths, pending, err := activePathsLocked(d, owner, name, m.Path, true)
 	if err != nil {
 		return empty, err
 	}
