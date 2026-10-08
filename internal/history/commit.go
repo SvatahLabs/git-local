@@ -84,13 +84,14 @@ func commitWithOptions(ctx context.Context, r *gitexec.Runner, cwd, message, wri
 		return result, err
 	}
 	skipped := map[string]string{}
+	carriedForward := map[string]bool{}
 	defer func() {
 		for path := range skipped {
 			result.Skipped = append(result.Skipped, path)
 		}
 		sort.Strings(result.Skipped)
 		for _, path := range result.Skipped {
-			result.Warnings = append(result.Warnings, skippedWarning(path, skipped[path]))
+			result.Warnings = append(result.Warnings, skippedWarning(path, skipped[path], carriedForward[path]))
 		}
 	}()
 	result.Warnings, err = configtx.WithSelection(ctx, r, cwd, func(w workspace.Context, state selection.State, recheck func() error) error {
@@ -209,6 +210,7 @@ func commitWithOptions(ctx context.Context, r *gitexec.Runner, cwd, message, wri
 			}
 			nextFiles[path] = file
 			skipped[path] = rule
+			carriedForward[path] = true
 		}
 		plainRegular := 0
 		for _, entry := range entries {

@@ -262,6 +262,11 @@ func TestSnapshotSkipsPathOnlyAliasingASensitiveRule(t *testing.T) {
 				if len(result.Warnings) != 1 || !strings.Contains(result.Warnings[0], tc.file) || !strings.Contains(result.Warnings[0], "skipped") {
 					t.Fatalf("warnings: %v", result.Warnings)
 				}
+				// The warning says what happened to the file: its last saved
+				// version kept, or nothing saved at all.
+				if kept := strings.Contains(result.Warnings[0], "its last saved version is kept"); kept != earlier || !earlier && !strings.Contains(result.Warnings[0], "has no saved version") {
+					t.Fatalf("warning text (earlier=%v): %s", earlier, result.Warnings[0])
+				}
 				blob := func(content string) string {
 					out, err := g.History(ctx, w.Store, strings.NewReader(content), "hash-object", "--stdin")
 					if err != nil {
