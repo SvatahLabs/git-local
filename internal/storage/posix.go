@@ -191,6 +191,22 @@ func (d *Dir) Rename(old, new string) error {
 	return unix.Fsync(a)
 }
 
+// flushed records nothing: SyncStaged can always reopen a stage for writing.
+func (d *Dir) flushed(string) {}
+
+func (d *Dir) chmodStaged(name string, mode fs.FileMode) error {
+	f, err := d.open(name, os.O_WRONLY, 0)
+	if err != nil {
+		return err
+	}
+	err = f.Chmod(mode)
+	closeErr := f.Close()
+	if err != nil {
+		return err
+	}
+	return closeErr
+}
+
 // RenameNoReplace renames like Rename, but fails with an error matching
 // fs.ErrExist, changing nothing, if new already exists.
 func (d *Dir) RenameNoReplace(old, new string) error {

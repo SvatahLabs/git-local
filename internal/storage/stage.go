@@ -24,6 +24,9 @@ func (d *Dir) StageNamed(name string, mode fs.FileMode, write func(io.Writer) er
 	if err == nil {
 		err = closeErr
 	}
+	if err == nil {
+		d.flushed(name)
+	}
 	// Preserve partial bytes on failure. They may include an external edit;
 	// only recorded complete images can be safely recognized by recovery.
 	return err
@@ -33,16 +36,7 @@ func (d *Dir) StageNamed(name string, mode fs.FileMode, write func(io.Writer) er
 // that died after the last write but before StageNamed's Chmod leaves complete
 // bytes at the 0600 creation mode.
 func (d *Dir) ChmodStaged(name string, mode fs.FileMode) error {
-	f, err := d.open(name, os.O_WRONLY, 0)
-	if err != nil {
-		return err
-	}
-	err = f.Chmod(mode)
-	closeErr := f.Close()
-	if err != nil {
-		return err
-	}
-	return closeErr
+	return d.chmodStaged(name, mode)
 }
 
 // MakeDirectory creates exactly one private directory, never accepts an existing one.
