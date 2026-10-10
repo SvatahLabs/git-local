@@ -223,8 +223,11 @@ type GrepResult struct {
 	SkippedBinary int         `json:"skippedBinary"`
 	SkippedLarge  int         `json:"skippedLarge"`
 	Truncated     bool        `json:"truncated"`
-	MoreSnapshots bool        `json:"moreSnapshots"`
-	Searched      int         `json:"searched"`
+	// BudgetExhausted reports that grep stopped at its 64 MiB content budget;
+	// Truncated is set too.
+	BudgetExhausted bool `json:"budgetExhausted"`
+	MoreSnapshots   bool `json:"moreSnapshots"`
+	Searched        int  `json:"searched"`
 }
 
 // Grep searches a bounded number of reachable snapshots for a literal UTF-8
@@ -311,9 +314,14 @@ func Grep(ctx context.Context, r *gitexec.Runner, cwd, source, pattern string, s
 					if err != nil || size < 0 {
 						return errors.New("invalid historical blob size")
 					}
-					if size > maxGrepBlob || scanned+size > maxGrepBytes {
+					if size > maxGrepBlob {
 						result.SkippedLarge++
 						continue
+					}
+					if scanned+size > maxGrepBytes {
+						// The budget is spent; the rest goes unsearched.
+						result.Truncated, result.BudgetExhausted = true, true
+						return finish()
 					}
 				}
 				limit := int64(maxGrepBlob)
@@ -322,6 +330,10 @@ func Grep(ctx context.Context, r *gitexec.Runner, cwd, source, pattern string, s
 				}
 				data, err := readSnapshotFileLocked(ctx, r, w, snapshot, path, limit)
 				if err != nil {
+					if errors.Is(err, errReadLimit) && limit < maxGrepBlob {
+						result.Truncated, result.BudgetExhausted = true, true
+						return finish()
+					}
 					if errors.Is(err, errReadLimit) {
 						result.SkippedLarge++
 						continue
@@ -365,7 +377,9 @@ func (r GrepResult) Human() string {
 	if r.SkippedBinary > 0 || r.SkippedLarge > 0 {
 		fmt.Fprintf(&out, "Skipped %d binary and %d oversized historical files.\n", r.SkippedBinary, r.SkippedLarge)
 	}
-	if r.Truncated {
+	if r.BudgetExhausted {
+		out.WriteString("Searched the 64 MiB content limit; later files and snapshots were not searched.\n")
+	} else if r.Truncated {
 		out.WriteString("Match limit reached; results truncated.\n")
 	}
 	if r.MoreSnapshots {
