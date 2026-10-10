@@ -173,6 +173,10 @@ path differs in the new clone. Adoption checks the key fingerprint, encrypted
 snapshots, and completed recovery records before publishing private state.
 If the original file-key path is still valid, `--file-key` may be omitted.
 
+`backup push` leaves out temporary files that an interrupted write left in the
+private state, and refuses anything restore wouldn't accept (for example the
+store of an encryption migration killed before it wrote its journal), naming
+it, so every pushed backup can be restored.
 If publication is interrupted, run `git local backup recover` in that clone.
 The encrypted archive contains committed private snapshots, not unsaved
 working files. Restore refuses a checkout with existing Git Local state or a

@@ -15,6 +15,10 @@ import (
 	"gitlocal/internal/workspace"
 )
 
+// stateEntries are the top-level private state entries a backup carries and
+// restore accepts.
+var stateEntries = map[string]bool{"repository.json": true, "history.git": true, "locks": true, "transactions": true, "workspaces": true, "hook-install.json": true, "overlays": true, "overlay-filter.gitconfig": true, "overlay-install.json": true, "encryption.json": true}
+
 type StagedInfo struct {
 	RepositoryID     string
 	WorkspaceID      string
@@ -53,13 +57,12 @@ func ValidateStaged(ctx context.Context, r *gitexec.Runner, stage string) (Stage
 		return result, err
 	}
 	defer state.Close()
-	allowed := map[string]bool{"repository.json": true, "history.git": true, "locks": true, "transactions": true, "workspaces": true, "hook-install.json": true, "overlays": true, "overlay-filter.gitconfig": true, "overlay-install.json": true, "encryption.json": true}
 	topEntries, err := state.ReadDir("")
 	if err != nil {
 		return result, err
 	}
 	for _, entry := range topEntries {
-		if !allowed[entry.Name()] {
+		if !stateEntries[entry.Name()] {
 			return result, fmt.Errorf("backup contains unknown private state %q", entry.Name())
 		}
 	}

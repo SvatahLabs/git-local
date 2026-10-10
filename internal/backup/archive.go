@@ -86,9 +86,15 @@ func packDirectory(ctx context.Context, root *storage.Dir, dst *tar.Writer, rel,
 			child = filepath.Join(rel, component)
 		}
 		// The quarantine holds local rescue copies, possibly plaintext; it
-		// isn't private history and stays out of backups.
-		if filepath.ToSlash(child) == "locks/repository.lock" || child == "quarantine" {
+		// isn't private history and stays out of backups. A temporary file
+		// left by an interrupted atomic write is never state.
+		if filepath.ToSlash(child) == "locks/repository.lock" || child == "quarantine" || storage.IsTempName(component) {
 			continue
+		}
+		// Restore accepts only known state, so anything else would make the
+		// backup unrestorable.
+		if rel == "" && !stateEntries[component] {
+			return fmt.Errorf("%w: private state %q isn't part of a backup, and restore would refuse it; it may be left over from an interrupted encryption migration (git local recover --list shows whether one is pending); if nothing is pending, move it out of the gitlocal directory in the common Git directory", storage.ErrConflict, component)
 		}
 		info, err := root.Lstat(child)
 		if err != nil {
