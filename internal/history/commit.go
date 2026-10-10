@@ -1,9 +1,7 @@
 package history
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -376,19 +374,7 @@ func commitWithOptions(ctx context.Context, r *gitexec.Runner, cwd, message, wri
 				return branchErr
 			}
 		}
-		data, e := json.Marshal(metadata)
-		if e != nil {
-			return e
-		}
-		data = append(data, '\n')
-		if len(data) > 1<<20 {
-			return errors.New("snapshot metadata exceeds size limit")
-		}
-		metadataID, e := hash(ctx, r, w.Store, bytes.NewReader(data))
-		if e != nil {
-			return e
-		}
-		wrapper, e := tree(ctx, r, w.Store, []treeEntry{{"040000", "tree", filesTree, "files"}, {"100644", "blob", metadataID, "metadata.json"}})
+		wrapper, e := writeWrapper(ctx, r, w.Store, filesTree, metadata)
 		if e != nil {
 			return e
 		}

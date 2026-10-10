@@ -38,6 +38,81 @@ type Metadata struct {
 }
 
 func Ref(workspaceID string) string { return "refs/gitlocal/workspaces/" + workspaceID + "/head" }
+
+const (
+	// maxInlineMetadata is the metadata.json limit; every earlier release
+	// reads snapshots within it.
+	maxInlineMetadata = 1 << 20
+	// maxListBlob bounds a changed-path list or digest map stored in its
+	// own wrapper blob.
+	maxListBlob          = 256 << 20
+	changedPathsBlob     = "changed-paths"
+	encryptedDigestsBlob = "encrypted-digests.json"
+)
+
+// writeWrapper stores a snapshot's files tree and metadata. Metadata that
+// fits maxInlineMetadata stays in metadata.json, as earlier releases wrote it.
+// Otherwise the changed paths (NUL-terminated) and the encrypted digests (a
+// JSON object) move into their own blobs, so neither the number of changed
+// files nor of sensitive files limits a snapshot.
+func writeWrapper(ctx context.Context, r historyGit, store, filesTree string, m Metadata) (string, error) {
+	entries := []treeEntry{{"040000", "tree", filesTree, "files"}}
+	data, err := json.Marshal(m)
+	if err != nil {
+		return "", err
+	}
+	if len(data)+1 > maxInlineMetadata {
+		if len(m.ChangedPaths) > 0 {
+			var list bytes.Buffer
+			for _, path := range m.ChangedPaths {
+				list.WriteString(path)
+				list.WriteByte(0)
+			}
+			id, err := hash(ctx, r, store, &list)
+			if err != nil {
+				return "", err
+			}
+			entries = append(entries, treeEntry{"100644", "blob", id, changedPathsBlob})
+		}
+		if len(m.EncryptedDigests) > 0 {
+			digests, err := json.Marshal(m.EncryptedDigests)
+			if err != nil {
+				return "", err
+			}
+			id, err := hash(ctx, r, store, bytes.NewReader(append(digests, '\n')))
+			if err != nil {
+				return "", err
+			}
+			entries = append(entries, treeEntry{"100644", "blob", id, encryptedDigestsBlob})
+		}
+		m.ChangedPaths, m.EncryptedDigests = nil, nil
+		if data, err = json.Marshal(m); err != nil {
+			return "", err
+		}
+	}
+	data = append(data, '\n')
+	if len(data) > maxInlineMetadata {
+		return "", errors.New("snapshot metadata exceeds size limit")
+	}
+	metadataID, err := hash(ctx, r, store, bytes.NewReader(data))
+	if err != nil {
+		return "", err
+	}
+	return tree(ctx, r, store, append(entries, treeEntry{"100644", "blob", metadataID, "metadata.json"}))
+}
+
+// readWrapperBlob reads a wrapper blob of at most limit bytes.
+func readWrapperBlob(ctx context.Context, r *gitexec.Runner, store, id string, limit int64) ([]byte, error) {
+	size, err := r.History(ctx, store, nil, "cat-file", "-s", id)
+	if err != nil {
+		return nil, err
+	}
+	n, err := strconv.ParseInt(strings.TrimSpace(string(size)), 10, 64)
+	if err != nil || n < 0 || n > limit {
+		return nil, errors.New("snapshot metadata exceeds size limit")
+	}
+	return r.History(ctx, store, nil, "cat-file", "blob", id)
+}
 func validDigest(s string) bool {
 	if len(s) != 64 {
 		return false
@@ -153,11 +228,11 @@ func readPrevious(ctx context.Context, r *gitexec.Runner, store, id, repo, works
 		return "", m, err
 	}
 	records := bytes.Split(out, []byte{0})
-	if len(records) != 3 || len(records[2]) != 0 {
+	if len(records) < 3 || len(records) > 5 || len(records[len(records)-1]) != 0 {
 		return "", m, errors.New("invalid snapshot wrapper tree")
 	}
-	files, metadata := "", ""
-	for _, record := range records[:2] {
+	files, metadata, changed, digests := "", "", "", ""
+	for _, record := range records[:len(records)-1] {
 		prefix, name, ok := strings.Cut(string(record), "\t")
 		fields := strings.Fields(prefix)
 		if !ok || len(fields) != 3 || !validOID(fields[2]) {
@@ -168,6 +243,10 @@ func readPrevious(ctx context.Context, r *gitexec.Runner, store, id, repo, works
 			files = fields[2]
 		case name == "metadata.json" && fields[0] == "100644" && fields[1] == "blob" && metadata == "":
 			metadata = fields[2]
+		case name == changedPathsBlob && fields[0] == "100644" && fields[1] == "blob" && changed == "":
+			changed = fields[2]
+		case name == encryptedDigestsBlob && fields[0] == "100644" && fields[1] == "blob" && digests == "":
+			digests = fields[2]
 		default:
 			return "", m, errors.New("invalid snapshot wrapper entry")
 		}
@@ -175,15 +254,7 @@ func readPrevious(ctx context.Context, r *gitexec.Runner, store, id, repo, works
 	if files == "" || metadata == "" {
 		return "", m, errors.New("incomplete snapshot wrapper")
 	}
-	size, err := r.History(ctx, store, nil, "cat-file", "-s", metadata)
-	if err != nil {
-		return "", m, err
-	}
-	n, err := strconv.ParseInt(strings.TrimSpace(string(size)), 10, 64)
-	if err != nil || n < 0 || n > 1<<20 {
-		return "", m, errors.New("snapshot metadata exceeds size limit")
-	}
-	data, err := r.History(ctx, store, nil, "cat-file", "blob", metadata)
+	data, err := readWrapperBlob(ctx, r, store, metadata, maxInlineMetadata)
 	if err != nil {
 		return "", m, err
 	}
@@ -194,6 +265,30 @@ func readPrevious(ctx context.Context, r *gitexec.Runner, store, id, repo, works
 	}
 	if decoder.Decode(new(any)) != io.EOF {
 		return "", m, errors.New("trailing snapshot metadata")
+	}
+	// A list kept in its own blob must not also be inline.
+	if changed != "" {
+		list, err := readWrapperBlob(ctx, r, store, changed, maxListBlob)
+		if err != nil {
+			return "", m, err
+		}
+		if len(m.ChangedPaths) != 0 || len(list) == 0 || list[len(list)-1] != 0 {
+			return "", m, errors.New("invalid snapshot changed-path list")
+		}
+		m.ChangedPaths = strings.Split(string(list[:len(list)-1]), "\x00")
+	}
+	if digests != "" {
+		data, err := readWrapperBlob(ctx, r, store, digests, maxListBlob)
+		if err != nil {
+			return "", m, err
+		}
+		decoder := json.NewDecoder(bytes.NewReader(data))
+		decoder.DisallowUnknownFields()
+		var loaded map[string]string
+		if len(m.EncryptedDigests) != 0 || decoder.Decode(&loaded) != nil || decoder.Decode(new(any)) != io.EOF || len(loaded) == 0 {
+			return "", m, errors.New("invalid snapshot encrypted digests")
+		}
+		m.EncryptedDigests = loaded
 	}
 	if (m.SchemaVersion != 1 && m.SchemaVersion != 2) || m.Kind != "user" || m.RepositoryID != repo || m.WorkspaceID != workspace || !storage.ValidUUID(workspace) || m.MainHead != "" && !validOID(m.MainHead) {
 		return "", m, errors.New("snapshot identity or schema mismatch")

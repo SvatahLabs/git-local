@@ -3,7 +3,6 @@ package history
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -346,19 +345,7 @@ func rewriteSnapshot(ctx context.Context, r *gitexec.Runner, w workspace.Context
 	metadata.SchemaVersion = 2
 	metadata.EncryptedKeyFingerprint = policy.KeyFingerprint
 	metadata.EncryptedDigests = digests
-	data, err := json.Marshal(metadata)
-	if err != nil {
-		return "", err
-	}
-	data = append(data, '\n')
-	if len(data) > 1<<20 {
-		return "", errors.New("migrated snapshot metadata exceeds size limit")
-	}
-	metadataID, err := hash(ctx, r, destination, bytes.NewReader(data))
-	if err != nil {
-		return "", err
-	}
-	wrapper, err := tree(ctx, r, destination, []treeEntry{{"040000", "tree", filesTree, "files"}, {"100644", "blob", metadataID, "metadata.json"}})
+	wrapper, err := writeWrapper(ctx, r, destination, filesTree, metadata)
 	if err != nil {
 		return "", err
 	}
