@@ -274,6 +274,7 @@ func (f legacyFixture) checkCorrected(t *testing.T) {
 }
 
 func TestMigrateCorrectsFileRuleNamingADirectory(t *testing.T) {
+	t.Parallel()
 	f := legacyPolicyFixture(t)
 	ctx := context.Background()
 	// Snapshots that would save a mis-covered file refuse, naming the command.
@@ -291,6 +292,7 @@ func TestMigrateCorrectsFileRuleNamingADirectory(t *testing.T) {
 }
 
 func TestPolicyCorrectionRefusesNarrowingKeyChangeAndNoChange(t *testing.T) {
+	t.Parallel()
 	f := legacyPolicyFixture(t)
 	ctx := context.Background()
 	other := filepath.Join(t.TempDir(), "other.key")
@@ -334,8 +336,10 @@ func TestPolicyCorrectionRefusesNarrowingKeyChangeAndNoChange(t *testing.T) {
 }
 
 func TestPolicyCorrectionRecoversAtEveryPublicationPoint(t *testing.T) {
+	t.Parallel()
 	for _, point := range []string{"journal", "old-store-moved", "encrypted-store-published", "policy-published", "record-updates"} {
 		t.Run(point, func(t *testing.T) {
+			t.Parallel()
 			f := legacyPolicyFixture(t)
 			ctx := context.Background()
 			stop := func(at string) error {
@@ -385,6 +389,7 @@ func TestPolicyCorrectionRecoversAtEveryPublicationPoint(t *testing.T) {
 }
 
 func TestPolicyCorrectionAbandonBeforePublicationKeepsOldPolicy(t *testing.T) {
+	t.Parallel()
 	f := legacyPolicyFixture(t)
 	ctx := context.Background()
 	id, err := f.correct(func(at string) error {
