@@ -258,6 +258,11 @@ rules still ignore as an error, and warns about a block generated for the
 other setting. After upgrading, run `git local init`: it rewrites such a block
 for the current selections. Until then a commit the old block blocks names that
 command. The next `track` or `untrack` rewrites it too.
+The managed rules are limited to 256 KiB. A path untracked inside a tracked
+directory costs about L×L+21×L bytes for a name of length L that differs from
+its siblings near its start, so roughly fifty sixty-character names, or three
+255-character names, can be untracked in one directory; beyond that `untrack`
+fails with "managed ignore rules exceed the size limit".
 `git add -f` can bypass that ignore rule. Run `git local hook install` to add
 pre-commit and pre-push guards on macOS, Linux or Git for Windows. Native Windows
 hook execution still awaits CI qualification. The guards reject additions or

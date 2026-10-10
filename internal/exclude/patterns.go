@@ -15,7 +15,13 @@ import (
 
 const Begin = "# >>> git-local managed exclusions >>>\n"
 const End = "# <<< git-local managed exclusions <<<\n"
-const MaxPatterns = 128 << 10
+
+// MaxPatterns bounds the managed block. An excluded name of length L inside a
+// tracked directory costs about L*L+21*L bytes, so this allows roughly fifty
+// sixty-character names, or three 255-byte names, in one directory. It stays
+// well below the 1 MiB limit on info/exclude, whose before and after images
+// configuration and seed journals embed.
+const MaxPatterns = 256 << 10
 
 type node struct {
 	path     string
