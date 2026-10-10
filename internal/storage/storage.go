@@ -83,9 +83,10 @@ func ValidateSelectionPath(path string) error {
 		if folded == ".git" || strings.HasPrefix(folded, "git~") || strings.TrimRight(folded, ". ") != folded || runtime.GOOS == "windows" && strings.ContainsAny(c, ":<>\"|?*") {
 			return fmt.Errorf("unsupported path component %q", c)
 		}
-		// An NTFS 8.3 short name such as PROGRA~1 or NAME~1.EXT can resolve
-		// to a different long name, which alias checks can't see.
-		if shortName.MatchString(c) {
+		// On Windows, an NTFS 8.3 short name such as PROGRA~1 or NAME~1.EXT
+		// can resolve to a different long name, which alias checks can't see.
+		// Elsewhere such names (backup~2.txt) are ordinary files and stay valid.
+		if runtime.GOOS == "windows" && shortName.MatchString(c) {
 			return fmt.Errorf("unsupported path component %q: it has the form of a Windows 8.3 short name", c)
 		}
 		stem := strings.SplitN(strings.ToUpper(c), ".", 2)[0]

@@ -75,3 +75,58 @@ func TestPreCommitRefusesRestagingAfterNoVerifyLeak(t *testing.T) {
 		t.Fatalf("commit on top of a published hunk: %v\n%s", err, out)
 	}
 }
+
+// TestPreCommitRefusesReleakAfterUnpublishedFix: after a --no-verify leak and a
+// commit that removes the hunk again, HEAD's parent still carries it. That
+// unpublished parent must not count as upstream adoption, so staging the hunk
+// again is refused.
+func TestPreCommitRefusesReleakAfterUnpublishedFix(t *testing.T) {
+	repo := testutil.New(t)
+	base := []byte("port = 80\na\nb\nc\nd\ne\nf\npassword = none\n")
+	if err := os.WriteFile(filepath.Join(repo.Root, "app.conf"), base, 0600); err != nil {
+		t.Fatal(err)
+	}
+	repo.Git("add", "app.conf")
+	repo.Git("commit", "-qm", "initial")
+	bin := integrationBinary(t)
+	run := func(name string, args ...string) ([]byte, error) {
+		cmd := exec.Command(name, args...)
+		cmd.Dir, cmd.Env = repo.Root, repo.Env
+		if name == bin {
+			cmd.Env = repo.RunnerEnv()
+		}
+		return cmd.CombinedOutput()
+	}
+	stage := func(content []byte) {
+		t.Helper()
+		hash := exec.Command(repo.GitPath, "hash-object", "-w", "--stdin")
+		hash.Dir, hash.Env, hash.Stdin = repo.Root, repo.Env, bytes.NewReader(content)
+		object, err := hash.CombinedOutput()
+		if err != nil {
+			t.Fatalf("hash: %v\n%s", err, object)
+		}
+		repo.Git("update-index", "--cacheinfo", "100644,"+string(bytes.TrimSpace(object))+",app.conf")
+	}
+	if out, err := run(bin, "init"); err != nil {
+		t.Fatalf("init: %v\n%s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(repo.Root, "app.conf"), []byte("port = 8080\na\nb\nc\nd\ne\nf\npassword = s3cret\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"overlay", "add", "dev", "--", "app.conf"}, {"hook", "install"}} {
+		if out, err := run(bin, args...); err != nil {
+			t.Fatalf("%v: %v\n%s", args, err, out)
+		}
+	}
+	leaked := []byte("port = 80\na\nb\nc\nd\ne\nf\npassword = s3cret\n")
+	stage(leaked)
+	repo.Git("commit", "--no-verify", "-qm", "leak")
+	stage(bytes.Replace(base, []byte("\nc\n"), []byte("\nc2\n"), 1))
+	if out, err := run(repo.GitPath, "commit", "-qm", "remove the leaked hunk"); err != nil {
+		t.Fatalf("commit removing the hunk: %v\n%s", err, out)
+	}
+	stage(bytes.Replace(leaked, []byte("\nc\n"), []byte("\nc2\n"), 1))
+	if out, err := run(repo.GitPath, "commit", "-qm", "leak again"); err == nil || !bytes.Contains(out, []byte(`overlay "dev"`)) {
+		t.Fatalf("pre-commit passed a re-leak because an unpublished parent carried the hunk: %v\n%s", err, out)
+	}
+}

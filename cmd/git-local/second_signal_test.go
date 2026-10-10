@@ -72,3 +72,57 @@ func TestSecondSignalEndsHungCancellation(t *testing.T) {
 		}
 	}
 }
+
+// TestNohupKeepsSIGHUPIgnored checks that a process started under nohup, which
+// ignores SIGHUP, isn't canceled when the terminal closes, while SIGTERM still
+// cancels it.
+func TestNohupKeepsSIGHUPIgnored(t *testing.T) {
+	nohup, err := exec.LookPath("nohup")
+	if err != nil {
+		t.Skip("nohup not available")
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(nohup, executable)
+	cmd.Env = append(os.Environ(), "GITLOCAL_TEST_MODE=hang")
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer cmd.Process.Kill()
+	lines := make(chan string, 4)
+	go func() {
+		scanner := bufio.NewScanner(stdout)
+		for scanner.Scan() {
+			lines <- scanner.Text()
+		}
+		close(lines)
+	}()
+	if got := <-lines; got != "ready" {
+		t.Fatalf("got %q, want ready", got)
+	}
+	if err := cmd.Process.Signal(syscall.SIGHUP); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-lines:
+		t.Fatalf("SIGHUP under nohup reached the process: %q", got)
+	case <-time.After(time.Second):
+	}
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-lines:
+		if got != "canceled" {
+			t.Fatalf("got %q after SIGTERM, want canceled", got)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("SIGTERM did not cancel the process")
+	}
+}

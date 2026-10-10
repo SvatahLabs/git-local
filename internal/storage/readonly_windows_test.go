@@ -59,3 +59,30 @@ func TestReadOnlyStagesOnWindows(t *testing.T) {
 		t.Fatalf("read-only file not deleted: %v", err)
 	}
 }
+
+// TestWritableStageOverReadOnlyTargetStaysWritable: replacing a read-only
+// file must leave the new file with its own mode, not the old read-only one.
+func TestWritableStageOverReadOnlyTargetStaysWritable(t *testing.T) {
+	root := t.TempDir()
+	d, err := OpenDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	if err := d.StageNamed(".gitlocal-tmp-w", 0644, func(w io.Writer) error { _, err := io.WriteString(w, "new\n"); return err }); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(root, "target")
+	if err := os.WriteFile(target, []byte("old\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(target, 0444); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Rename(".gitlocal-tmp-w", "target"); err != nil {
+		t.Fatalf("replace a read-only target: %v", err)
+	}
+	if info, err := os.Stat(target); err != nil || info.Mode().Perm()&0200 == 0 {
+		t.Fatalf("the replacement inherited the old read-only attribute: %v %v", info, err)
+	}
+}

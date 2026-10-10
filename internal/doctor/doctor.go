@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"gitlocal/internal/configtx"
@@ -272,6 +273,8 @@ func Run(ctx context.Context, r *gitexec.Runner, cwd string) (Report, error) {
 				for _, name := range []string{"pre-commit", "pre-push"} {
 					if !status.Installed[name] {
 						result.add("guards", "warning", name+" guard is not installed in the current hooks directory", "Run git local hook install.")
+					} else if slices.Contains(status.Disabled, name) {
+						result.add("guards", "warning", name+" guard is installed, but the hook file isn't executable, so Git skips it", "Run chmod +x on "+filepath.Join(status.Current, name)+".")
 					}
 				}
 				if len(snapshot.Selections) > 0 {

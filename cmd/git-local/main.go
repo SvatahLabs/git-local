@@ -15,9 +15,16 @@ func main() {
 
 // cancelContext is canceled by the first interrupt or termination signal.
 // Later signals get their default action again, so a second one ends a
-// process whose cancellation hangs.
+// process whose cancellation hangs. A signal ignored when the process started
+// (nohup ignores SIGHUP) stays ignored: registering for it would undo that.
 func cancelContext() (context.Context, context.CancelFunc) {
-	ctx, stop := signal.NotifyContext(context.Background(), cancelSignals...)
+	var watched []os.Signal
+	for _, sig := range cancelSignals {
+		if !signal.Ignored(sig) {
+			watched = append(watched, sig)
+		}
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), watched...)
 	go func() {
 		<-ctx.Done()
 		stop()

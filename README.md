@@ -253,8 +253,9 @@ once a remote has it, a merge's other side, or a pushed commit's parent), for
 example because a teammate committed the same change upstream, isn't reported.
 A hunk leaked by `git commit --no-verify` is still refused in the next commit,
 because the leaking `HEAD` isn't on a remote yet;
-staged deletions remain allowed. Components that look like Windows 8.3 short
-names (`PROGRA~1`, `NAME~1.EXT`) can't be selected on any platform. Paths that
+staged deletions remain allowed. On Windows, components that look like 8.3 short
+names (`PROGRA~1`, `NAME~1.EXT`) can't be selected; elsewhere they are ordinary
+names. Paths that
 can never be selected, such as
 `aux.c`, `nul.txt`, names with a backslash or a trailing dot or space, or
 non-UTF-8 names, pass the guards unless the spelling Windows would resolve them
@@ -294,7 +295,8 @@ as they are and says so, and `hook status` reports them as installed by
 another repository; `hook uninstall` from a shared directory warns that the
 other repositories lose those hooks too.
 Install keeps an existing hook's file mode, so a hook you disabled by removing
-its execute bits stays disabled (`hook status` reports it), and adds its block
+its execute bits stays disabled; install warns that Git won't run it, and
+`hook status` and `doctor` report it. Install adds its block
 only to `sh`, `bash`, `dash`, `ksh` or `zsh` hooks (directly or through
 `env`); for any other interpreter it refuses and explains how to call the
 guards from that hook.
@@ -348,7 +350,8 @@ checkout. It saves an initial snapshot, then checks every five minutes by
 default; `--interval 30s` changes the period. This is a foreground process for
 one worktree. Stop it with Ctrl-C, or stop its service if you run it under a
 process supervisor: SIGTERM and SIGHUP stop it the same way, and a second
-signal ends it at once. It holds no permanent watcher state, and simultaneous
+signal ends it at once. A signal ignored when it started stays ignored, so a
+watcher started with `nohup` keeps running after the terminal closes. It holds no permanent watcher state, and simultaneous
 event hooks use the same snapshot lock. `--json` returns one summary object
 when the watcher stops.
 A capture that conflicts, for example because a selected file is saved or Git

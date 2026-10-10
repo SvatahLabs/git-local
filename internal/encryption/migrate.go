@@ -295,6 +295,13 @@ func prepareSeedUpdates(ctx context.Context, r *gitexec.Runner, w workspace.Cont
 func applyRecordUpdates(meta *storage.Dir, j migrationJournal, mismatch func(name string) error) error {
 	for _, update := range append(append([]recordUpdate{}, j.SeedUpdates...), j.RestoreUpdates...) {
 		current, err := meta.ReadFile("transactions/completed/"+update.Name, 16<<20)
+		if errors.Is(err, os.ErrNotExist) && mismatch != nil {
+			// An interrupted abandon may already have quarantined it.
+			if err := mismatch(update.Name); err != nil {
+				return err
+			}
+			continue
+		}
 		if err != nil {
 			return err
 		}
@@ -930,6 +937,13 @@ func AbandonMigration(ctx context.Context, r *gitexec.Runner, cwd, id string) (c
 		// Something outside git-local changed this journal since the
 		// migration prepared its update. Neither version fits the encrypted
 		// history, and resuming needs the key, so keep it aside instead.
+		source := "transactions/completed/" + name
+		if _, err := meta.Lstat(source); errors.Is(err, os.ErrNotExist) {
+			if q.HoldsJournal(meta, source) {
+				return nil // Quarantined by an interrupted earlier abandon.
+			}
+			return fmt.Errorf("%w: completed journal %q is missing", storage.ErrConflict, name)
+		}
 		entry, err := q.QuarantineJournal(meta, "transactions/completed/"+name, "completed journal changed outside git-local during the migration; it matches neither its version before nor after it")
 		if err != nil {
 			return err

@@ -995,7 +995,7 @@ func hookCommand() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				if setJSON(c, map[string]any{"currentDirectory": status.Current, "installed": status.Installed, "installedByOtherRepository": append([]string{}, status.Others...), "previousDirectories": status.Previous, "location": status.Location.Kind, "worktree": status.Location.Worktree, "tracked": status.Tracked}) {
+				if setJSON(c, map[string]any{"currentDirectory": status.Current, "installed": status.Installed, "installedByOtherRepository": append([]string{}, status.Others...), "disabled": append([]string{}, status.Disabled...), "previousDirectories": status.Previous, "location": status.Location.Kind, "worktree": status.Location.Worktree, "tracked": status.Tracked}) {
 					return nil
 				}
 				names := []string{"pre-commit", "pre-push"}
@@ -1059,7 +1059,7 @@ func autoCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if setJSON(c, map[string]any{"currentDirectory": status.Current, "installed": status.Installed, "installedByOtherRepository": append([]string{}, status.Others...), "location": status.Location.Kind, "worktree": status.Location.Worktree, "tracked": status.Tracked}) {
+			if setJSON(c, map[string]any{"currentDirectory": status.Current, "installed": status.Installed, "installedByOtherRepository": append([]string{}, status.Others...), "disabled": append([]string{}, status.Disabled...), "location": status.Location.Kind, "worktree": status.Location.Worktree, "tracked": status.Tracked}) {
 				return nil
 			}
 			names := []string{"post-commit", "post-checkout", "pre-rebase", "post-rewrite"}

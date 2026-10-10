@@ -104,30 +104,40 @@ func Staged(ctx context.Context, r *gitexec.Runner, cwd, index string) ([]Findin
 }
 
 // adoptedRevisions lists the revisions whose content a commit may carry
-// without leaking an overlay: a merge's other side, HEAD's parents, and HEAD
-// itself once a remote has it. An unpublished HEAD alone doesn't count: after
-// a git commit --no-verify, it holds the leaked hunk itself.
+// without leaking an overlay: a merge's other side, HEAD's parents and HEAD
+// itself, but only those a remote-tracking ref already contains. An
+// unpublished revision doesn't count, however it relates to HEAD: after a
+// git commit --no-verify, it (or a descendant's parent) holds the leaked hunk
+// itself.
 func adoptedRevisions(ctx context.Context, r *gitexec.Runner, root string) ([]string, error) {
-	revisions := []string{"MERGE_HEAD"}
+	var candidates []string
+	if _, err := r.Guard(ctx, root, "", "rev-parse", "--verify", "--quiet", "MERGE_HEAD"); err == nil {
+		candidates = append(candidates, "MERGE_HEAD")
+	} else if ge := (*gitexec.Error)(nil); !errors.As(err, &ge) || ge.Code != 1 {
+		return nil, err
+	}
 	_, err := r.Guard(ctx, root, "", "rev-parse", "--verify", "--quiet", "HEAD")
 	var ge *gitexec.Error
-	if errors.As(err, &ge) && ge.Code == 1 {
-		return revisions, nil // An unborn branch.
-	}
-	if err != nil {
+	if err != nil && !(errors.As(err, &ge) && ge.Code == 1) {
 		return nil, err
 	}
-	parents, err := r.Guard(ctx, root, "", "rev-parse", "HEAD^@")
-	if err != nil {
-		return nil, err
+	if err == nil {
+		parents, err := r.Guard(ctx, root, "", "rev-parse", "HEAD^@")
+		if err != nil {
+			return nil, err
+		}
+		candidates = append(candidates, strings.Fields(string(parents))...)
+		candidates = append(candidates, "HEAD")
 	}
-	revisions = append(revisions, strings.Fields(string(parents))...)
-	published, err := r.Guard(ctx, root, "", "for-each-ref", "--count=1", "--contains", "HEAD", "--format=%(refname)", "refs/remotes")
-	if err != nil {
-		return nil, err
-	}
-	if len(bytes.TrimSpace(published)) != 0 {
-		revisions = append(revisions, "HEAD")
+	var revisions []string
+	for _, candidate := range candidates {
+		published, err := r.Guard(ctx, root, "", "for-each-ref", "--count=1", "--contains", candidate, "--format=%(refname)", "refs/remotes")
+		if err != nil {
+			return nil, err
+		}
+		if len(bytes.TrimSpace(published)) != 0 {
+			revisions = append(revisions, candidate)
+		}
 	}
 	return revisions, nil
 }

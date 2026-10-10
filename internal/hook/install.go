@@ -379,6 +379,9 @@ func installNamed(ctx context.Context, r *gitexec.Runner, cwd, executable string
 			return nil, nil, e
 		}
 		plan := plannedHook{name: name, updated: updated, before: before, mode: modeForInstall(info, exists), beforeExists: beforeExists}
+		if plan.mode&0111 == 0 {
+			warnings = append(warnings, fmt.Sprintf("%s in %s isn't executable, so Git won't run it or the guard; run chmod +x %q to enable it", name, dir, filepath.Join(dir, name)))
+		}
 		if beforeExists {
 			plan.beforeMode = beforeInfo.Mode().Perm()
 		}

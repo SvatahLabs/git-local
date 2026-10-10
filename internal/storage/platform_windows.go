@@ -200,7 +200,7 @@ func (d *Dir) Rename(old, new string) error {
 		return err
 	}
 	// MoveFileEx refuses to replace a read-only destination.
-	return d.writable(new, func() error {
+	return d.writable(new, true, func() error {
 		return windows.MoveFileEx(src, dst, windows.MOVEFILE_REPLACE_EXISTING|windows.MOVEFILE_WRITE_THROUGH)
 	})
 }
@@ -238,7 +238,7 @@ func (d *Dir) Remove(name string) error {
 	}
 	defer done()
 	// DeleteFile refuses a read-only file.
-	return d.writable(name, func() error { return d.root.Remove(name) })
+	return d.writable(name, false, func() error { return d.root.Remove(name) })
 }
 func tryLock(f *os.File, shared bool) (bool, error) {
 	flags := uint32(windows.LOCKFILE_FAIL_IMMEDIATELY)
@@ -322,7 +322,7 @@ func (d *Dir) SyncStaged(name string) error {
 	if _, ok := flushedStages.Load(filepath.Join(d.name, name)); ok {
 		return nil
 	}
-	return d.writable(name, func() error {
+	return d.writable(name, false, func() error {
 		f, err := d.open(name, os.O_RDWR, 0)
 		if err != nil {
 			return err
@@ -348,8 +348,10 @@ func (d *Dir) chmodStaged(name string, mode fs.FileMode) error {
 }
 
 // writable runs fn with name's read-only attribute cleared, and sets it again
-// afterwards if it was set.
-func (d *Dir) writable(name string, fn func() error) error {
+// afterwards if it was set and the file is still the original. When fn
+// replaces the file (a rename over it) and succeeds, the file now at name is
+// the new one and keeps its own mode.
+func (d *Dir) writable(name string, replaces bool, fn func() error) error {
 	path := filepath.Join(d.name, name)
 	info, err := os.Lstat(path)
 	if err != nil || info.Mode().Perm()&0200 != 0 || !info.Mode().IsRegular() {
@@ -359,6 +361,9 @@ func (d *Dir) writable(name string, fn func() error) error {
 		return err
 	}
 	err = fn()
+	if replaces && err == nil {
+		return nil
+	}
 	if _, statErr := os.Lstat(path); statErr == nil {
 		err = errors.Join(err, os.Chmod(path, info.Mode().Perm()))
 	}

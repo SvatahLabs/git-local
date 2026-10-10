@@ -165,6 +165,19 @@ func (q *Quarantine) QuarantineJournal(meta *storage.Dir, name, reason string) (
 	return entry, meta.Rename(name, path.Join(quarantinePath(q.TransactionID), entry.File))
 }
 
+// HoldsJournal reports whether this quarantine already holds the completed
+// journal name (transactions/completed/...): an interrupted abandon recorded
+// and moved it, so a rerun must not expect it in its old place.
+func (q *Quarantine) HoldsJournal(meta *storage.Dir, name string) bool {
+	for _, entry := range q.Entries {
+		if entry.Kind == "journal" && entry.Source == name {
+			_, err := meta.Lstat(path.Join(quarantinePath(q.TransactionID), entry.File))
+			return err == nil
+		}
+	}
+	return false
+}
+
 // QuarantineStore moves a directory owned by an encryption migration from
 // <common>/gitlocal into the quarantine. Both live in the same directory, so
 // the move is a rename and never copies or deletes bytes.

@@ -10,6 +10,7 @@ import (
 
 	"gitlocal/internal/configtx"
 	"gitlocal/internal/restore"
+	"gitlocal/internal/storage"
 )
 
 // TestAbandonWithoutKeyQuarantinesMismatchedJournal: after publication,
@@ -68,5 +69,53 @@ func TestAbandonWithoutKeyQuarantinesMismatchedJournal(t *testing.T) {
 	orphans, err := restore.OrphanRefs(ctx, r, w)
 	if err != nil || len(orphans) != 1 || orphans[0].ID != restoreID || orphans[0].Quarantine != result.Quarantine {
 		t.Fatalf("orphan refs: %+v %v", orphans, err)
+	}
+}
+
+// TestAbandonRerunAfterJournalQuarantined: an abandon interrupted after it
+// moved a mismatched completed journal into the quarantine, but before it
+// marked the migration abandoned, must finish on a rerun instead of failing
+// on the journal's old, now empty, place.
+func TestAbandonRerunAfterJournalQuarantined(t *testing.T) {
+	r, w, root, key, restoreID, _ := restoredMigrationFixture(t)
+	ctx := context.Background()
+	id, err := migrate(ctx, r, root, key, []string{".env.local"}, func(point string) error {
+		if point == "policy-published" {
+			return errors.New("injected interruption")
+		}
+		return nil
+	})
+	if err == nil {
+		t.Fatal("fault missed")
+	}
+	completed := filepath.Join(w.Common, "gitlocal", "transactions", "completed", "restore-"+restoreID+".json")
+	data, err := os.ReadFile(completed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(completed, append(data, '\n'), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(key, key+".away"); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate the interrupted abandon: the journal is quarantined, nothing else happened.
+	meta, err := storage.OpenDir(filepath.Join(w.Common, "gitlocal"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	q, err := configtx.NewQuarantine(meta, id, "encrypt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.QuarantineJournal(meta, "transactions/completed/restore-"+restoreID+".json", "test"); err != nil {
+		t.Fatal(err)
+	}
+	meta.Close()
+	if _, err := AbandonMigration(ctx, r, root, id); err != nil {
+		t.Fatalf("abandon rerun after the journal was quarantined: %v", err)
+	}
+	if pending, err := configtx.PendingJournals(ctx, r, root); err != nil || len(pending) != 0 {
+		t.Fatalf("pending after rerun: %+v %v", pending, err)
 	}
 }
