@@ -19,7 +19,9 @@ import (
 	"time"
 )
 
-const MaxOutput = 16 << 20
+// MaxOutput caps buffered Git output. It is a variable only so tests can
+// lower it.
+var MaxOutput = 16 << 20
 
 type Runner struct {
 	processes  atomic.Uint64
@@ -393,7 +395,25 @@ func (r *Runner) ResetFilters(ctx context.Context, cwd, admin, commit string, pa
 	return result, nil
 }
 
+// MainListing runs an ls-files or ls-tree listing like Main, without the
+// output cap: index and HEAD listings grow with the repository, and callers
+// parse them in full.
+func (r *Runner) MainListing(ctx context.Context, cwd, admin string, args ...string) ([]byte, error) {
+	if len(args) == 0 || args[0] != "ls-files" && args[0] != "ls-tree" {
+		return nil, errors.New("only index and tree listings may exceed the output limit")
+	}
+	var out bytes.Buffer
+	if _, err := r.mainOutput(ctx, cwd, admin, nil, &out, args...); err != nil {
+		return nil, err
+	}
+	return out.Bytes(), nil
+}
+
 func (r *Runner) mainInput(ctx context.Context, cwd, admin string, input io.Reader, args ...string) ([]byte, error) {
+	return r.mainOutput(ctx, cwd, admin, input, nil, args...)
+}
+
+func (r *Runner) mainOutput(ctx context.Context, cwd, admin string, input io.Reader, output io.Writer, args ...string) ([]byte, error) {
 	if len(args) == 0 || !mainCommands[args[0]] {
 		return nil, errors.New("command not allowed by main-read policy")
 	}
@@ -443,7 +463,7 @@ func (r *Runner) mainInput(ctx context.Context, cwd, admin string, input io.Read
 		// setting. Its stdin contains pathnames; CheckIgnore prefixes them with ./.
 		extraEnv = []string{"GIT_LITERAL_PATHSPECS=0"}
 	}
-	return r.run(ctx, cwd, false, extraEnv, prefix, input, args...)
+	return r.runOutput(ctx, cwd, false, extraEnv, prefix, input, output, args...)
 }
 
 var historyCommands = map[string]bool{"symbolic-ref": true, "hash-object": true, "mktree": true, "commit-tree": true, "update-ref": true, "rev-parse": true, "cat-file": true, "ls-tree": true, "fsck": true, "show-ref": true, "rev-list": true, "diff-tree": true}

@@ -16,6 +16,9 @@ import (
 
 type GitReader interface {
 	Main(context.Context, string, string, ...string) ([]byte, error)
+	// MainListing is Main without the output cap, for index and tree
+	// listings that grow with the repository.
+	MainListing(context.Context, string, string, ...string) ([]byte, error)
 }
 type Evidence struct {
 	Head        string
@@ -127,7 +130,7 @@ func head(ctx context.Context, g GitReader, root, admin string) (string, error) 
 	return id, nil
 }
 func indexBytes(ctx context.Context, g GitReader, root, admin string) ([]byte, error) {
-	return g.Main(ctx, root, admin, "ls-files", "--stage", "--sparse", "--full-name", "-z")
+	return g.MainListing(ctx, root, admin, "ls-files", "--stage", "--sparse", "--full-name", "-z")
 }
 
 // InspectOwnership never interprets Git failures or unavailable trees as empty
@@ -149,7 +152,7 @@ func InspectOwnership(ctx context.Context, g GitReader, root, admin string) (Own
 	paths := map[string]bool{}
 	for _, e := range entries {
 		if e.mode == "040000" {
-			tree, err := g.Main(ctx, root, admin, "ls-tree", "-r", "--full-tree", "-z", e.oid)
+			tree, err := g.MainListing(ctx, root, admin, "ls-tree", "-r", "--full-tree", "-z", e.oid)
 			if err != nil {
 				return Ownership{}, err
 			}
@@ -165,7 +168,7 @@ func InspectOwnership(ctx context.Context, g GitReader, root, admin string) (Own
 		}
 	}
 	if firstHead != "" {
-		tree, err := g.Main(ctx, root, admin, "ls-tree", "-r", "--full-tree", "-z", firstHead)
+		tree, err := g.MainListing(ctx, root, admin, "ls-tree", "-r", "--full-tree", "-z", firstHead)
 		if err != nil {
 			return Ownership{}, err
 		}

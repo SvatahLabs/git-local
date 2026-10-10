@@ -70,7 +70,7 @@ func checkResetTarget(ctx context.Context, r *gitexec.Runner, w *workspace.Conte
 	if err != nil {
 		return nil, err
 	}
-	data, err := r.Main(ctx, w.Root, w.Admin, "ls-tree", "--full-tree", "--name-only", "-r", "-z", commit)
+	data, err := r.MainListing(ctx, w.Root, w.Admin, "ls-tree", "--full-tree", "--name-only", "-r", "-z", commit)
 	if err != nil {
 		return nil, err
 	}

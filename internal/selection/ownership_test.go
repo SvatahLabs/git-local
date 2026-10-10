@@ -45,6 +45,9 @@ type unavailableGit struct{}
 func (unavailableGit) Main(context.Context, string, string, ...string) ([]byte, error) {
 	return nil, errors.New("ownership unavailable")
 }
+func (g unavailableGit) MainListing(ctx context.Context, root, admin string, args ...string) ([]byte, error) {
+	return g.Main(ctx, root, admin, args...)
+}
 func TestUnavailableOwnershipIsNotEmpty(t *testing.T) {
 	if _, err := InspectOwnership(context.Background(), unavailableGit{}, "", " "); err == nil {
 		t.Fatal("unavailable ownership accepted")

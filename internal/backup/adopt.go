@@ -225,7 +225,7 @@ func checkMainlineOwnership(ctx context.Context, r *gitexec.Runner, w workspace.
 		if args[0] == "ls-tree" && w.Head == "" {
 			continue
 		}
-		paths, err := r.Main(ctx, w.Root, w.Admin, args...)
+		paths, err := r.MainListing(ctx, w.Root, w.Admin, args...)
 		if err != nil {
 			return err
 		}

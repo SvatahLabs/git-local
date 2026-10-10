@@ -404,7 +404,7 @@ func onDiskSpelling(files *storage.Dir, path string) string {
 func leftoverStages(ctx context.Context, r *gitexec.Runner, w workspace.Context) ([]string, error) {
 	// An ignore pattern rather than a pathspec: the runner forces literal
 	// pathspecs, and only this pattern is applied, so ignored stages are listed.
-	b, err := r.Main(ctx, w.Root, w.Admin, "ls-files", "-z", "--others", "--ignored", "--full-name", "--exclude="+exclude.StagePattern)
+	b, err := r.MainListing(ctx, w.Root, w.Admin, "ls-files", "-z", "--others", "--ignored", "--full-name", "--exclude="+exclude.StagePattern)
 	if err != nil {
 		return nil, err
 	}
@@ -415,7 +415,7 @@ func leftoverStages(ctx context.Context, r *gitexec.Runner, w workspace.Context)
 		}
 	}
 	// A stage that was force-added is in the index, which is the riskier state.
-	b, err = r.Main(ctx, w.Root, w.Admin, "ls-files", "-z", "--cached", "--full-name")
+	b, err = r.MainListing(ctx, w.Root, w.Admin, "ls-files", "-z", "--cached", "--full-name")
 	if err != nil {
 		return nil, err
 	}
