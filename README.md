@@ -153,7 +153,11 @@ when the replacement bytes match the stored key fingerprint.
 
 For encrypted remote backup, add a named SSH or HTTPS Git remote on a host
 different from `origin`, generate and preserve a key outside the checkout, and
-run `backup push`. The printed `refs/gitlocal/backups/...` ref identifies that
+run `backup push`. An HTTPS remote authenticates through the credential
+helpers in your global or system Git config (`credential.helper`, or
+`credential.<url>.helper` for that URL); repository config is ignored and Git
+never prompts, so store the credential with your helper first, for example by
+fetching from that URL once. The printed `refs/gitlocal/backups/...` ref identifies that
 backup; the archive is bound to it, so restore refuses an archive the backup
 host serves under another ref (an older backup or another repository's).
 Archives from earlier releases aren't bound and are refused; restore them with

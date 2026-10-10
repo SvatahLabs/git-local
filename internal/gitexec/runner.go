@@ -29,6 +29,9 @@ type Runner struct {
 	private    string
 	mu         sync.Mutex
 	checked    bool
+	// backupConfig holds extra -c settings for backup transports; only
+	// tests set it (to trust a test server's certificate).
+	backupConfig []string
 }
 
 type Error struct {
@@ -473,8 +476,45 @@ func (r *Runner) BackupPush(ctx context.Context, store, remoteURL, commit, ref s
 			return errors.New("invalid backup commit ID")
 		}
 	}
-	_, err := r.run(ctx, store, true, nil, []string{"--git-dir=" + store, "-c", "protocol.ssh.allow=always", "-c", "protocol.https.allow=always"}, nil, "push", "--porcelain", "--no-verify", "--no-follow-tags", remoteURL, commit+":"+ref)
+	prefix, err := r.backupTransport(ctx, store, remoteURL)
+	if err != nil {
+		return err
+	}
+	_, err = r.run(ctx, store, true, nil, prefix, nil, "push", "--porcelain", "--no-verify", "--no-follow-tags", remoteURL, commit+":"+ref)
 	return err
+}
+
+// backupTransport allows SSH and HTTPS for one backup command. For an HTTPS
+// URL it also passes the user's credential helpers on: the credential.helper
+// and credential.<url>.helper entries of the global and system config, in
+// Git's order, so Git applies its own URL matching to them. Repository config
+// stays ignored, and terminal and askpass prompts stay disabled.
+func (r *Runner) backupTransport(ctx context.Context, store, remoteURL string) ([]string, error) {
+	prefix := []string{"--git-dir=" + store, "-c", "protocol.ssh.allow=always", "-c", "protocol.https.allow=always"}
+	for _, setting := range r.backupConfig {
+		prefix = append(prefix, "-c", setting)
+	}
+	if !strings.HasPrefix(strings.ToLower(remoteURL), "https://") {
+		return prefix, nil
+	}
+	for _, scope := range []string{"--system", "--global"} {
+		out, err := r.run(ctx, store, false, nil, nil, nil, "config", "--includes", "--null", scope, "--get-regexp", `^credential\.(.+\.)?helper$`)
+		var ge *Error
+		if errors.As(err, &ge) && ge.Code == 1 {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("read credential helpers for the backup remote: %w", err)
+		}
+		for _, entry := range strings.Split(strings.TrimSuffix(string(out), "\x00"), "\x00") {
+			key, value, ok := strings.Cut(entry, "\n")
+			if !ok || strings.Contains(key, "=") {
+				return nil, fmt.Errorf("unsupported credential helper setting %q for the backup remote", key)
+			}
+			prefix = append(prefix, "-c", key+"="+value)
+		}
+	}
+	return prefix, nil
 }
 
 // BackupFetch retrieves one explicit backup ref into a disposable store. It
@@ -486,7 +526,11 @@ func (r *Runner) BackupFetch(ctx context.Context, store, remoteURL, ref string) 
 	if remoteURL == "" || strings.ContainsAny(remoteURL, "\x00\r\n") || !strings.HasPrefix(ref, "refs/gitlocal/backups/") || strings.ContainsAny(ref, "\x00\r\n :") {
 		return errors.New("invalid backup fetch arguments")
 	}
-	_, err := r.run(ctx, store, true, nil, []string{"--git-dir=" + store, "-c", "protocol.ssh.allow=always", "-c", "protocol.https.allow=always"}, nil, "fetch", "--no-tags", "--no-write-fetch-head", "--no-recurse-submodules", remoteURL, ref+":refs/heads/import")
+	prefix, err := r.backupTransport(ctx, store, remoteURL)
+	if err != nil {
+		return err
+	}
+	_, err = r.run(ctx, store, true, nil, prefix, nil, "fetch", "--no-tags", "--no-write-fetch-head", "--no-recurse-submodules", remoteURL, ref+":refs/heads/import")
 	return err
 }
 
