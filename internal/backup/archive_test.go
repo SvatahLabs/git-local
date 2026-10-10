@@ -45,7 +45,7 @@ func TestPackEncryptedIncludesPrivateStoreAndIdentity(t *testing.T) {
 	}
 	var encrypted bytes.Buffer
 	err = configtx.ReadSelection(context.Background(), g, repo.Root, func(current workspace.Context, _ selection.State, _ []string, recheck func() error) error {
-		if err := PackEncrypted(context.Background(), filepath.Join(current.Common, "gitlocal"), current.Admin, &encrypted, key); err != nil {
+		if err := PackEncrypted(context.Background(), filepath.Join(current.Common, "gitlocal"), current.Admin, &encrypted, key, testRef(current.RepositoryID)); err != nil {
 			return err
 		}
 		return recheck()
@@ -57,7 +57,7 @@ func TestPackEncryptedIncludesPrivateStoreAndIdentity(t *testing.T) {
 		t.Fatal("encrypted archive exposed selected file bytes")
 	}
 	var plain bytes.Buffer
-	if err := Decrypt(&plain, bytes.NewReader(encrypted.Bytes()), key); err != nil {
+	if err := Decrypt(&plain, bytes.NewReader(encrypted.Bytes()), key, testRef(w.RepositoryID)); err != nil {
 		t.Fatal(err)
 	}
 	entries := map[string][]byte{}
@@ -83,7 +83,7 @@ func TestPackEncryptedIncludesPrivateStoreAndIdentity(t *testing.T) {
 	if len(entries["state/locks/repository.lock"]) != 0 {
 		t.Fatal("transient repository lock was archived")
 	}
-	stage, err := DecryptStaged(context.Background(), bytes.NewReader(encrypted.Bytes()), key)
+	stage, err := DecryptStaged(context.Background(), bytes.NewReader(encrypted.Bytes()), key, testRef(w.RepositoryID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func TestPackEncryptedIncludesPrivateStoreAndIdentity(t *testing.T) {
 	}
 	bad := bytes.Clone(encrypted.Bytes())
 	bad[len(bad)-1] ^= 1
-	if stage, err := DecryptStaged(context.Background(), bytes.NewReader(bad), key); err == nil || stage != "" {
+	if stage, err := DecryptStaged(context.Background(), bytes.NewReader(bad), key, testRef(w.RepositoryID)); err == nil || stage != "" {
 		t.Fatalf("tampered backup produced a published stage: %q %v", stage, err)
 	}
 }
@@ -118,7 +118,7 @@ func TestPackEncryptedRejectsSymlinkedState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := PackEncrypted(context.Background(), state, admin, io.Discard, key); err == nil {
+	if err := PackEncrypted(context.Background(), state, admin, io.Discard, key, codecRef); err == nil {
 		t.Fatal("symlinked state was archived")
 	}
 }

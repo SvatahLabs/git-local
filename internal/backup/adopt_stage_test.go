@@ -43,15 +43,17 @@ func TestAdoptNamesStagingFileOwnedByMainline(t *testing.T) {
 		t.Fatal(err)
 	}
 	var encrypted bytes.Buffer
+	var ref string
 	if err := configtx.ReadSelection(ctx, g, source.Root, func(w workspace.Context, _ selection.State, _ []string, recheck func() error) error {
-		if err := PackEncrypted(ctx, filepath.Join(w.Common, "gitlocal"), w.Admin, &encrypted, key); err != nil {
+		ref = testRef(w.RepositoryID)
+		if err := PackEncrypted(ctx, filepath.Join(w.Common, "gitlocal"), w.Admin, &encrypted, key, ref); err != nil {
 			return err
 		}
 		return recheck()
 	}); err != nil {
 		t.Fatal(err)
 	}
-	stage, err := DecryptStaged(ctx, bytes.NewReader(encrypted.Bytes()), key)
+	stage, err := DecryptStaged(ctx, bytes.NewReader(encrypted.Bytes()), key, ref)
 	if err != nil {
 		t.Fatal(err)
 	}

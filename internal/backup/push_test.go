@@ -91,7 +91,7 @@ func TestPushUsesIsolatedEncryptedCommitAndRefusesOriginHost(t *testing.T) {
 		t.Fatal("remote archive contained plaintext")
 	}
 	var plain bytes.Buffer
-	if err := Decrypt(&plain, bytes.NewReader(encrypted), key); err != nil {
+	if err := Decrypt(&plain, bytes.NewReader(encrypted), key, result.Ref); err != nil {
 		t.Fatal(err)
 	}
 	foundHistory := false

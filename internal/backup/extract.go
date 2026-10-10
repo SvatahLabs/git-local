@@ -12,12 +12,14 @@ import (
 	"strings"
 
 	"gitlocal/internal/storage"
+	"gitlocal/internal/workspace"
 )
 
-// DecryptStaged authenticates an archive and extracts it into a new private
-// temporary directory. It returns that directory only after the terminal
-// authentication record succeeds. The caller owns removal or publication.
-func DecryptStaged(ctx context.Context, encrypted io.Reader, key []byte) (string, error) {
+// DecryptStaged authenticates an archive bound to ref and extracts it into a
+// new private temporary directory. It returns that directory only after the
+// terminal authentication record succeeds and the archive's repository is the
+// one ref names. The caller owns removal or publication.
+func DecryptStaged(ctx context.Context, encrypted io.Reader, key []byte, ref string) (string, error) {
 	stage, err := os.MkdirTemp("", "gitlocal-restore-stage-")
 	if err != nil {
 		return "", err
@@ -31,7 +33,7 @@ func DecryptStaged(ctx context.Context, encrypted io.Reader, key []byte) (string
 	reader, writer := io.Pipe()
 	done := make(chan error, 1)
 	go func() {
-		err := Decrypt(writer, encrypted, key)
+		err := Decrypt(writer, encrypted, key, ref)
 		writer.CloseWithError(err)
 		done <- err
 	}()
@@ -46,6 +48,9 @@ func DecryptStaged(ctx context.Context, encrypted io.Reader, key []byte) (string
 	}
 	if decryptErr != nil {
 		return "", decryptErr
+	}
+	if err := matchRefRepository(stage, ref); err != nil {
+		return "", err
 	}
 	success = true
 	return stage, nil
@@ -119,4 +124,23 @@ func extractTar(ctx context.Context, stage string, src io.Reader) error {
 	}
 	_, err = io.Copy(io.Discard, src)
 	return err
+}
+
+// matchRefRepository requires the staged state's repository ID to be the one
+// the backup ref names.
+func matchRefRepository(stage, ref string) error {
+	parts := strings.Split(strings.TrimPrefix(ref, "refs/gitlocal/backups/"), "/")
+	state, err := storage.OpenDir(filepath.Join(stage, "state"))
+	if err != nil {
+		return err
+	}
+	defer state.Close()
+	var repository workspace.Repository
+	if err := state.ReadJSON("repository.json", &repository); err != nil {
+		return err
+	}
+	if len(parts) != 2 || repository.RepositoryID != parts[0] {
+		return fmt.Errorf("backup archive belongs to repository %s, not %s named by its backup ref", repository.RepositoryID, parts[0])
+	}
+	return nil
 }

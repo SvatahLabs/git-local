@@ -77,15 +77,17 @@ func TestSymlinkRestoreSurvivesMigrationAndBackupAdoption(t *testing.T) {
 		t.Fatal(err)
 	}
 	var archive bytes.Buffer
+	var ref string
 	if err := configtx.ReadSelection(ctx, r, source.Root, func(w workspace.Context, _ selection.State, _ []string, recheck func() error) error {
-		if err := PackEncrypted(ctx, filepath.Join(w.Common, "gitlocal"), w.Admin, &archive, backupKey); err != nil {
+		ref = testRef(w.RepositoryID)
+		if err := PackEncrypted(ctx, filepath.Join(w.Common, "gitlocal"), w.Admin, &archive, backupKey, ref); err != nil {
 			return err
 		}
 		return recheck()
 	}); err != nil {
 		t.Fatal(err)
 	}
-	stage, err := DecryptStaged(ctx, bytes.NewReader(archive.Bytes()), backupKey)
+	stage, err := DecryptStaged(ctx, bytes.NewReader(archive.Bytes()), backupKey, ref)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -58,7 +58,12 @@ func push(ctx context.Context, r *gitexec.Runner, cwd, remote, keyFile string, t
 	}
 	defer archive.Close()
 	var urls []string
-	var repositoryID string
+	var ref string
+	nonce, err := storage.UUID()
+	if err != nil {
+		return result, err
+	}
+	stamp := time.Now().UTC().Format("20060102T150405Z")
 	err = configtx.ReadSelection(ctx, r, cwd, func(w workspace.Context, _ selection.State, _ []string, recheck func() error) error {
 		var e error
 		state, e := storage.OpenDir(filepath.Join(w.Common, "gitlocal"))
@@ -74,8 +79,8 @@ func push(ctx context.Context, r *gitexec.Runner, cwd, remote, keyFile string, t
 		if e != nil {
 			return e
 		}
-		repositoryID = w.RepositoryID
-		if e = PackEncrypted(ctx, filepath.Join(w.Common, "gitlocal"), w.Admin, archive, key); e != nil {
+		ref = fmt.Sprintf("refs/gitlocal/backups/%s/%s-%s", w.RepositoryID, stamp, nonce)
+		if e = PackEncrypted(ctx, filepath.Join(w.Common, "gitlocal"), w.Admin, archive, key, ref); e != nil {
 			return e
 		}
 		return recheck()
@@ -108,11 +113,7 @@ func push(ctx context.Context, r *gitexec.Runner, cwd, remote, keyFile string, t
 		return result, err
 	}
 	commitID := strings.TrimSpace(string(commit))
-	nonce, err := storage.UUID()
-	if err != nil {
-		return result, err
-	}
-	result.Ref = fmt.Sprintf("refs/gitlocal/backups/%s/%s-%s", repositoryID, time.Now().UTC().Format("20060102T150405Z"), nonce)
+	result.Ref = ref
 	for _, url := range urls {
 		if err := transport(ctx, r, store, url, commitID, result.Ref); err != nil {
 			return result, err

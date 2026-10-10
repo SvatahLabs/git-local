@@ -127,5 +127,5 @@ func fetchStaged(ctx context.Context, r *gitexec.Runner, cwd, remote, ref, keyFi
 		return "", err
 	}
 	defer input.Close()
-	return DecryptStaged(ctx, input, key)
+	return DecryptStaged(ctx, input, key, ref)
 }

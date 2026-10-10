@@ -3,6 +3,7 @@
 package backup
 
 import (
+	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/hmac"
@@ -16,7 +17,26 @@ import (
 
 const chunkSize = 1 << 20
 
-var archiveMagic = []byte("GITLOCAL-BACKUP\x01")
+// Version 2 archives bind their backup ref into the authenticated header.
+// Version 1 archives are unbound and refused.
+var (
+	archiveMagic       = []byte("GITLOCAL-BACKUP\x02")
+	legacyArchiveMagic = []byte("GITLOCAL-BACKUP\x01")
+)
+
+const maxBoundRef = 1024
+
+// archiveHeader is the magic, the salt and the backup ref the archive is
+// pushed under. Every record's authenticated data includes it, so an archive
+// served under another ref (an older backup, or another repository's) fails.
+func archiveHeader(salt []byte, ref string) ([]byte, error) {
+	if ref == "" || len(ref) > maxBoundRef {
+		return nil, errors.New("invalid backup ref for archive binding")
+	}
+	header := append(append([]byte{}, archiveMagic...), salt...)
+	header = binary.BigEndian.AppendUint16(header, uint16(len(ref)))
+	return append(header, ref...), nil
+}
 
 // GenerateKey creates a raw AES-256 master key. Callers must keep it outside
 // the clone; losing the clone and its key must not make a remote backup useless.
@@ -76,17 +96,20 @@ func writeRecord(dst io.Writer, aead cipher.AEAD, header []byte, counter, size u
 }
 
 // Encrypt writes independently authenticated 1 MiB records and an
-// authenticated terminal record. It never writes plaintext to dst.
-func Encrypt(dst io.Writer, src io.Reader, master []byte) error {
+// authenticated terminal record, bound to ref. It never writes plaintext to dst.
+func Encrypt(dst io.Writer, src io.Reader, master []byte, ref string) error {
 	if len(master) != 32 {
 		return errors.New("backup key must be exactly 32 bytes")
 	}
-	header := make([]byte, len(archiveMagic)+16)
-	copy(header, archiveMagic)
-	if _, err := rand.Read(header[len(archiveMagic):]); err != nil {
+	salt := make([]byte, 16)
+	if _, err := rand.Read(salt); err != nil {
 		return err
 	}
-	aead, err := archiveAEAD(master, header[len(archiveMagic):])
+	header, err := archiveHeader(salt, ref)
+	if err != nil {
+		return err
+	}
+	aead, err := archiveAEAD(master, salt)
 	if err != nil {
 		return err
 	}
@@ -115,23 +138,41 @@ func Encrypt(dst io.Writer, src io.Reader, master []byte) error {
 	}
 }
 
-// Decrypt rejects modified, truncated and extended archives. Callers must
-// stage its output until it returns successfully, because earlier records may
-// have been written before a later authentication failure.
-func Decrypt(dst io.Writer, src io.Reader, master []byte) error {
+// Decrypt rejects modified, truncated and extended archives, and archives
+// bound to a ref other than ref. Callers must stage its output until it
+// returns successfully, because earlier records may have been written before
+// a later authentication failure.
+func Decrypt(dst io.Writer, src io.Reader, master []byte, ref string) error {
 	if len(master) != 32 {
 		return errors.New("backup key must be exactly 32 bytes")
 	}
-	header := make([]byte, len(archiveMagic)+16)
-	if _, err := io.ReadFull(src, header); err != nil {
+	prefix := make([]byte, len(archiveMagic)+16+2)
+	if _, err := io.ReadFull(src, prefix); err != nil {
 		return fmt.Errorf("truncated backup header: %w", err)
 	}
-	for i, b := range archiveMagic {
-		if header[i] != b {
-			return errors.New("unsupported backup archive format")
-		}
+	if bytes.Equal(prefix[:len(legacyArchiveMagic)], legacyArchiveMagic) {
+		return errors.New("backup archive was written by an earlier release and isn't bound to its backup ref, so its age and repository can't be verified; restore it with that release, then push a new backup")
 	}
-	aead, err := archiveAEAD(master, header[len(archiveMagic):])
+	if !bytes.Equal(prefix[:len(archiveMagic)], archiveMagic) {
+		return errors.New("unsupported backup archive format")
+	}
+	salt := prefix[len(archiveMagic) : len(archiveMagic)+16]
+	size := int(binary.BigEndian.Uint16(prefix[len(archiveMagic)+16:]))
+	if size == 0 || size > maxBoundRef {
+		return errors.New("invalid backup archive binding")
+	}
+	bound := make([]byte, size)
+	if _, err := io.ReadFull(src, bound); err != nil {
+		return fmt.Errorf("truncated backup header: %w", err)
+	}
+	if string(bound) != ref {
+		return fmt.Errorf("backup archive was pushed as %s, not %s; the backup remote may have swapped refs", bound, ref)
+	}
+	header, err := archiveHeader(salt, ref)
+	if err != nil {
+		return err
+	}
+	aead, err := archiveAEAD(master, salt)
 	if err != nil {
 		return err
 	}

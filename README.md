@@ -154,7 +154,11 @@ when the replacement bytes match the stored key fingerprint.
 For encrypted remote backup, add a named SSH or HTTPS Git remote on a host
 different from `origin`, generate and preserve a key outside the checkout, and
 run `backup push`. The printed `refs/gitlocal/backups/...` ref identifies that
-backup. In a fresh mainline clone with the same named backup remote and key:
+backup; the archive is bound to it, so restore refuses an archive the backup
+host serves under another ref (an older backup or another repository's).
+Archives from earlier releases aren't bound and are refused; restore them with
+that release, then push a new backup. In a fresh mainline clone with the same
+named backup remote and key:
 
 ```sh
 git local backup restore backup "$BACKUP_REF" --key-file /secure/location/gitlocal.key

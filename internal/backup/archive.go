@@ -15,9 +15,10 @@ import (
 )
 
 // PackEncrypted streams Git Local's common state and the source checkout's
-// identity through the authenticated cipher. The caller must hold the common
-// repository lock and reject pending recovery transactions first.
-func PackEncrypted(ctx context.Context, stateRoot, admin string, dst io.Writer, key []byte) error {
+// identity through the authenticated cipher, bound to the backup ref. The
+// caller must hold the common repository lock and reject pending recovery
+// transactions first.
+func PackEncrypted(ctx context.Context, stateRoot, admin string, dst io.Writer, key []byte, ref string) error {
 	state, err := storage.OpenDir(stateRoot)
 	if err != nil {
 		return err
@@ -49,7 +50,7 @@ func PackEncrypted(ctx context.Context, stateRoot, admin string, dst io.Writer, 
 		writer.CloseWithError(err)
 		done <- err
 	}()
-	encErr := Encrypt(dst, reader, key)
+	encErr := Encrypt(dst, reader, key, ref)
 	if encErr != nil {
 		reader.CloseWithError(encErr)
 	}
