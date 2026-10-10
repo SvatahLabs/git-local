@@ -167,17 +167,13 @@ func New(out, errOut io.Writer) *cobra.Command {
 		return nil
 	}, RunE: func(c *cobra.Command, args []string) error {
 		return inspectCommand(c, func(r *gitexec.Runner, cwd string) error {
-			w, err := workspace.Discover(c.Context(), r, cwd)
-			if err != nil {
-				return err
-			}
-			if err := backup.CreateKeyFile(args[0], w.Root); err != nil {
+			if err := backup.Keygen(c.Context(), r, cwd, args[0]); err != nil {
 				return err
 			}
 			if setJSON(c, map[string]any{"path": args[0]}) {
 				return nil
 			}
-			_, err = fmt.Fprintf(c.OutOrStdout(), "Created backup key at %s. Keep it outside the clone.\n", args[0])
+			_, err := fmt.Fprintf(c.OutOrStdout(), "Created backup key at %s. Keep it outside the clone.\n", args[0])
 			return err
 		})
 	}})

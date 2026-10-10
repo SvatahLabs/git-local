@@ -48,6 +48,9 @@ func push(ctx context.Context, r *gitexec.Runner, cwd, remote, keyFile string, t
 	if err := r.InitBare(ctx, store); err != nil {
 		return result, err
 	}
+	if err := CheckKeyLocation(ctx, r, *w, keyFile); err != nil {
+		return result, err
+	}
 	key, err := LoadKeyFile(keyFile, w.Root)
 	if err != nil {
 		return result, err

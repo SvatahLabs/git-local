@@ -70,6 +70,9 @@ func fetchStaged(ctx context.Context, r *gitexec.Runner, cwd, remote, ref, keyFi
 	if err != nil {
 		return "", err
 	}
+	if err := CheckKeyLocation(ctx, r, *w, keyFile); err != nil {
+		return "", err
+	}
 	key, err := LoadKeyFile(keyFile, w.Root)
 	if err != nil {
 		return "", err
