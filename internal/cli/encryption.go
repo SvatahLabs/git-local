@@ -52,7 +52,7 @@ func encryptionCommand() *cobra.Command {
 	enable.Flags().StringVar(&keyFile, "key-file", "", "Absolute path to an external 32-byte sensitive-file key")
 	command.AddCommand(enable)
 	var migrateKey string
-	migrate := &cobra.Command{Use: "migrate --key-file <absolute-path> -- <selected-paths...>", Short: "Encrypt existing private snapshot history", Args: func(_ *cobra.Command, args []string) error {
+	migrate := &cobra.Command{Use: "migrate --key-file <absolute-path> -- <selected-paths...>", Short: "Encrypt existing private snapshot history, or correct the policy in service", Args: func(_ *cobra.Command, args []string) error {
 		if len(args) == 0 || !filepath.IsAbs(migrateKey) {
 			return usageError{errors.New("encrypt migrate requires --key-file <absolute-path> and selected paths")}
 		}

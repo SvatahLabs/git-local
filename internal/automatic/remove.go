@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"strconv"
-	"strings"
 
 	"gitlocal/internal/configtx"
 	"gitlocal/internal/gitexec"
@@ -67,12 +65,6 @@ func RemoveWorktree(ctx context.Context, r *gitexec.Runner, cwd, target string, 
 		return result, fmt.Errorf("snapshot linked worktree before removal: %w", err)
 	}
 	result.SnapshotChanged = saved.Changed
-	// Removal deletes ignored files too, so a skipped file whose content
-	// differs from its carried version would be lost. Unchanged or deleted
-	// skipped files lose nothing.
-	if len(saved.Unsaved) > 0 && !force {
-		return result, fmt.Errorf("%w: the snapshot before removal skipped %s, whose changes would be lost; correct the sensitive-file policy (see git local doctor), or use --force to discard them", storage.ErrConflict, quoted(saved.Unsaved))
-	}
 	if err := r.RemoveLinkedWorktree(ctx, w.Root, w.Admin, target, force); err != nil {
 		return result, fmt.Errorf("%w: Git refused to remove %q after the local snapshot; use --force only if other worktree changes may be discarded: %v", storage.ErrConflict, target, err)
 	}
@@ -85,12 +77,4 @@ func RemoveWorktree(ctx context.Context, r *gitexec.Runner, cwd, target string, 
 	}
 	result.Retired = true
 	return result, nil
-}
-
-func quoted(paths []string) string {
-	list := make([]string, len(paths))
-	for i, path := range paths {
-		list[i] = strconv.Quote(path)
-	}
-	return strings.Join(list, ", ")
 }

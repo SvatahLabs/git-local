@@ -52,7 +52,7 @@ func InspectCompletedRecoveryForMigration(ctx context.Context, r *gitexec.Runner
 	if err != nil {
 		return RecoveryMigrationIdentity{}, err
 	}
-	if j.SchemaVersion != 1 || j.Outcome == "" || !storage.ValidUUID(j.Manifest.Plan.DestinationWorkspaceID) {
+	if j.SchemaVersion != 1 && j.SchemaVersion != 2 || j.Outcome == "" || !storage.ValidUUID(j.Manifest.Plan.DestinationWorkspaceID) {
 		return RecoveryMigrationIdentity{}, errors.New("unsupported completed restore journal for encryption migration")
 	}
 	w.WorkspaceID = j.Manifest.Plan.DestinationWorkspaceID
@@ -65,6 +65,8 @@ func InspectCompletedRecoveryForMigration(ctx context.Context, r *gitexec.Runner
 // RewriteCompletedRecovery copies a completed recovery anchor into the new
 // store. Sensitive preimages are encrypted; no plaintext recovery object is
 // copied into that store. The returned journal is staged until publication.
+// A schema 2 anchor (a policy correction with the same key) keeps its
+// encrypted images and encrypts the ones the corrected policy newly covers.
 func RewriteCompletedRecovery(ctx context.Context, r *gitexec.Runner, w workspace.Context, destination string, data []byte, policy secureblob.Policy, key []byte, mapSnapshot func(string) (string, error)) (RewrittenRecovery, error) {
 	identity, err := InspectCompletedRecoveryForMigration(ctx, r, w, data)
 	if err != nil {
@@ -76,6 +78,10 @@ func RewriteCompletedRecovery(ctx context.Context, r *gitexec.Runner, w workspac
 	}
 	m := &j.Manifest
 	p := &m.Plan
+	if j.SchemaVersion == 2 && p.EncryptedKeyFingerprint != policy.KeyFingerprint {
+		return RewrittenRecovery{}, errors.New("restore anchor is encrypted with a different key")
+	}
+	oldBefore, oldPost := m.BeforeStored, m.PostStored
 	oldSource := p.SourceSnapshot
 	if p.SourceSnapshot, err = mapSnapshot(p.SourceSnapshot); err != nil {
 		return RewrittenRecovery{}, err
@@ -94,9 +100,19 @@ func RewriteCompletedRecovery(ctx context.Context, r *gitexec.Runner, w workspac
 	for i := range p.Operations {
 		op := &p.Operations[i]
 		isSensitive := policy.Covers(op.Path)
+		if op.Encrypted && !isSensitive {
+			return RewrittenRecovery{}, fmt.Errorf("%w: restore image %q is encrypted, and the corrected policy doesn't cover it", storage.ErrConflict, op.Path)
+		}
+		wasEncrypted := op.Encrypted
 		op.Encrypted = isSensitive
 		if isSensitive {
 			protected++
+		}
+		if wasEncrypted {
+			if err := keepEncryptedImages(ctx, r, w, destination, &j, i, oldBefore[i], oldPost[i], p.SourceSnapshot, key); err != nil {
+				return RewrittenRecovery{}, err
+			}
+			continue
 		}
 		if op.Before.Exists {
 			actual, err := blobFingerprint(ctx, r, w.Store, op.Before.BlobID, op.Before.GitMode, op.Before.Permissions)
@@ -247,6 +263,48 @@ func VerifyMigratedRecovery(ctx context.Context, r *gitexec.Runner, w workspace.
 				return fmt.Errorf("migrated restore image %q differs from recovery evidence", op.Path)
 			}
 		}
+	}
+	return nil
+}
+
+// keepEncryptedImages authenticates an operation's encrypted images in the
+// live store and copies them unchanged; the rewritten source snapshot must
+// hold the same encrypted source blob.
+func keepEncryptedImages(ctx context.Context, r *gitexec.Runner, w workspace.Context, destination string, j *journal, i int, before, post, newSource string, key []byte) error {
+	m := &j.Manifest
+	p := &m.Plan
+	op := &p.Operations[i]
+	if op.Before.Exists {
+		identity := secureblob.Identity{RepositoryID: w.RepositoryID, WorkspaceID: p.DestinationWorkspaceID, Path: op.Path, Mode: op.Before.GitMode}
+		actual, err := protectedBlobFingerprint(ctx, r, w.Store, before, key, identity, op.Before.Permissions)
+		if err != nil {
+			return err
+		}
+		if !imageEqual(actual, op.Before) {
+			return fmt.Errorf("restore preimage %q differs from anchor", op.Path)
+		}
+		if err := copyRecoveryBlob(ctx, r, w.Store, destination, before); err != nil {
+			return err
+		}
+		m.BeforeStored[i] = before
+	}
+	if m.Post[i].Exists {
+		identity := secureblob.Identity{RepositoryID: w.RepositoryID, WorkspaceID: p.SourceWorkspaceID, Path: op.Path, Mode: op.SourceMode}
+		actual, err := protectedBlobFingerprint(ctx, r, w.Store, post, key, identity, m.Post[i].Permissions)
+		if err != nil {
+			return err
+		}
+		if post != op.SourceBlob || !imageEqual(actual, m.Post[i]) {
+			return fmt.Errorf("restore postimage %q differs from anchor", op.Path)
+		}
+		newFile, digest, err := history.SnapshotFileFromStore(ctx, r, w, destination, p.SourceWorkspaceID, newSource, op.Path)
+		if err != nil {
+			return err
+		}
+		if newFile.ID != op.SourceBlob || newFile.Mode != op.SourceMode || digest != op.SourceDigest {
+			return fmt.Errorf("migrated restore source %q differs from anchor", op.Path)
+		}
+		m.PostStored[i] = post
 	}
 	return nil
 }

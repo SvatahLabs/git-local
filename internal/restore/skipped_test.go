@@ -13,13 +13,13 @@ import (
 	"gitlocal/internal/storage"
 )
 
-func TestRestoreOfSkippedPathWritesNoNewPlaintext(t *testing.T) {
+func TestRestoreOfAliasedPathWritesNoNewPlaintext(t *testing.T) {
 	repo, r, w := fixture(t)
 	write(t, repo.Root, "notes/Secret.txt", "TOKEN=saved\n")
 	write(t, repo.Root, "notes/plain.txt", "plain\n")
 	track(t, r, repo.Root, true, "notes")
 	// An earlier release saved it as plaintext, then recorded the policy
-	// under another spelling, so snapshots now skip the file.
+	// under another spelling, so snapshots now refuse the file.
 	source := save(t, r, repo.Root)
 	keyPath := filepath.Join(t.TempDir(), "sensitive.key")
 	if err := keymaterial.Create(keyPath, repo.Root); err != nil {
@@ -39,14 +39,14 @@ func TestRestoreOfSkippedPathWritesNoNewPlaintext(t *testing.T) {
 	common.Close()
 	write(t, repo.Root, "notes/Secret.txt", "TOKEN=unsaved-local-change\n")
 	if _, err := Execute(ctx, r, repo.Root, "", source, []string{"notes/Secret.txt"}, true); !errors.Is(err, storage.ErrConflict) || !strings.Contains(err.Error(), "can't be kept as a recovery copy") {
-		t.Fatalf("restore over an unsaved skipped file was not refused as a skipped path: %v", err)
+		t.Fatalf("restore over an unsaved aliased file was not refused as an aliased path: %v", err)
 	}
 	objects, err := r.History(ctx, w.Store, nil, "cat-file", "--batch-all-objects", "--batch", "--unordered")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if bytes.Contains(objects, []byte("unsaved-local-change")) {
-		t.Fatal("restore wrote the skipped file's plaintext into the private store")
+		t.Fatal("restore wrote the aliased file's plaintext into the private store")
 	}
 	if data, err := os.ReadFile(filepath.Join(repo.Root, "notes/Secret.txt")); err != nil || string(data) != "TOKEN=unsaved-local-change\n" {
 		t.Fatalf("local change not kept: %q %v", data, err)

@@ -185,11 +185,11 @@ func Run(ctx context.Context, r *gitexec.Runner, cwd string) (Report, error) {
 		} else {
 			result.add("main ownership", "ok", "main HEAD and index do not own the current selection", "")
 		}
-		if paths, e := sensitiveKindMismatches(d.Workspace); e != nil {
+		if paths, correction, e := sensitiveKindMismatches(d.Workspace); e != nil {
 			result.add("encryption", "error", e.Error(), "Inspect the sensitive-file policy.")
 		} else {
 			for _, problem := range paths {
-				result.add("encryption", "error", problem+"; files it should cover were saved unencrypted, and snapshots skip them (keeping their last saved version) until the policy is corrected", "Keep the private store and its backups private. Changing an existing sensitive-file policy isn't supported yet; changes to the skipped files go unsaved until it is.")
+				result.add("encryption", "error", problem+"; files it should cover were saved unencrypted, and snapshots that would save them are refused until the policy is corrected", "Run "+correction+" to encrypt them in every snapshot (add any other sensitive path you want). Keep the private store and its backups private until then.")
 			}
 		}
 		storeErr := gitexec.ValidateStore(d.Workspace.Store)
@@ -318,32 +318,37 @@ func Run(ctx context.Context, r *gitexec.Runner, cwd string) (Report, error) {
 // holds: a file rule naming a directory, or a rule spelled differently from the
 // on-disk path. Earlier releases recorded both, which left the files stored as
 // plaintext.
-func sensitiveKindMismatches(w workspace.Context) ([]string, error) {
+// The returned command corrects the policy: encrypt migrate with the policy's
+// key and every rule's path as spelled on disk.
+func sensitiveKindMismatches(w workspace.Context) ([]string, string, error) {
 	common, err := storage.OpenDir(w.Common)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	defer common.Close()
 	var policy secureblob.Policy
 	if err := common.ReadJSON(secureblob.PolicyFile, &policy); errors.Is(err, os.ErrNotExist) {
-		return nil, nil
+		return nil, "", nil
 	} else if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	files, err := storage.OpenDir(w.Root)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	defer files.Close()
 	var problems []string
+	command := "git local encrypt migrate --key-file " + shellQuote(policy.KeyFile) + " --"
 	for _, rule := range policy.Sensitive {
 		if storage.ValidateSelectionPath(rule.Path) != nil {
 			continue
 		}
 		if spelled := onDiskSpelling(files, rule.Path); spelled != "" {
 			problems = append(problems, fmt.Sprintf("sensitive path %q is spelled %q on disk", rule.Path, spelled))
+			command += " " + shellQuote(spelled)
 			continue
 		}
+		command += " " + shellQuote(rule.Path)
 		if rule.Kind != "file" {
 			continue
 		}
@@ -351,8 +356,10 @@ func sensitiveKindMismatches(w workspace.Context) ([]string, error) {
 			problems = append(problems, fmt.Sprintf("sensitive path %q is recorded as a file but is a directory", rule.Path))
 		}
 	}
-	return problems, nil
+	return problems, command, nil
 }
+
+func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'" }
 
 // onDiskSpelling returns the checkout's spelling of path when some component
 // exists only under a different alias spelling (case or normalization). It

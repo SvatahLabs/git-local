@@ -39,3 +39,26 @@ func WriteLocked(common *storage.Dir, policy Policy, repoRoot, commonGitDir stri
 	}
 	return common.WriteJSON(PolicyFile, canonical)
 }
+
+// Published reports whether an encryption migration's policy is in service.
+// A first migration (previous is nil) publishes by creating the policy file; a
+// correction replaces previous, so the file must hold one of the two. The
+// file is read without resolving the key path, which may be unavailable.
+func Published(common *storage.Dir, next Policy, previous *Policy) (bool, error) {
+	var live Policy
+	if err := common.ReadJSON(PolicyFile, &live); errors.Is(err, os.ErrNotExist) {
+		if previous != nil {
+			return false, errors.New("sensitive-file policy is missing during its correction")
+		}
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	switch {
+	case previous == nil || SameRules(live, next):
+		return true, nil
+	case SameRules(live, *previous):
+		return false, nil
+	}
+	return false, errors.New("sensitive-file policy differs from both versions in the encryption migration journal")
+}

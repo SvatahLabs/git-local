@@ -50,6 +50,22 @@ func HistoricalPaths(ctx context.Context, r *gitexec.Runner, w workspace.Context
 // objects may contain plaintext and cannot safely be carried over unchanged.
 // The caller holds the common repository lock and owns the empty destination.
 func RewritePlaintextStore(ctx context.Context, r *gitexec.Runner, w workspace.Context, destination string, policy secureblob.Policy, key []byte, allowedRecovery ...map[string]string) (MigrationResult, error) {
+	return rewriteStore(ctx, r, w, destination, policy, nil, key, allowedRecovery...)
+}
+
+// RewriteEncryptedStore copies histories encrypted under previous into a new
+// bare store under a corrected policy with the same key. A file previous
+// covers keeps its encrypted blob and keyed digest; a newly covered file is
+// encrypted, and its plaintext object is never copied. A file previous covers
+// that policy doesn't is refused: a correction never decrypts history.
+func RewriteEncryptedStore(ctx context.Context, r *gitexec.Runner, w workspace.Context, destination string, policy, previous secureblob.Policy, key []byte, allowedRecovery map[string]string) (MigrationResult, error) {
+	if previous.KeyFingerprint != policy.KeyFingerprint {
+		return MigrationResult{}, errors.New("corrected sensitive-file policy uses a different key")
+	}
+	return rewriteStore(ctx, r, w, destination, policy, &previous, key, allowedRecovery)
+}
+
+func rewriteStore(ctx context.Context, r *gitexec.Runner, w workspace.Context, destination string, policy secureblob.Policy, previous *secureblob.Policy, key []byte, allowedRecovery ...map[string]string) (MigrationResult, error) {
 	if err := gitexec.ValidateStore(destination); err != nil {
 		return MigrationResult{}, err
 	}
@@ -117,7 +133,7 @@ func RewritePlaintextStore(ctx context.Context, r *gitexec.Runner, w workspace.C
 			if previousOld == "" && len(fields) != 1 || previousOld != "" && len(fields) != 2 {
 				return MigrationResult{}, errors.New("incomplete workspace history during migration")
 			}
-			next, err := rewriteSnapshot(ctx, r, w, destination, source, fields[0], previousNew, policy, key)
+			next, err := rewriteSnapshot(ctx, r, w, destination, source, fields[0], previousNew, policy, previous, key)
 			if err != nil {
 				return MigrationResult{}, fmt.Errorf("rewrite snapshot %s: %w", fields[0], err)
 			}
@@ -271,13 +287,16 @@ func configWorkspace(w workspace.Context, id string) error {
 	return nil
 }
 
-func rewriteSnapshot(ctx context.Context, r *gitexec.Runner, w workspace.Context, destination, source, oldID, parent string, policy secureblob.Policy, key []byte) (string, error) {
+func rewriteSnapshot(ctx context.Context, r *gitexec.Runner, w workspace.Context, destination, source, oldID, parent string, policy secureblob.Policy, previous *secureblob.Policy, key []byte) (string, error) {
 	treeID, metadata, err := readPrevious(ctx, r, w.Store, oldID, w.RepositoryID, source)
 	if err != nil {
 		return "", err
 	}
-	if metadata.SchemaVersion != 1 {
+	switch {
+	case previous == nil && metadata.SchemaVersion != 1:
 		return "", errors.New("mixed or already encrypted history requires a separate migration")
+	case previous != nil && (metadata.SchemaVersion != 2 || metadata.EncryptedKeyFingerprint != previous.KeyFingerprint):
+		return "", errors.New("history to correct isn't encrypted with the policy's key")
 	}
 	oldFiles, err := readFiles(ctx, r, w.Store, treeID)
 	if err != nil {
@@ -293,11 +312,24 @@ func rewriteSnapshot(ctx context.Context, r *gitexec.Runner, w workspace.Context
 	for _, path := range paths {
 		file := oldFiles[path]
 		id := file.ID
+		encrypted := metadata.EncryptedDigests[path]
+		if encrypted != "" && !policy.Covers(path) {
+			return "", fmt.Errorf("%w: historical file %q is encrypted, and the corrected policy doesn't cover it; a correction can't decrypt history", storage.ErrConflict, path)
+		}
 		if rule, ok := policy.UncoveredAlias(path); ok {
 			return "", fmt.Errorf("%w: historical file %q matches sensitive path %q only by spelling or kind and would stay unencrypted", storage.ErrConflict, path, rule)
 		}
-		if policy.Covers(path) {
-			identity := secureblob.Identity{RepositoryID: w.RepositoryID, WorkspaceID: source, Path: path, Mode: file.Mode}
+		identity := secureblob.Identity{RepositoryID: w.RepositoryID, WorkspaceID: source, Path: path, Mode: file.Mode}
+		if encrypted != "" {
+			// Same key, path, mode and workspace: the ciphertext stays valid.
+			id, err = migratePublicBlob(ctx, r, w.Store, destination, file.ID)
+			if err == nil {
+				digests[path], err = auditedBlobDigest(ctx, r, destination, id, key, identity)
+			}
+			if err == nil && digests[path] != encrypted {
+				err = errors.New("encrypted file failed authentication")
+			}
+		} else if policy.Covers(path) {
 			id, digests[path], err = migrateSensitiveBlob(ctx, r, w.Store, destination, file.ID, key, identity)
 		} else {
 			id, err = migratePublicBlob(ctx, r, w.Store, destination, file.ID)

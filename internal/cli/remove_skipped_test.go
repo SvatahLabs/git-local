@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,7 +14,7 @@ import (
 
 // skippedRemoveFixture gives a linked worktree seeded with notes/Secret.txt
 // under a policy from an earlier release that spells the rule differently, so
-// snapshots skip that file and carry its saved version forward.
+// snapshots that would save that file are refused.
 func skippedRemoveFixture(t *testing.T) (*testutil.Repo, string, func(root, path, content string)) {
 	t.Helper()
 	repo := testutil.New(t)
@@ -48,8 +47,7 @@ func skippedRemoveFixture(t *testing.T) (*testutil.Repo, string, func(root, path
 		t.Fatal(err)
 	}
 	successful(t, linked, "init", "--from", "main")
-	// The linked workspace saves its own copy before the policy exists, so a
-	// later skip has a version to carry forward.
+	// The linked workspace saves its own copy before the policy exists.
 	successful(t, linked, "commit", "-m", "linked notes")
 	// A policy from an earlier release spelled the rule differently.
 	common := filepath.Join(repo.Root, ".git")
@@ -72,45 +70,48 @@ func skippedRemoveFixture(t *testing.T) (*testutil.Repo, string, func(root, path
 	return repo, linked, write
 }
 
-func TestWorkspaceRemoveRefusesSkippedChangesUnlessForced(t *testing.T) {
+// A snapshot refuses a file that a policy from an earlier release covers only
+// by spelling, so removal, which saves the worktree first, is refused with
+// the correction command and the worktree is kept, even with --force.
+func TestWorkspaceRemoveRefusesWhenSnapshotRefusesAliasedFile(t *testing.T) {
 	repo, linked, write := skippedRemoveFixture(t)
 	write(linked, "notes/Secret.txt", "TOKEN=unsaved\n")
-	code, out, diagnostic := callCLI(t, repo.Root, "workspace", "remove", linked)
-	if code == 0 || !strings.Contains(diagnostic, `skipped "notes/Secret.txt"`) || !strings.Contains(diagnostic, "Warning:") || !strings.Contains(diagnostic, "--force") {
-		t.Fatalf("removal with a skipped change (exit %d):\n%s\n%s", code, out, diagnostic)
-	}
-	if _, err := os.Stat(filepath.Join(linked, "notes/Secret.txt")); err != nil {
-		t.Fatalf("worktree removed although a skipped file was unsaved: %v", err)
-	}
-	code, out, _ = callCLI(t, repo.Root, "workspace", "remove", linked, "--json")
-	var envelope struct {
-		OK       bool     `json:"ok"`
-		Warnings []string `json:"warnings"`
-		Data     struct {
-			Removed bool `json:"removed"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal([]byte(out), &envelope); err != nil || code == 0 || envelope.OK || envelope.Data.Removed || len(envelope.Warnings) != 1 || !strings.Contains(envelope.Warnings[0], `skipped "notes/Secret.txt"`) {
-		t.Fatalf("JSON removal with a skipped change (exit %d): %s %v", code, out, err)
-	}
-	code, out, diagnostic = callCLI(t, repo.Root, "workspace", "remove", linked, "--force")
-	if code != 0 || !strings.Contains(diagnostic, `skipped "notes/Secret.txt"`) || !strings.Contains(out, "Removed and retained workspace") {
-		t.Fatalf("forced removal (exit %d):\n%s\n%s", code, out, diagnostic)
-	}
-	if _, err := os.Stat(linked); !os.IsNotExist(err) {
-		t.Fatalf("forced removal left the worktree: %v", err)
+	for _, args := range [][]string{{"workspace", "remove", linked}, {"workspace", "remove", linked, "--force"}} {
+		code, out, diagnostic := callCLI(t, repo.Root, args...)
+		if code == 0 || !strings.Contains(diagnostic, `"notes/Secret.txt" matches sensitive path "notes/secret.txt"`) || !strings.Contains(diagnostic, "git local encrypt migrate") {
+			t.Fatalf("%v (exit %d):\n%s\n%s", args, code, out, diagnostic)
+		}
+		if data, err := os.ReadFile(filepath.Join(linked, "notes/Secret.txt")); err != nil || string(data) != "TOKEN=unsaved\n" {
+			t.Fatalf("%v removed the worktree although its snapshot was refused: %q %v", args, data, err)
+		}
 	}
 }
 
-// An unchanged skipped file loses nothing on removal, so no --force is needed
-// (which would also discard tracked-file edits).
-func TestWorkspaceRemoveAllowsUnchangedSkippedFile(t *testing.T) {
-	repo, linked, _ := skippedRemoveFixture(t)
-	code, out, diagnostic := callCLI(t, repo.Root, "workspace", "remove", linked)
-	if code != 0 || !strings.Contains(out, "Removed and retained workspace") || !strings.Contains(diagnostic, `skipped "notes/Secret.txt"`) {
-		t.Fatalf("removal with an unchanged skipped file (exit %d):\n%s\n%s", code, out, diagnostic)
+// unavailableWorkspaceFixture gives a repository with a tracked file and an
+// initialized linked worktree that was then moved away without Git, so every
+// snapshot in the main worktree warns that its rules can't be verified.
+func unavailableWorkspaceFixture(t *testing.T) (*testutil.Repo, func(root, path, content string)) {
+	t.Helper()
+	repo := testutil.New(t)
+	repo.Commit()
+	write := func(root, path, content string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Join(root, filepath.Dir(path)), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, path), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if _, err := os.Stat(linked); !os.IsNotExist(err) {
-		t.Fatalf("removal left the worktree: %v", err)
+	write(repo.Root, "notes/plain.txt", "plain v1\n")
+	successful(t, repo.Root, "init")
+	successful(t, repo.Root, "track", "notes")
+	successful(t, repo.Root, "commit", "-m", "main notes")
+	linked := filepath.Join(t.TempDir(), "linked")
+	repo.Git("worktree", "add", "-q", "-b", "moved-away", linked)
+	successful(t, linked, "init", "--from", "main")
+	if err := os.Rename(linked, linked+"-moved"); err != nil {
+		t.Fatal(err)
 	}
+	return repo, write
 }

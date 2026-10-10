@@ -189,3 +189,46 @@ func MissingKey(policy Policy) bool {
 	_, err := os.Lstat(policy.KeyFile)
 	return errors.Is(err, os.ErrNotExist)
 }
+
+// SameRules reports whether two policies use the same key fingerprint and
+// sensitive rules, whatever path the key file has.
+func SameRules(a, b Policy) bool {
+	if a.SchemaVersion != b.SchemaVersion || a.KeyFingerprint != b.KeyFingerprint || len(a.Sensitive) != len(b.Sensitive) {
+		return false
+	}
+	sorted := func(rules []PathRule) []PathRule {
+		rules = append([]PathRule{}, rules...)
+		sort.Slice(rules, func(i, j int) bool { return rules[i].Path < rules[j].Path })
+		return rules
+	}
+	left, right := sorted(a.Sensitive), sorted(b.Sensitive)
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// Narrowed returns an existing rule that a corrected policy no longer covers.
+// A rule is kept by a directory rule at its path or an ancestor, or, for a
+// file rule, by any rule at its path; paths compare by alias key, so a rule
+// may be respelled to match the checkout. Files saved under an exact spelling
+// a respelled rule drops still fail the rewrite, which never decrypts history.
+func Narrowed(previous, next Policy) (PathRule, bool) {
+	for _, old := range previous.Sensitive {
+		oldKey := storage.AliasKey(old.Path)
+		kept := false
+		for _, rule := range next.Sensitive {
+			key := storage.AliasKey(rule.Path)
+			if rule.Kind == "directory" && (key == oldKey || strings.HasPrefix(oldKey, key+"/")) || old.Kind == "file" && key == oldKey {
+				kept = true
+				break
+			}
+		}
+		if !kept {
+			return old, true
+		}
+	}
+	return PathRule{}, false
+}

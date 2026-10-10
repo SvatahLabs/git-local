@@ -141,30 +141,3 @@ func validateMergedFiles(files map[string]fileValue, state selection.State) erro
 	}
 	return nil
 }
-
-type capturedComponent struct {
-	path string
-	file bool
-}
-
-func addComponents(captured map[string]capturedComponent, path string) {
-	parts := strings.Split(path, "/")
-	for i := range parts {
-		component := strings.Join(parts[:i+1], "/")
-		captured[storage.AliasKey(component)] = capturedComponent{component, i == len(parts)-1}
-	}
-}
-
-// conflictsWithCaptured reports whether a carried-forward path, or one of its
-// parents, is captured under another spelling or as the other kind (a file
-// where it needs a directory, or the reverse).
-func conflictsWithCaptured(captured map[string]capturedComponent, path string) bool {
-	parts := strings.Split(path, "/")
-	for i := range parts {
-		component := strings.Join(parts[:i+1], "/")
-		if other, ok := captured[storage.AliasKey(component)]; ok && (other.path != component || other.file != (i == len(parts)-1)) {
-			return true
-		}
-	}
-	return false
-}

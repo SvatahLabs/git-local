@@ -726,7 +726,7 @@ func New(out, errOut io.Writer) *cobra.Command {
 			return err
 		})
 	}}
-	removeWorktree.Flags().BoolVar(&removeWorktreeForce, "force", false, "Allow Git to remove a dirty linked worktree after saving selected files, discarding changes the snapshot skipped")
+	removeWorktree.Flags().BoolVar(&removeWorktreeForce, "force", false, "Allow Git to remove a dirty linked worktree after saving selected files")
 	workspaceCommand.AddCommand(removeWorktree)
 	var pruneDryRun bool
 	prune := &cobra.Command{Use: "prune", Short: "Retire unregistered, unavailable workspaces while preserving history",

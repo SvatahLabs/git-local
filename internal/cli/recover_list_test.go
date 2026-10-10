@@ -67,16 +67,15 @@ func TestRecoverListShowsPendingEncryptionJournal(t *testing.T) {
 }
 
 // TestAutomaticEventPrintsSnapshotWarnings checks that a hook-driven snapshot
-// shows the warning a manual commit shows, here for a skipped file.
+// shows the warning a manual commit shows, here for an unavailable workspace.
 func TestAutomaticEventPrintsSnapshotWarnings(t *testing.T) {
-	repo, _, write := skippedRemoveFixture(t)
-	write(repo.Root, "notes/Secret.txt", "TOKEN=v2\n")
+	repo, write := unavailableWorkspaceFixture(t)
 	write(repo.Root, "notes/plain.txt", "plain v2\n")
 	code, _, diagnostic := callCLI(t, repo.Root, "auto", "event", "post-commit")
 	if code != 0 {
 		t.Fatalf("auto event: exit %d: %s", code, diagnostic)
 	}
-	if !strings.Contains(diagnostic, "git-local: warning:") || !strings.Contains(diagnostic, `skipped "notes/Secret.txt"`) {
+	if !strings.Contains(diagnostic, "git-local: warning:") || !strings.Contains(diagnostic, "is unavailable") {
 		t.Fatalf("automatic snapshot dropped its warning: %q", diagnostic)
 	}
 	if out := successful(t, repo.Root, "show", "latest:notes/plain.txt"); out != "plain v2\n" {

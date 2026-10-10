@@ -14,10 +14,9 @@ import (
 )
 
 // TestResetHardPrintsSnapshotWarningsInHumanMode checks that human mode shows
-// the warnings JSON mode reports, here for a file the snapshot skipped.
+// the warnings JSON mode reports, here for an unavailable workspace.
 func TestResetHardPrintsSnapshotWarningsInHumanMode(t *testing.T) {
-	repo, _, write := skippedRemoveFixture(t)
-	write(repo.Root, "notes/Secret.txt", "TOKEN=v2\n")
+	repo, write := unavailableWorkspaceFixture(t)
 	write(repo.Root, "notes/plain.txt", "plain v2\n")
 	code, out, diagnostic := callCLI(t, repo.Root, "reset", "--hard")
 	if code != 0 {
@@ -26,7 +25,7 @@ func TestResetHardPrintsSnapshotWarningsInHumanMode(t *testing.T) {
 	if !strings.Contains(out, "Saved local snapshot") || !strings.Contains(out, "Reset main worktree") {
 		t.Fatalf("reset output: %q", out)
 	}
-	if !strings.Contains(diagnostic, "Warning:") || !strings.Contains(diagnostic, "notes/Secret.txt") {
+	if !strings.Contains(diagnostic, "Warning:") || !strings.Contains(diagnostic, "is unavailable") {
 		t.Fatalf("reset dropped its warning in human mode: %q", diagnostic)
 	}
 }

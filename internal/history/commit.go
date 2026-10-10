@@ -9,7 +9,6 @@ import (
 	"io"
 	"os"
 	"reflect"
-	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -22,16 +21,9 @@ import (
 )
 
 type Result struct {
-	ID       string
-	Changed  bool
-	Warnings []string
-	// Skipped lists paths whose current content wasn't saved because a
-	// sensitive rule covers them only by spelling or kind.
-	Skipped []string
-	// Unsaved lists the skipped paths present in the checkout whose content
-	// or mode differs from the version carried forward (or that have none),
-	// so removing the checkout would lose them.
-	Unsaved      []string
+	ID           string
+	Changed      bool
+	Warnings     []string
 	Subprocesses uint64
 }
 type fault func(string) error
@@ -83,17 +75,6 @@ func commitWithOptions(ctx context.Context, r *gitexec.Runner, cwd, message, wri
 	if err = ValidateWriter(writer); err != nil {
 		return result, err
 	}
-	skipped := map[string]string{}
-	carriedForward := map[string]bool{}
-	defer func() {
-		for path := range skipped {
-			result.Skipped = append(result.Skipped, path)
-		}
-		sort.Strings(result.Skipped)
-		for _, path := range result.Skipped {
-			result.Warnings = append(result.Warnings, skippedWarning(path, skipped[path], carriedForward[path]))
-		}
-	}()
 	result.Warnings, err = configtx.WithSelection(ctx, r, cwd, func(w workspace.Context, state selection.State, recheck func() error) error {
 		secure, e := loadSecure(w)
 		if e != nil {
@@ -175,42 +156,11 @@ func commitWithOptions(ctx context.Context, r *gitexec.Runner, cwd, message, wri
 		}
 		entries := scopeEntries(plan.Entries, scope)
 		// A path that falls under a sensitive rule only by spelling or kind
-		// (a policy from an earlier release) would be saved as plaintext. It
-		// is skipped instead: its last saved version is carried forward
-		// unchanged, and it isn't recorded as deleted. An untracked or renamed
-		// skipped path is dropped like any other.
-		kept := entries[:0:0]
+		// (a policy from an earlier release) would be saved as plaintext.
 		for _, entry := range entries {
 			if rule, ok := secure.uncoveredRule(entry.Path); ok {
-				skipped[entry.Path] = rule
-				oldFile, carried := oldFiles[entry.Path]
-				changed, err := skippedChanged(ctx, r, w.Store, files, entry, oldFile, carried)
-				if err != nil {
-					return err
-				}
-				if changed {
-					result.Unsaved = append(result.Unsaved, entry.Path)
-				}
-				continue
+				return fmt.Errorf("%w: %q matches sensitive path %q only by spelling or kind and would be saved unencrypted; correct the policy with git local encrypt migrate (see git local doctor), or untrack the file", storage.ErrConflict, entry.Path, rule)
 			}
-			kept = append(kept, entry)
-		}
-		entries = kept
-		captured := map[string]capturedComponent{}
-		for path := range nextFiles {
-			addComponents(captured, path)
-		}
-		for _, entry := range entries {
-			addComponents(captured, entry.Path)
-		}
-		for path, file := range oldFiles {
-			rule, ok := secure.uncoveredRule(path)
-			if !ok || !inScope(scope, path) || !state.Selected(path) || conflictsWithCaptured(captured, path) {
-				continue
-			}
-			nextFiles[path] = file
-			skipped[path] = rule
-			carriedForward[path] = true
 		}
 		plainRegular := 0
 		for _, entry := range entries {
@@ -470,36 +420,4 @@ func commitWithOptions(ctx context.Context, r *gitexec.Runner, cwd, message, wri
 		return nil
 	})
 	return result, err
-}
-
-// skippedChanged reports whether a skipped checkout entry differs from the
-// version that will be carried forward. It hashes without -w, so no object
-// (and no plaintext) is written to the private store.
-func skippedChanged(ctx context.Context, r *gitexec.Runner, store string, files *storage.Dir, entry selection.Entry, old fileValue, carried bool) (bool, error) {
-	mode := "100644"
-	if entry.Mode&os.ModeSymlink != 0 {
-		mode = "120000"
-	} else if entry.Mode&0111 != 0 {
-		mode = "100755"
-	}
-	if !carried || old.Mode != mode {
-		return true, nil
-	}
-	var id []byte
-	if mode == "120000" {
-		target, err := files.ReadLink(entry.Path)
-		if err != nil {
-			return false, err
-		}
-		if id, err = r.History(ctx, store, strings.NewReader(target), "hash-object", "--stdin", "--no-filters"); err != nil {
-			return false, err
-		}
-	} else if _, err := files.StreamStable(entry.Path, func(input io.Reader) error {
-		var e error
-		id, e = r.History(ctx, store, input, "hash-object", "--stdin", "--no-filters")
-		return e
-	}); err != nil {
-		return false, err
-	}
-	return strings.TrimSpace(string(id)) != old.ID, nil
 }

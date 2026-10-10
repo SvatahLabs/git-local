@@ -245,9 +245,9 @@ func planLocked(ctx context.Context, r *gitexec.Runner, cwd string, w workspace.
 				return fmt.Errorf("%w: local changes at %q require --overwrite", storage.ErrConflict, p)
 			}
 			// Their recovery copy would be the only plaintext the private
-			// store gains for a path snapshots skip.
+			// store gains for a path snapshots refuse.
 			if rule, ok := published.UncoveredAlias(p); ok && dirty && before.Exists {
-				return fmt.Errorf("%w: local changes at %q can't be kept as a recovery copy: it matches sensitive path %q only by spelling or kind and would be saved unencrypted; move the file aside first (see git local doctor)", storage.ErrConflict, p, rule)
+				return fmt.Errorf("%w: local changes at %q can't be kept as a recovery copy: it matches sensitive path %q only by spelling or kind and would be saved unencrypted; move the file aside first, or correct the policy with git local encrypt migrate (see git local doctor)", storage.ErrConflict, p, rule)
 			}
 			op := Operation{Path: p, Action: "delete", Before: before, Dirty: dirty}
 			op.Encrypted = encrypted

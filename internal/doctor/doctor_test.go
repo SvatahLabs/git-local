@@ -436,6 +436,10 @@ func TestDoctorReportsSensitiveFileRuleNamingADirectory(t *testing.T) {
 	}
 	for _, finding := range report.Findings {
 		if finding.Check == "encryption" && finding.Severity == "error" && strings.Contains(finding.Message, `"notes/secrets" is recorded as a file but is a directory`) {
+			// The action names the correction command with the policy's key.
+			if want := "git local encrypt migrate --key-file '" + policy.KeyFile + "' -- 'notes/secrets'"; !strings.Contains(finding.Action, want) {
+				t.Fatalf("doctor action %q doesn't name %q", finding.Action, want)
+			}
 			return
 		}
 	}

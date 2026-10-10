@@ -356,6 +356,8 @@ func PendingJournals(ctx context.Context, r *gitexec.Runner, cwd string) ([]Pend
 					Destination string `json:"destinationWorkspaceId"`
 				} `json:"plan"`
 			} `json:"manifest"`
+			Policy    secureblob.Policy  `json:"policy"`
+			OldPolicy *secureblob.Policy `json:"oldPolicy"`
 		}
 		if readErr == nil {
 			readErr = json.NewDecoder(bytes.NewReader(data)).Decode(&record)
@@ -390,9 +392,9 @@ func PendingJournals(ctx context.Context, r *gitexec.Runner, cwd string) ([]Pend
 		if kind == "restore" {
 			item.WorkspaceID = record.Manifest.Plan.Destination
 		}
-		if kind == "encrypt" {
-			_, e := common.Lstat(secureblob.PolicyFile)
-			item.Published = e == nil
+		if kind == "encrypt" && readErr == nil {
+			// A correction replaces a policy that is already in service.
+			item.Published, item.Err = secureblob.Published(common, record.Policy, record.OldPolicy)
 		}
 		item.Root = root(item.WorkspaceID)
 		out = append(out, item)

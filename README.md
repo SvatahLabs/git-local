@@ -132,20 +132,22 @@ missing path, or one that differs only in case or Unicode normalization, is
 refused. Migration fails if a file would match a sensitive path only by
 spelling or kind. `doctor` reports a policy from an earlier release that
 recorded a directory as a file or used a different spelling; files it should
-have covered were saved unencrypted. **Changing an existing policy isn't
-supported yet.** Until it is, a snapshot skips each file that matches a
-sensitive path only by spelling or kind and prints a warning naming it: no new
-plaintext is written, the skipped file keeps its last saved version (or stays
-absent if it was never saved), and every other file is saved as usual. Changes
-to skipped files go unsaved until the policy is corrected. Untracking a skipped
-file, or renaming it to the sensitive path's exact spelling, drops its old
-entry; the renamed file is then saved encrypted. Restoring over unsaved changes
-to a skipped file is refused, because the recovery copy restore keeps would be
-plaintext; move the file aside first. Automatic snapshots print the skip
-warning too: event hooks on Git's output, and `auto watch` when it saves a
-snapshot; `git local doctor` reports the policy. `workspace remove` refuses
-when a skipped file has changes that weren't
-saved; an unchanged or deleted skipped file doesn't block removal.
+have covered were saved unencrypted, and a snapshot that would save such a file
+is refused. Run `encrypt migrate` again with the same key file to correct the
+policy: list every sensitive path, spelled as on disk (doctor prints the
+command). The new rules are read as for a first migration, and must keep every
+existing rule, either at the same path (a respelled rule, or a file rule that
+becomes a directory) or below a directory rule; a correction can't remove
+encryption. It rewrites every snapshot in a separate store: files the policy
+already covered keep their ciphertext, newly covered files are encrypted, and
+their plaintext isn't copied, so none remains in the private store. Completed
+seed and restore records are converted, and interruption is resumed or rolled
+back with `encrypt recover` as for a first migration; until the new policy is
+published, the old one stays in service. Snapshot IDs change. Backups taken
+before the correction still hold the plaintext. Until the policy is corrected,
+untracking the file lets other snapshots continue. Restoring over unsaved
+changes to such a file is refused, because the recovery copy restore keeps would
+be plaintext; move the file aside first.
 If the key is moved, `encrypt rebind-key` accepts its new absolute path only
 when the replacement bytes match the stored key fingerprint.
 
@@ -336,9 +338,9 @@ When Git removes a worktree directly, the next installed post-event hook
 retires eligible missing records while keeping their history. Ambiguous or
 unidentified registrations require `git local workspace prune` after repair. Use
 `git local workspace remove <path>` to save selected files, ask Git to remove
-the linked worktree, and retire it immediately. If that snapshot skipped a file
-(see the sensitive-file policy note above), removal is refused unless you pass
-`--force`, because Git would delete the skipped file's unsaved changes. A
+the linked worktree, and retire it immediately. If that snapshot is refused
+(for example by a sensitive-file policy that needs correcting, see above), the
+worktree isn't removed, even with `--force`. A
 `--no-checkout` worktree is
 seeded after its first later checkout event; `git local init --from main` is
 available when no such event occurs. A failed pre-rebase snapshot

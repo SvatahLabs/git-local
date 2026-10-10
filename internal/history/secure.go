@@ -51,16 +51,6 @@ func (s *secureState) uncoveredRule(path string) (string, bool) {
 	return s.policy.UncoveredAlias(path)
 }
 
-// skippedWarning explains a skipped path; carried tells whether its last
-// saved version was carried forward.
-func skippedWarning(path, rule string, carried bool) string {
-	kept := "its last saved version is kept"
-	if !carried {
-		kept = "it has no saved version, so it isn't saved"
-	}
-	return fmt.Sprintf("skipped %q: it matches sensitive path %q only by spelling or kind and would be saved unencrypted; %s until the sensitive-file policy is corrected (see git local doctor)", path, rule, kept)
-}
-
 func (s *secureState) identity(w workspace.Context, path, mode string) secureblob.Identity {
 	return secureblob.Identity{RepositoryID: w.RepositoryID, WorkspaceID: w.WorkspaceID, Path: path, Mode: mode}
 }

@@ -21,7 +21,9 @@ func RewriteCompletedSeedJournal(data []byte, repositoryID, keyFingerprint strin
 	if err := decode(data, &j); err != nil {
 		return nil, err
 	}
-	if !storage.ValidUUID(j.WorkspaceID) || j.SchemaVersion != 1 || j.KeyFingerprint != "" || j.Outcome == "" {
+	// Schema 2 records come from encrypted history, which only a policy
+	// correction with the same key rewrites.
+	if !storage.ValidUUID(j.WorkspaceID) || j.Outcome == "" || !(j.SchemaVersion == 1 && j.KeyFingerprint == "" || j.SchemaVersion == 2 && j.KeyFingerprint == keyFingerprint) {
 		return nil, errors.New("unsupported completed seed journal for encryption migration")
 	}
 	if err := validateSeed(j, repositoryID, j.WorkspaceID); err != nil {
@@ -43,6 +45,9 @@ func RewriteCompletedSeedJournal(data []byte, repositoryID, keyFingerprint strin
 		}
 		if !oidValid(blob) || digest != "" && !validSeedDigest(digest) {
 			return nil, errors.New("invalid migrated seed file evidence")
+		}
+		if file.PlainDigest != "" && digest == "" {
+			return nil, errors.New("migrated seed file lost its encryption")
 		}
 		j.Files[i].Blob = blob
 		j.Files[i].PlainDigest = digest

@@ -3,9 +3,11 @@ package history
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -219,7 +221,10 @@ func TestSensitiveSnapshotEncryptsContentAndReusesUnchangedBlob(t *testing.T) {
 	}
 }
 
-func TestSnapshotSkipsPathOnlyAliasingASensitiveRule(t *testing.T) {
+// A file that a policy from an earlier release covers only by spelling or
+// kind would be saved as plaintext, so the snapshot is refused and names the
+// correction command; nothing is written.
+func TestSnapshotRefusesPathOnlyAliasingASensitiveRule(t *testing.T) {
 	for _, tc := range []struct{ rule, file, other string }{
 		{"config/secrets", "config/secrets/token", "config/plain.txt"},
 		{"notes/secret.txt", "notes/Secret.txt", "notes/plain.txt"},
@@ -236,6 +241,10 @@ func TestSnapshotSkipsPathOnlyAliasingASensitiveRule(t *testing.T) {
 					if _, err := Commit(ctx, g, repo.Root, "before policy"); err != nil {
 						t.Fatal(err)
 					}
+				}
+				before, err := head(ctx, g, w.Store, Ref(w.WorkspaceID))
+				if err != nil {
+					t.Fatal(err)
 				}
 				keyPath := filepath.Join(t.TempDir(), "sensitive.key")
 				if err := keymaterial.Create(keyPath, repo.Root); err != nil {
@@ -255,53 +264,28 @@ func TestSnapshotSkipsPathOnlyAliasingASensitiveRule(t *testing.T) {
 				common.Close()
 				write(t, repo.Root, tc.file, []byte("TOKEN=alias-secret-v2\n"))
 				write(t, repo.Root, tc.other, []byte("plain v2\n"))
-				result, err := Commit(ctx, g, repo.Root, "aliased")
-				if err != nil {
+				_, err = Commit(ctx, g, repo.Root, "aliased")
+				if !errors.Is(err, storage.ErrConflict) || !strings.Contains(err.Error(), strconv.Quote(tc.file)) || !strings.Contains(err.Error(), strconv.Quote(tc.rule)) || !strings.Contains(err.Error(), "git local encrypt migrate") {
 					t.Fatalf("snapshot of %q under file rule %q: %v", tc.file, tc.rule, err)
 				}
-				if len(result.Warnings) != 1 || !strings.Contains(result.Warnings[0], tc.file) || !strings.Contains(result.Warnings[0], "skipped") {
-					t.Fatalf("warnings: %v", result.Warnings)
-				}
-				// The warning says what happened to the file: its last saved
-				// version kept, or nothing saved at all.
-				if kept := strings.Contains(result.Warnings[0], "its last saved version is kept"); kept != earlier || !earlier && !strings.Contains(result.Warnings[0], "has no saved version") {
-					t.Fatalf("warning text (earlier=%v): %s", earlier, result.Warnings[0])
-				}
-				blob := func(content string) string {
+				for _, content := range []string{"TOKEN=alias-secret-v2\n", "plain v2\n"} {
 					out, err := g.History(ctx, w.Store, strings.NewReader(content), "hash-object", "--stdin")
 					if err != nil {
 						t.Fatal(err)
 					}
-					return strings.TrimSpace(string(out))
+					if _, err := g.History(ctx, w.Store, nil, "cat-file", "-e", strings.TrimSpace(string(out))); err == nil {
+						t.Fatalf("refused snapshot wrote %q", content)
+					}
 				}
-				if _, err := g.History(ctx, w.Store, nil, "cat-file", "-e", blob("TOKEN=alias-secret-v2\n")); err == nil {
-					t.Fatal("the skipped file's new content was written as plaintext")
-				}
-				id, err := head(ctx, g, w.Store, Ref(w.WorkspaceID))
-				if err != nil {
-					t.Fatal(err)
-				}
-				tree, _, err := readPrevious(ctx, g, w.Store, id, w.RepositoryID, w.WorkspaceID)
-				if err != nil {
-					t.Fatal(err)
-				}
-				files, err := readFiles(ctx, g, w.Store, tree)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if files[tc.other].ID != blob("plain v2\n") {
-					t.Fatalf("other file not saved: %+v", files)
-				}
-				saved, ok := files[tc.file]
-				if earlier && (!ok || saved.ID != blob("TOKEN=alias-secret-v1\n")) || !earlier && ok {
-					t.Fatalf("skipped file not carried forward unchanged: %+v (earlier=%v)", files, earlier)
+				if after, err := head(ctx, g, w.Store, Ref(w.WorkspaceID)); err != nil || after != before {
+					t.Fatalf("refused snapshot moved the head: %s -> %s %v", before, after, err)
 				}
 			})
 		}
 	}
 }
 
-func TestSnapshotDropsSkippedPathAfterUntrackOrRename(t *testing.T) {
+func TestSnapshotDropsAliasedPathAfterUntrackOrRename(t *testing.T) {
 	for _, tc := range []struct {
 		name, rule, file, other string
 		change                  func(t *testing.T, g *gitexec.Runner, root string)

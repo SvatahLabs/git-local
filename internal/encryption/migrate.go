@@ -24,16 +24,19 @@ import (
 )
 
 type migrationJournal struct {
-	SchemaVersion  int               `json:"schemaVersion"`
-	Kind           string            `json:"kind"`
-	ID             string            `json:"id"`
-	RepositoryID   string            `json:"repositoryId"`
-	Policy         secureblob.Policy `json:"policy"`
-	OldHeads       map[string]string `json:"oldHeads"`
-	NewHeads       map[string]string `json:"newHeads"`
-	NewRecovery    map[string]string `json:"newRecovery,omitempty"`
-	SeedUpdates    []recordUpdate    `json:"seedUpdates,omitempty"`
-	RestoreUpdates []recordUpdate    `json:"restoreUpdates,omitempty"`
+	SchemaVersion int               `json:"schemaVersion"`
+	Kind          string            `json:"kind"`
+	ID            string            `json:"id"`
+	RepositoryID  string            `json:"repositoryId"`
+	Policy        secureblob.Policy `json:"policy"`
+	// OldPolicy is the policy a correction replaces (schema 2 only). Until
+	// Policy is published, OldPolicy stays in service.
+	OldPolicy      *secureblob.Policy `json:"oldPolicy,omitempty"`
+	OldHeads       map[string]string  `json:"oldHeads"`
+	NewHeads       map[string]string  `json:"newHeads"`
+	NewRecovery    map[string]string  `json:"newRecovery,omitempty"`
+	SeedUpdates    []recordUpdate     `json:"seedUpdates,omitempty"`
+	RestoreUpdates []recordUpdate     `json:"restoreUpdates,omitempty"`
 	// Outcome is set only on a journal archived by AbandonMigration.
 	Outcome string `json:"outcome,omitempty"`
 }
@@ -53,7 +56,10 @@ func journalName(id string) string { return "transactions/encrypt-" + id + ".jso
 
 // Migrate rewrites existing user histories into an encrypted store and swaps it
 // under an exclusive common lock. Interrupted publication is resumed or rolled
-// back by RecoverMigration using the durable journal.
+// back by RecoverMigration using the durable journal. With a policy already in
+// service, Migrate corrects it: the key must be the same, the new rules must
+// keep every existing rule (see secureblob.Narrowed), and history is rewritten
+// so files the corrected rules newly cover are encrypted.
 func Migrate(ctx context.Context, r *gitexec.Runner, cwd, keyFile string, paths []string) (string, error) {
 	return migrate(ctx, r, cwd, keyFile, paths, nil)
 }
@@ -76,10 +82,14 @@ func migrate(ctx context.Context, r *gitexec.Runner, cwd, keyFile string, paths 
 			return err
 		}
 		defer common.Close()
-		if _, exists, err := secureblob.ReadLocked(common, w.Root, w.Common); err != nil {
+		var oldPolicy *secureblob.Policy
+		if previous, exists, err := secureblob.ReadLocked(common, w.Root, w.Common); err != nil {
 			return err
 		} else if exists {
-			return fmt.Errorf("%w: sensitive-file encryption is already enabled", storage.ErrConflict)
+			if err := correctable(previous, policy); err != nil {
+				return err
+			}
+			oldPolicy = &previous
 		}
 		meta, err := storage.OpenDir(filepath.Join(w.Common, "gitlocal"))
 		if err != nil {
@@ -109,7 +119,12 @@ func migrate(ctx context.Context, r *gitexec.Runner, cwd, keyFile string, paths 
 		if err != nil {
 			return err
 		}
-		rewritten, err := history.RewritePlaintextStore(ctx, r, w, stage, policy, key, allowedRecovery)
+		var rewritten history.MigrationResult
+		if oldPolicy != nil {
+			rewritten, err = history.RewriteEncryptedStore(ctx, r, w, stage, policy, *oldPolicy, key, allowedRecovery)
+		} else {
+			rewritten, err = history.RewritePlaintextStore(ctx, r, w, stage, policy, key, allowedRecovery)
+		}
 		if err != nil {
 			return err
 		}
@@ -133,7 +148,10 @@ func migrate(ctx context.Context, r *gitexec.Runner, cwd, keyFile string, paths 
 		if err := matchHeads(ctx, r, w.Store, oldHeads); err != nil {
 			return err
 		}
-		journal := migrationJournal{SchemaVersion: 1, Kind: "encrypt", ID: id, RepositoryID: w.RepositoryID, Policy: policy, OldHeads: oldHeads, NewHeads: rewritten.Heads, NewRecovery: newRecovery, SeedUpdates: seedUpdates, RestoreUpdates: restoreUpdates}
+		journal := migrationJournal{SchemaVersion: 1, Kind: "encrypt", ID: id, RepositoryID: w.RepositoryID, Policy: policy, OldPolicy: oldPolicy, OldHeads: oldHeads, NewHeads: rewritten.Heads, NewRecovery: newRecovery, SeedUpdates: seedUpdates, RestoreUpdates: restoreUpdates}
+		if oldPolicy != nil {
+			journal.SchemaVersion = 2
+		}
 		if err := meta.WriteJSON(journalName(id), journal); err != nil {
 			return err
 		}
@@ -147,6 +165,22 @@ func migrate(ctx context.Context, r *gitexec.Runner, cwd, keyFile string, paths 
 		return nil
 	})
 	return id, err
+}
+
+// correctable refuses a correction that changes the key, changes nothing, or
+// drops an existing rule, because a narrower policy would need decrypted
+// history.
+func correctable(previous, next secureblob.Policy) error {
+	if previous.KeyFingerprint != next.KeyFingerprint {
+		return fmt.Errorf("%w: sensitive-file encryption is already enabled with a different key; correcting the policy needs the same key file (use git local encrypt rebind-key if it moved)", storage.ErrConflict)
+	}
+	if secureblob.SameRules(previous, next) {
+		return fmt.Errorf("%w: sensitive-file encryption is already enabled with these paths", storage.ErrConflict)
+	}
+	if rule, narrowed := secureblob.Narrowed(previous, next); narrowed {
+		return fmt.Errorf("%w: the corrected policy doesn't cover sensitive path %q (%s); list every existing sensitive path again, spelled as on disk, because a correction can't remove encryption", storage.ErrConflict, rule.Path, rule.Kind)
+	}
+	return nil
 }
 
 func migrationJournalsSupported(meta *storage.Dir) ([]string, []string, error) {
@@ -553,7 +587,10 @@ func readMigrationJournal(meta *storage.Dir, id, repositoryID string) (migration
 	if err := dec.Decode(&j); err != nil {
 		return j, err
 	}
-	if dec.Decode(new(any)) != io.EOF || j.SchemaVersion != 1 || j.Kind != "encrypt" || j.ID != id || j.RepositoryID != repositoryID || j.Outcome != "" {
+	if dec.Decode(new(any)) != io.EOF || j.Kind != "encrypt" || j.ID != id || j.RepositoryID != repositoryID || j.Outcome != "" {
+		return j, errors.New("invalid encryption migration journal")
+	}
+	if !(j.SchemaVersion == 1 && j.OldPolicy == nil || j.SchemaVersion == 2 && j.OldPolicy != nil && j.OldPolicy.KeyFingerprint == j.Policy.KeyFingerprint && !secureblob.SameRules(*j.OldPolicy, j.Policy)) {
 		return j, errors.New("invalid encryption migration journal")
 	}
 	if len(j.OldHeads) != len(j.NewHeads)+len(j.NewRecovery) {
@@ -677,9 +714,15 @@ func RecoverMigration(ctx context.Context, r *gitexec.Runner, cwd, id, direction
 	if err != nil {
 		return err
 	}
-	policy, published, err := secureblob.ReadLocked(common, w.Root, w.Common)
+	policy, exists, err := secureblob.ReadLocked(common, w.Root, w.Common)
 	if err != nil {
 		return err
+	}
+	published := false
+	if exists {
+		if published, err = secureblob.Published(common, j.Policy, j.OldPolicy); err != nil {
+			return err
+		}
 	}
 	// After publication the plaintext store only awaits deletion. A crash or
 	// I/O error partway through removing it can leave it without config or
@@ -920,10 +963,9 @@ func AbandonMigration(ctx context.Context, r *gitexec.Runner, cwd, id string) (c
 	if !live {
 		return result, fmt.Errorf("%w: no history store is in service; run git local encrypt recover %s --rollback or --resume", storage.ErrConflict, id)
 	}
-	_, policyErr := common.Lstat(secureblob.PolicyFile)
-	published := policyErr == nil
-	if policyErr != nil && !errors.Is(policyErr, os.ErrNotExist) {
-		return result, policyErr
+	published, err := secureblob.Published(common, j.Policy, j.OldPolicy)
+	if err != nil {
+		return result, err
 	}
 	q, err := configtx.NewQuarantine(meta, id, "encrypt")
 	if err != nil {
