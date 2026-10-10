@@ -28,11 +28,6 @@ type Policy struct {
 	Sensitive      []PathRule `json:"sensitive"`
 }
 
-func containsPath(parent, path string) bool {
-	rel, err := filepath.Rel(parent, path)
-	return err == nil && (rel == "." || filepath.IsLocal(rel))
-}
-
 func resolvedPath(path string) (string, error) {
 	parent, err := filepath.EvalSymlinks(filepath.Dir(path))
 	if err != nil {
@@ -70,11 +65,9 @@ func Canonical(policy Policy, repoRoot, commonGitDir string) (Policy, error) {
 		return Policy{}, err
 	}
 	for _, root := range []string{repoRoot, commonGitDir} {
-		resolvedRoot, err := filepath.EvalSymlinks(root)
-		if err != nil {
+		if inside, err := keymaterial.Inside(root, keyPath); err != nil {
 			return Policy{}, err
-		}
-		if containsPath(resolvedRoot, keyPath) {
+		} else if inside {
 			return Policy{}, errors.New("sensitive-file key must be outside the checkout and common Git directory")
 		}
 	}

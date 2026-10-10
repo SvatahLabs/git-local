@@ -36,10 +36,33 @@ func keyPath(path, repoRoot string, existing bool) (string, error) {
 			return "", errors.New("key must be a regular file, not a symlink")
 		}
 	}
-	if rel, err := filepath.Rel(root, resolved); err == nil && (rel == "." || filepath.IsLocal(rel)) {
+	if inside, err := Inside(root, resolved); err != nil {
+		return "", err
+	} else if inside {
 		return "", errors.New("key must be stored outside the repository checkout")
 	}
 	return resolved, nil
+}
+
+// Inside reports whether path is root or lies below it. It compares
+// directories by file identity rather than spelling, so on a case-insensitive
+// or normalizing volume a differently spelled path into root still counts.
+// path itself need not exist.
+func Inside(root, path string) (bool, error) {
+	rootInfo, err := os.Stat(root)
+	if err != nil {
+		return false, err
+	}
+	for dir := filepath.Clean(path); ; {
+		if info, err := os.Stat(dir); err == nil && os.SameFile(info, rootInfo) {
+			return true, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return false, nil
+		}
+		dir = parent
+	}
 }
 
 // Create writes a new random 32-byte key with owner-only permissions. It

@@ -156,12 +156,9 @@ func Keygen(ctx context.Context, r *gitexec.Runner, cwd, keyFile string) error {
 		return err
 	}
 	for _, root := range append(roots, w.Common) {
-		resolvedRoot, err := filepath.EvalSymlinks(root)
-		if err != nil {
+		if inside, err := keymaterial.Inside(root, resolvedKey); err != nil {
 			return err
-		}
-		rel, err := filepath.Rel(resolvedRoot, resolvedKey)
-		if err == nil && (rel == "." || filepath.IsLocal(rel)) {
+		} else if inside {
 			return errors.New("sensitive-file key must be outside every checkout and the common Git directory")
 		}
 	}

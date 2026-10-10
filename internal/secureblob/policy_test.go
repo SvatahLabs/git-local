@@ -3,6 +3,7 @@ package secureblob
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"gitlocal/internal/keymaterial"
@@ -111,5 +112,27 @@ func TestPolicyStorageRoundTripAndWrongKeyRefusal(t *testing.T) {
 	}
 	if err := WriteLocked(dir, policy, repo, common); err == nil {
 		t.Fatal("wrong key accepted for policy publication")
+	}
+}
+
+// A policy naming its key through a differently cased path into the checkout
+// is refused on a case-insensitive volume.
+func TestPolicyRefusesCaseVariantKeyInsideCheckout(t *testing.T) {
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, common := filepath.Join(base, "Repo"), filepath.Join(base, "Repo", ".git")
+	if err := os.MkdirAll(common, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(base, "repo")); err != nil {
+		t.Skip("case-sensitive volume")
+	}
+	for _, key := range []string{filepath.Join(base, "repo", "file.key"), filepath.Join(base, "REPO", ".GIT", "file.key")} {
+		policy := Policy{SchemaVersion: PolicySchemaVersion, KeyFile: key, KeyFingerprint: strings.Repeat("a", 64), Sensitive: []PathRule{{Path: "secret.txt", Kind: "file"}}}
+		if _, err := Canonical(policy, root, common); err == nil || !strings.Contains(err.Error(), "outside the checkout") {
+			t.Fatalf("key %s accepted: %v", key, err)
+		}
 	}
 }
