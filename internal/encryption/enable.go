@@ -175,12 +175,14 @@ func Rebind(ctx context.Context, r *gitexec.Runner, cwd, keyFile string) (secure
 			return err
 		}
 		defer common.Close()
-		policy, exists, err := secureblob.ReadLocked(common, w.Root, w.Common)
-		if err != nil {
-			return err
-		}
-		if !exists {
+		// The stored policy is read without resolving the old key path,
+		// whose directory may be gone (an ejected drive); RebindKeyPath
+		// validates the whole policy with the new path.
+		var policy secureblob.Policy
+		if err := common.ReadJSON(secureblob.PolicyFile, &policy); errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("%w: sensitive-file encryption is not enabled", storage.ErrConflict)
+		} else if err != nil {
+			return err
 		}
 		policy, err = secureblob.RebindKeyPath(policy, keyFile, w.Root, w.Common)
 		if err != nil {

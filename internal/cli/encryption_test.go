@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"gitlocal/internal/testutil"
@@ -76,5 +77,43 @@ func TestEncryptionMigrateExistingHistory(t *testing.T) {
 	}
 	if got := successful(t, repo.Root, "show", "latest:.env.local"); got != "TOKEN=old-private\n" {
 		t.Fatalf("migrated historical show: %q", got)
+	}
+}
+
+// The documented relocation path works when the old key's directory is gone,
+// for example on an ejected drive.
+func TestRebindKeyAfterOldKeyDirectoryIsGone(t *testing.T) {
+	repo := layoutRepo(t)
+	if err := os.WriteFile(filepath.Join(repo.Root, ".env.local"), []byte("TOKEN=private\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	successful(t, repo.Root, "track", ".env.local")
+	drive := filepath.Join(t.TempDir(), "usb")
+	if err := os.MkdirAll(filepath.Join(drive, "keys"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	keyPath := filepath.Join(drive, "keys", "sensitive.key")
+	successful(t, repo.Root, "encrypt", "keygen", keyPath)
+	successful(t, repo.Root, "encrypt", "enable", "--key-file", keyPath, "--", ".env.local")
+	successful(t, repo.Root, "commit", "-m", "encrypted")
+	home := filepath.Join(t.TempDir(), "keys")
+	if err := os.Mkdir(home, 0700); err != nil {
+		t.Fatal(err)
+	}
+	moved := filepath.Join(home, "sensitive.key")
+	if err := os.Rename(keyPath, moved); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(drive); err != nil {
+		t.Fatal(err)
+	}
+	wrong := filepath.Join(home, "wrong.key")
+	successful(t, repo.Root, "encrypt", "keygen", wrong)
+	if code, _, diagnostic := callCLI(t, repo.Root, "encrypt", "rebind-key", wrong); code == 0 || !strings.Contains(diagnostic, "fingerprint") {
+		t.Fatalf("rebind to an unrelated key: exit %d %s", code, diagnostic)
+	}
+	successful(t, repo.Root, "encrypt", "rebind-key", moved)
+	if got := successful(t, repo.Root, "show", "latest:.env.local"); got != "TOKEN=private\n" {
+		t.Fatalf("show after rebinding: %q", got)
 	}
 }
