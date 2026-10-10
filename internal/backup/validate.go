@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"gitlocal/internal/gitexec"
@@ -103,7 +104,7 @@ func ValidateStaged(ctx context.Context, r *gitexec.Runner, stage string) (Stage
 		if err := state.ReadJSON(filepath.Join("workspaces", id, "workspace.json"), &record); err != nil {
 			return result, err
 		}
-		if record.SchemaVersion != workspace.SchemaVersion || record.WorkspaceID != id || record.State != "active" && record.State != "retained" || !filepath.IsAbs(record.Root) || !filepath.IsAbs(record.Admin) {
+		if record.SchemaVersion != workspace.SchemaVersion || record.WorkspaceID != id || record.State != "active" && record.State != "retained" || !absoluteOnAnyOS(record.Root) || !absoluteOnAnyOS(record.Admin) {
 			return result, fmt.Errorf("invalid backed-up workspace %s", id)
 		}
 		if _, err := time.Parse(time.RFC3339Nano, record.CreatedAt); err != nil {
@@ -141,4 +142,20 @@ func ValidateStaged(ctx context.Context, r *gitexec.Runner, stage string) (Stage
 		}
 	}
 	return result, nil
+}
+
+// absoluteOnAnyOS accepts an absolute POSIX path, or an absolute Windows path
+// with a drive letter or a UNC prefix. Backed-up workspace paths come from the
+// source machine, which may run another OS; they are metadata here, and
+// adoption rewrites the restored workspace's own paths.
+func absoluteOnAnyOS(path string) bool {
+	switch {
+	case strings.ContainsRune(path, 0):
+		return false
+	case strings.HasPrefix(path, "/"):
+		return true
+	case len(path) >= 3 && ('a' <= path[0]|0x20 && path[0]|0x20 <= 'z') && path[1] == ':' && (path[2] == '\\' || path[2] == '/'):
+		return true
+	}
+	return len(path) > 2 && strings.HasPrefix(path, `\\`) && path[2] != '\\'
 }
