@@ -480,8 +480,20 @@ func (r *Runner) BackupPush(ctx context.Context, store, remoteURL, commit, ref s
 	if err != nil {
 		return err
 	}
-	_, err = r.run(ctx, store, true, nil, prefix, nil, "push", "--porcelain", "--no-verify", "--no-follow-tags", remoteURL, commit+":"+ref)
+	_, err = r.run(ctx, store, true, nil, prefix, nil, backupArgs("push", remoteURL, commit+":"+ref)...)
 	return err
+}
+
+// backupArgs builds a backup push or fetch. The URL follows "--", so Git never
+// reads it as an option, whatever its first character.
+func backupArgs(verb, remoteURL, refspec string) []string {
+	args := []string{verb}
+	if verb == "push" {
+		args = append(args, "--porcelain", "--no-verify", "--no-follow-tags")
+	} else {
+		args = append(args, "--no-tags", "--no-write-fetch-head", "--no-recurse-submodules")
+	}
+	return append(args, "--", remoteURL, refspec)
 }
 
 // backupTransport allows SSH and HTTPS for one backup command. For an HTTPS
@@ -530,7 +542,7 @@ func (r *Runner) BackupFetch(ctx context.Context, store, remoteURL, ref string) 
 	if err != nil {
 		return err
 	}
-	_, err = r.run(ctx, store, true, nil, prefix, nil, "fetch", "--no-tags", "--no-write-fetch-head", "--no-recurse-submodules", remoteURL, ref+":refs/heads/import")
+	_, err = r.run(ctx, store, true, nil, prefix, nil, backupArgs("fetch", remoteURL, ref+":refs/heads/import")...)
 	return err
 }
 

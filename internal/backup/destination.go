@@ -11,7 +11,7 @@ import (
 // RemoteHost accepts only SSH and HTTPS Git transports. The caller must pass
 // Git-expanded remote URLs (including insteadOf and pushInsteadOf rewrites).
 func RemoteHost(raw string) (string, error) {
-	if raw == "" || strings.ContainsAny(raw, "\x00\r\n") {
+	if raw == "" || strings.ContainsAny(raw, "\x00\r\n") || strings.HasPrefix(raw, "-") {
 		return "", errors.New("invalid backup remote URL")
 	}
 	host := ""
@@ -43,8 +43,13 @@ func RemoteHost(raw string) (string, error) {
 		host = prefix
 	}
 	host = strings.TrimSuffix(strings.ToLower(host), ".")
-	if host == "" || strings.ContainsAny(host, " /\\@") || strings.Contains(host, ":") && net.ParseIP(host) == nil {
+	if host == "" || strings.HasPrefix(host, "-") || strings.ContainsAny(host, " /\\@") || strings.Contains(host, ":") && net.ParseIP(host) == nil {
 		return "", errors.New("invalid backup remote host")
+	}
+	// One spelling per address, so the same-host rule can't be bypassed
+	// with another IPv6 form or an IPv4-mapped address.
+	if ip := net.ParseIP(host); ip != nil {
+		host = ip.String()
 	}
 	if host == "localhost" {
 		return "", errors.New("backup remote must not be on this host")

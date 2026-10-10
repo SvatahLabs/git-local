@@ -123,3 +123,12 @@ func TestBackupTransportUsesUserCredentialHelperForHTTPS(t *testing.T) {
 		t.Fatalf("fetched backup: %q %v", out, err)
 	}
 }
+
+func TestBackupArgsSeparateTheURL(t *testing.T) {
+	for _, verb := range []string{"push", "fetch"} {
+		args := backupArgs(verb, "-oProxyCommand=touch:x", "a:b")
+		if args[0] != verb || len(args) < 4 || args[len(args)-3] != "--" || args[len(args)-2] != "-oProxyCommand=touch:x" || args[len(args)-1] != "a:b" {
+			t.Fatalf("%s arguments: %q", verb, args)
+		}
+	}
+}

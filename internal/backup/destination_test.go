@@ -41,3 +41,28 @@ func TestDestinationRejectsOriginAndSameHost(t *testing.T) {
 		t.Fatal("distinct backup host rejected", err)
 	}
 }
+
+func TestRemoteHostCanonicalizesIPsAndRejectsOptionLikeHosts(t *testing.T) {
+	for raw, want := range map[string]string{
+		"ssh://git@[2001:db8:0::1]/owner/repo.git":        "2001:db8::1",
+		"https://[2001:DB8:0000:0000:0000:0000:0000:1]/r": "2001:db8::1",
+		"ssh://git@[::ffff:192.0.2.1]/owner/repo.git":     "192.0.2.1",
+		"git@192.0.2.1:owner/repo.git":                    "192.0.2.1",
+		"https://Backup.Example./owner/repo.git":          "backup.example",
+	} {
+		if got, err := RemoteHost(raw); err != nil || got != want {
+			t.Fatalf("%q: %q %v", raw, got, err)
+		}
+	}
+	origin := []string{"ssh://git@[2001:db8::1]/project/source.git"}
+	for _, backup := range []string{"ssh://git@[2001:db8:0::1]/project/backup.git", "https://[2001:0db8::0001]/project/backup.git"} {
+		if err := ValidateDestination("backup", []string{backup}, origin); err == nil {
+			t.Fatalf("backup %q on the origin host accepted", backup)
+		}
+	}
+	for _, raw := range []string{"-oProxyCommand=touch:path", "git@-host:path", "-host:path", "ssh://-host/repo.git", "https://-host/repo.git", "-u@host:path"} {
+		if _, err := RemoteHost(raw); err == nil {
+			t.Fatalf("option-like backup remote %q accepted", raw)
+		}
+	}
+}
