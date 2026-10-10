@@ -810,11 +810,11 @@ func New(out, errOut io.Writer) *cobra.Command {
 	root.AddCommand(reset)
 	root.AddCommand(guardCommand())
 	root.AddCommand(overlayCommand())
-	var resume, rollback, abandon, list bool
+	var resume, rollback, abandon, list, discardRecovery bool
 	recover := &cobra.Command{Use: "recover <transaction-id> --resume|--rollback|--abandon", Short: "Resume, roll back or abandon an interrupted configuration, seed, restore, encryption or initialization transaction",
 		Args: func(_ *cobra.Command, args []string) error {
 			if list {
-				if len(args) != 0 || resume || rollback || abandon {
+				if len(args) != 0 || resume || rollback || abandon || discardRecovery {
 					return usageError{errors.New("--list cannot be combined with an ID or recovery direction")}
 				}
 				return nil
@@ -827,6 +827,9 @@ func New(out, errOut io.Writer) *cobra.Command {
 			}
 			if len(args) != 1 || directions != 1 {
 				return usageError{errors.New("provide a transaction ID and exactly one of --resume, --rollback or --abandon")}
+			}
+			if discardRecovery && !abandon {
+				return usageError{errors.New("--discard-recovery requires --abandon")}
 			}
 			if !storage.ValidUUID(args[0]) {
 				return usageError{errors.New("invalid transaction ID")}
@@ -873,7 +876,7 @@ func New(out, errOut io.Writer) *cobra.Command {
 				return nil
 			}
 			if abandon {
-				return abandonTransaction(c, r, cwd, args[0])
+				return abandonTransaction(c, r, cwd, args[0], discardRecovery)
 			}
 			kind, err := configtx.TransactionKind(c.Context(), r, cwd, args[0])
 			if err != nil {
@@ -934,6 +937,7 @@ func New(out, errOut io.Writer) *cobra.Command {
 	recover.Flags().BoolVar(&rollback, "rollback", false, "Restore the recorded pre-transaction state")
 	recover.Flags().BoolVar(&abandon, "abandon", false, "Give up the transaction, leaving files as they are and quarantining unpreserved bytes")
 	recover.Flags().BoolVar(&list, "list", false, "List unfinished transaction IDs")
+	recover.Flags().BoolVar(&discardRecovery, "discard-recovery", false, "With --abandon, also delete a recovery ref that keeps the previous file versions of a restore whose journal is quarantined")
 	root.AddCommand(recover)
 	return root
 }
@@ -1562,7 +1566,7 @@ func inspectionConflicts(s history.StatusResult) error {
 // abandonTransaction gives up a transaction that neither resume nor rollback
 // can finish. Each kind's handler takes the repository lock and runs its own
 // safety checks.
-func abandonTransaction(c *cobra.Command, r *gitexec.Runner, cwd, id string) error {
+func abandonTransaction(c *cobra.Command, r *gitexec.Runner, cwd, id string, discardRecovery bool) error {
 	kind, err := configtx.JournalKind(c.Context(), r, cwd, id)
 	if errors.Is(err, os.ErrNotExist) {
 		// A restore killed before writing its journal leaves only its
@@ -1576,7 +1580,7 @@ func abandonTransaction(c *cobra.Command, r *gitexec.Runner, cwd, id string) err
 	var result configtx.AbandonResult
 	switch kind {
 	case "recovery-ref":
-		result, err = restore.AbandonOrphanRef(c.Context(), r, cwd, id)
+		result, err = restore.AbandonOrphanRef(c.Context(), r, cwd, id, discardRecovery)
 		if errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("no transaction %s", id)
 		}

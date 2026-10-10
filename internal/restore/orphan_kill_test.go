@@ -34,14 +34,14 @@ func TestRestoreKilledBeforeJournalIsAbandonable(t *testing.T) {
 			if err != nil || len(orphans) != 1 || orphans[0].WorkspaceID != w.WorkspaceID || !strings.HasSuffix(orphans[0].Ref, "/"+orphans[0].ID) {
 				t.Fatalf("orphan refs: %+v %v", orphans, err)
 			}
-			result, err := AbandonOrphanRef(ctx, r, root, orphans[0].ID)
+			result, err := AbandonOrphanRef(ctx, r, root, orphans[0].ID, false)
 			if err != nil || len(result.Removed) != 1 || result.Removed[0] != orphans[0].Ref {
 				t.Fatalf("abandon: %+v %v", result, err)
 			}
 			if again, err := OrphanRefs(ctx, r, *w); err != nil || len(again) != 0 {
 				t.Fatalf("orphan refs after abandon: %+v %v", again, err)
 			}
-			if _, err := AbandonOrphanRef(ctx, r, root, orphans[0].ID); !os.IsNotExist(err) {
+			if _, err := AbandonOrphanRef(ctx, r, root, orphans[0].ID, false); !os.IsNotExist(err) {
 				t.Fatalf("second abandon: %v", err)
 			}
 			destination := filepath.Join(t.TempDir(), "migrated.git")

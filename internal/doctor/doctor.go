@@ -170,7 +170,7 @@ func Run(ctx context.Context, r *gitexec.Runner, cwd string) (Report, error) {
 		} else {
 			for _, orphan := range orphans {
 				if orphan.Quarantine != "" {
-					result.add("recovery refs", "warning", fmt.Sprintf("recovery ref %s keeps the recovery snapshot of a restore whose journal an abandoned encryption migration quarantined in %s; it blocks a later encryption migration", orphan.Ref, orphan.Quarantine), "Keep it while you may need that restore's previous file versions; then run git local recover "+orphan.ID+" --abandon.")
+					result.add("recovery refs", "warning", fmt.Sprintf("recovery ref %s keeps the recovery snapshot of a restore whose journal an abandoned encryption migration quarantined in %s; it blocks a later encryption migration, and restoring an encrypted backup that contains it", orphan.Ref, orphan.Quarantine), "Keep it while you may need that restore's previous file versions; then run git local recover "+orphan.ID+" --abandon --discard-recovery.")
 					continue
 				}
 				result.add("recovery refs", "warning", fmt.Sprintf("recovery ref %s has no journal: its restore stopped before writing one and changed no files; it blocks encryption migration", orphan.Ref), "Run git local recover "+orphan.ID+" --abandon.")

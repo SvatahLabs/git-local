@@ -91,3 +91,12 @@ func TestRecoverAbandonCLIAndDoctorGuidance(t *testing.T) {
 		t.Fatalf("unknown ID: %d %s", code, diagnostic)
 	}
 }
+
+func TestRecoverDiscardRecoveryRequiresAbandon(t *testing.T) {
+	id := "00000000-0000-4000-8000-000000000000"
+	for _, args := range [][]string{{"recover", id, "--resume", "--discard-recovery"}, {"recover", "--list", "--discard-recovery"}} {
+		if code, _, diagnostic := callCLI(t, t.TempDir(), args...); code != 2 {
+			t.Fatalf("%v: exit %d %s", args, code, diagnostic)
+		}
+	}
+}

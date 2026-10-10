@@ -102,7 +102,10 @@ recovery ref. Run `git local doctor` afterwards to check the result.
 A restore killed after publishing its recovery ref but before writing its
 journal changed no files and leaves only that ref, which would block a later
 encryption migration; doctor lists it, and `git local recover <id> --abandon`
-deletes it.
+deletes it. If an abandoned encryption migration quarantined that restore's
+journal, the ref is all that keeps the restore's previous file versions (and
+it also blocks restoring an encrypted backup), so deleting it needs
+`--abandon --discard-recovery`.
 
 Sensitive-file encryption can be enabled before the first private snapshot.
 First `track` the path, create a separate 32-byte key outside every checkout,

@@ -3,6 +3,7 @@ package restore
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -88,9 +89,11 @@ func OrphanRefs(ctx context.Context, r *gitexec.Runner, w workspace.Context) ([]
 }
 
 // AbandonOrphanRef deletes the recovery refs of restore id, which never wrote
-// its journal. It returns an error matching os.ErrNotExist when there is no
-// such ref.
-func AbandonOrphanRef(ctx context.Context, r *gitexec.Runner, cwd, id string) (configtx.AbandonResult, error) {
+// its journal. A ref whose journal an encryption abandon quarantined is the
+// only thing keeping that restore's previous file versions, so it is deleted
+// only with discardRecovery. It returns an error matching os.ErrNotExist when
+// there is no such ref.
+func AbandonOrphanRef(ctx context.Context, r *gitexec.Runner, cwd, id string, discardRecovery bool) (configtx.AbandonResult, error) {
 	result := configtx.AbandonResult{TransactionID: id, Kind: "recovery-ref"}
 	if !storage.ValidUUID(id) {
 		return result, errors.New("invalid transaction ID")
@@ -103,6 +106,9 @@ func AbandonOrphanRef(ctx context.Context, r *gitexec.Runner, cwd, id string) (c
 		for _, orphan := range orphans {
 			if orphan.ID != id {
 				continue
+			}
+			if orphan.Quarantine != "" && !discardRecovery {
+				return fmt.Errorf("%w: recovery ref %s keeps the previous file versions of a restore whose journal is quarantined in %s; deleting it loses them. Rerun with --discard-recovery to delete it anyway", storage.ErrConflict, orphan.Ref, orphan.Quarantine)
 			}
 			if _, err := r.History(ctx, w.Store, nil, "update-ref", "--no-deref", "-d", orphan.Ref, orphan.Commit); err != nil {
 				return err
