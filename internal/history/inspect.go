@@ -86,7 +86,7 @@ func readFiles(ctx context.Context, r *gitexec.Runner, store, treeID string) (ma
 	if treeID == "" {
 		return result, nil
 	}
-	data, err := r.History(ctx, store, nil, "ls-tree", "-r", "-z", "--full-tree", treeID)
+	data, err := r.HistoryListing(ctx, store, nil, "ls-tree", "-r", "-z", "--full-tree", treeID)
 	if err != nil {
 		return nil, err
 	}

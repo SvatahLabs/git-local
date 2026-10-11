@@ -485,7 +485,7 @@ func publishMigration(ctx context.Context, r *gitexec.Runner, w workspace.Contex
 }
 
 func storeHeads(ctx context.Context, r *gitexec.Runner, store string) (map[string]string, error) {
-	data, err := r.History(ctx, store, nil, "show-ref")
+	data, err := r.HistoryListing(ctx, store, nil, "show-ref")
 	if err != nil {
 		var ge *gitexec.Error
 		if errors.As(err, &ge) && ge.Code == 1 {

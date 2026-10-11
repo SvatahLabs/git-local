@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -114,6 +115,10 @@ func (r *Runner) Executable() string { return r.executable }
 // Guard runs a restricted read-only Git query without the expensive capability
 // probe. Hooks execute on every commit and must inspect the live index.
 func (r *Runner) Guard(ctx context.Context, cwd, index string, args ...string) ([]byte, error) {
+	return r.guardOutput(ctx, cwd, index, nil, args...)
+}
+
+func (r *Runner) guardOutput(ctx context.Context, cwd, index string, output io.Writer, args ...string) ([]byte, error) {
 	if len(args) == 0 || !map[string]bool{"rev-parse": true, "diff": true, "rev-list": true, "diff-tree": true, "for-each-ref": true, "cat-file": true}[args[0]] {
 		return nil, errors.New("command not allowed by guard policy")
 	}
@@ -124,17 +129,40 @@ func (r *Runner) Guard(ctx context.Context, cwd, index string, args ...string) (
 		}
 		extra = []string{"GIT_INDEX_FILE=" + index}
 	}
-	return r.run(ctx, cwd, false, extra, nil, nil, args...)
+	return r.runOutput(ctx, cwd, false, extra, nil, nil, output, args...)
 }
 
-// GuardInput is Guard for the batch commands that read their arguments from
-// standard input: rev-list --stdin, diff-tree --stdin and cat-file
+// guardInputOutput is Guard for the batch commands that read their arguments
+// from standard input: rev-list --stdin, diff-tree --stdin and cat-file
 // --batch-check.
-func (r *Runner) GuardInput(ctx context.Context, cwd string, input io.Reader, args ...string) ([]byte, error) {
+func (r *Runner) guardInputOutput(ctx context.Context, cwd string, input io.Reader, output io.Writer, args ...string) ([]byte, error) {
 	if len(args) < 2 || !(args[0] == "rev-list" && args[1] == "--stdin" || args[0] == "diff-tree" && args[1] == "--stdin" || args[0] == "cat-file" && strings.HasPrefix(args[1], "--batch-check")) {
 		return nil, errors.New("command not allowed by guard policy")
 	}
-	return r.run(ctx, cwd, false, nil, nil, input, args...)
+	return r.runOutput(ctx, cwd, false, nil, nil, input, output, args...)
+}
+
+// GuardListing runs a Guard or GuardInput query whose output grows with the
+// index or the pushed history, without the output cap: staged names, pushed
+// commits, their changed names and batch object checks. Content reads stay
+// capped.
+func (r *Runner) GuardListing(ctx context.Context, cwd, index string, input io.Reader, args ...string) ([]byte, error) {
+	if len(args) < 2 || !(args[0] == "diff" && slices.Contains(args, "--name-only") || args[0] == "rev-list" || args[0] == "diff-tree" && slices.Contains(args, "--name-only") || args[0] == "cat-file" && strings.HasPrefix(args[1], "--batch-check")) {
+		return nil, errors.New("only name and object listings may exceed the output limit")
+	}
+	var out bytes.Buffer
+	var err error
+	if input == nil {
+		_, err = r.guardOutput(ctx, cwd, index, &out, args...)
+	} else if index != "" {
+		return nil, errors.New("guard input queries read the live index")
+	} else {
+		_, err = r.guardInputOutput(ctx, cwd, input, &out, args...)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return out.Bytes(), nil
 }
 
 // IndexBlob reads a stage-zero blob without filters or text conversion. A
@@ -242,22 +270,27 @@ func (r *Runner) controls() []string {
 	return args
 }
 
+// boundedBuffer keeps at most MaxOutput bytes. It holds its buffer in a field
+// rather than embedding it: os/exec copies output with io.Copy, which would use
+// an embedded buffer's ReadFrom and bypass Write.
 type boundedBuffer struct {
-	bytes.Buffer
+	buf      bytes.Buffer
 	overflow bool
 }
 
 func (b *boundedBuffer) Write(p []byte) (int, error) {
 	n := len(p)
-	room := MaxOutput - b.Len()
+	room := MaxOutput - b.buf.Len()
 	if room > 0 {
-		b.Buffer.Write(p[:min(room, n)])
+		b.buf.Write(p[:min(room, n)])
 	}
 	if n > room {
 		b.overflow = true
 	}
 	return n, nil
 }
+func (b *boundedBuffer) Bytes() []byte  { return b.buf.Bytes() }
+func (b *boundedBuffer) String() string { return b.buf.String() }
 func (r *Runner) run(ctx context.Context, cwd string, private bool, extraEnv []string, prefix []string, input io.Reader, args ...string) ([]byte, error) {
 	return r.runOutput(ctx, cwd, private, extraEnv, prefix, input, nil, args...)
 }
@@ -481,6 +514,25 @@ func (r *Runner) mainOutput(ctx context.Context, cwd, admin string, input io.Rea
 var historyCommands = map[string]bool{"symbolic-ref": true, "hash-object": true, "mktree": true, "commit-tree": true, "update-ref": true, "rev-parse": true, "cat-file": true, "ls-tree": true, "fsck": true, "show-ref": true, "rev-list": true, "diff-tree": true}
 
 func (r *Runner) History(ctx context.Context, store string, input io.Reader, args ...string) ([]byte, error) {
+	return r.historyOutput(ctx, store, input, nil, args...)
+}
+
+// HistoryListing runs a History query whose output grows with the store,
+// without the output cap: ancestry, tree and ref listings, name-only or
+// numstat tree diffs, and batch object checks. Blob contents and patches stay
+// capped.
+func (r *Runner) HistoryListing(ctx context.Context, store string, input io.Reader, args ...string) ([]byte, error) {
+	if len(args) == 0 || !(args[0] == "rev-list" || args[0] == "ls-tree" || args[0] == "show-ref" || args[0] == "diff-tree" && !slices.Contains(args, "-p") && !slices.Contains(args, "--patch") || args[0] == "cat-file" && len(args) > 1 && strings.HasPrefix(args[1], "--batch-check")) {
+		return nil, errors.New("only history listings may exceed the output limit")
+	}
+	var out bytes.Buffer
+	if _, err := r.historyOutput(ctx, store, input, &out, args...); err != nil {
+		return nil, err
+	}
+	return out.Bytes(), nil
+}
+
+func (r *Runner) historyOutput(ctx context.Context, store string, input io.Reader, output io.Writer, args ...string) ([]byte, error) {
 	if len(args) == 0 || !historyCommands[args[0]] {
 		return nil, errors.New("command not allowed by history policy")
 	}
@@ -490,7 +542,7 @@ func (r *Runner) History(ctx context.Context, store string, input io.Reader, arg
 	if err := r.checkStore(store); err != nil {
 		return nil, err
 	}
-	return r.run(ctx, store, true, []string{"GIT_AUTHOR_NAME=Git Local", "GIT_AUTHOR_EMAIL=git-local@localhost", "GIT_COMMITTER_NAME=Git Local", "GIT_COMMITTER_EMAIL=git-local@localhost"}, []string{"--git-dir=" + store}, input, args...)
+	return r.runOutput(ctx, store, true, []string{"GIT_AUTHOR_NAME=Git Local", "GIT_AUTHOR_EMAIL=git-local@localhost", "GIT_COMMITTER_NAME=Git Local", "GIT_COMMITTER_EMAIL=git-local@localhost"}, []string{"--git-dir=" + store}, input, output, args...)
 }
 
 // BackupPush sends one explicit encrypted-archive commit from a disposable
@@ -756,7 +808,11 @@ func (r *Runner) CheckIgnoreMatches(ctx context.Context, root, admin string, pat
 	if len(paths) == 0 {
 		return map[string]IgnoreMatch{}, nil
 	}
-	out, err := r.mainInput(ctx, root, admin, &input, "check-ignore", "--stdin", "-z", "--no-index", "--verbose", "--non-matching")
+	// One record per queried path: the output grows with the query, not with
+	// anything Git chooses, so it isn't capped.
+	var output bytes.Buffer
+	_, err := r.mainOutput(ctx, root, admin, &input, &output, "check-ignore", "--stdin", "-z", "--no-index", "--verbose", "--non-matching")
+	out := output.Bytes()
 	if err != nil {
 		var ge *Error
 		if !errors.As(err, &ge) || ge.Code != 1 {

@@ -48,7 +48,7 @@ func Staged(ctx context.Context, r *gitexec.Runner, cwd, index string) ([]Findin
 	if err != nil {
 		return nil, err
 	}
-	b, err := r.Guard(ctx, snapshot.Root, index, "diff", "--cached", "--name-only", "-z", "--no-renames", "--no-ext-diff", "--no-textconv", "--diff-filter=ACMRTUXB")
+	b, err := r.GuardListing(ctx, snapshot.Root, index, nil, "diff", "--cached", "--name-only", "-z", "--no-renames", "--no-ext-diff", "--no-textconv", "--diff-filter=ACMRTUXB")
 	if err != nil {
 		return nil, err
 	}
@@ -275,7 +275,7 @@ func push(ctx context.Context, r *gitexec.Runner, cwd, remote string, input io.R
 			revs += "--not\n--remotes=" + remote + "\n"
 		}
 	}
-	listed, err := r.GuardInput(ctx, snapshot.Root, strings.NewReader(revs), "rev-list", "--stdin")
+	listed, err := r.GuardListing(ctx, snapshot.Root, "", strings.NewReader(revs), "rev-list", "--stdin")
 	if err != nil {
 		return nil, err
 	}
@@ -341,7 +341,7 @@ func changedPaths(ctx context.Context, r *gitexec.Runner, root string, commits [
 	if len(commits) == 0 {
 		return result, nil
 	}
-	out, err := r.GuardInput(ctx, root, strings.NewReader(strings.Join(commits, "\n")+"\n"), "diff-tree", "--stdin", "--root", "-m", "-r", "-z", "--name-only", "--no-renames", "--diff-filter=ACMRTUXB", "--format=%x00%H")
+	out, err := r.GuardListing(ctx, root, "", strings.NewReader(strings.Join(commits, "\n")+"\n"), "diff-tree", "--stdin", "--root", "-m", "-r", "-z", "--name-only", "--no-renames", "--diff-filter=ACMRTUXB", "--format=%x00%H")
 	if err != nil {
 		return nil, err
 	}
@@ -389,7 +389,7 @@ func knownCommits(ctx context.Context, r *gitexec.Runner, root string, ids []str
 	if query.Len() == 0 {
 		return known, nil
 	}
-	out, err := r.GuardInput(ctx, root, strings.NewReader(query.String()), "cat-file", "--batch-check=%(objectname)")
+	out, err := r.GuardListing(ctx, root, "", strings.NewReader(query.String()), "cat-file", "--batch-check=%(objectname)")
 	if err != nil {
 		return nil, err
 	}

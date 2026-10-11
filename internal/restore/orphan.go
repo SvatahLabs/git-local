@@ -37,7 +37,7 @@ func OrphanRefs(ctx context.Context, r *gitexec.Runner, w workspace.Context) ([]
 		return nil, err
 	}
 	defer meta.Close()
-	b, err := r.History(ctx, w.Store, nil, "show-ref")
+	b, err := r.HistoryListing(ctx, w.Store, nil, "show-ref")
 	var ge *gitexec.Error
 	if errors.As(err, &ge) && ge.Code == 1 {
 		return nil, nil // No refs at all.

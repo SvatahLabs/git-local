@@ -37,7 +37,7 @@ type StatSummary struct {
 }
 
 func snapshotStat(ctx context.Context, r *gitexec.Runner, store, id string) (string, StatSummary, error) {
-	out, err := r.History(ctx, store, nil, "diff-tree", "--root", "--no-commit-id", "-r", "--numstat", "-z", "--no-ext-diff", "--no-textconv", "--no-renames", id, "--", "files")
+	out, err := r.HistoryListing(ctx, store, nil, "diff-tree", "--root", "--no-commit-id", "-r", "--numstat", "-z", "--no-ext-diff", "--no-textconv", "--no-renames", id, "--", "files")
 	if err != nil {
 		return "", StatSummary{}, err
 	}

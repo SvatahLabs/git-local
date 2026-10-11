@@ -353,7 +353,8 @@ snapshot. `log --stat` reports recorded file changes. `grep <literal-pattern>`
 searches the newest 20 snapshots by default; use `--snapshots` and
 `--max-matches` for bounded searches. It reports binary and oversized files it
 skips. These commands also accept `--workspace <uuid>` when reading retained
-workspace history (`diff` requires two selectors with that flag).
+workspace history (`diff` requires two selectors with that flag). `show` and
+`diff` print at most 16 MiB; use `restore` for a larger file.
 Run `git local auto install` to add managed post-commit, post-checkout,
 pre-rebase and post-rewrite hooks. They snapshot selected files only when their
 content or selection changed. The hooks preserve existing shell hooks and seed

@@ -25,14 +25,14 @@ type MigrationResult struct {
 // sensitive rule matches what history holds, not only today's checkout.
 func HistoricalPaths(ctx context.Context, r *gitexec.Runner, w workspace.Context) (map[string]bool, error) {
 	paths := map[string]bool{}
-	commits, err := r.History(ctx, w.Store, nil, "rev-list", "--all")
+	commits, err := r.HistoryListing(ctx, w.Store, nil, "rev-list", "--all")
 	if err != nil {
 		return nil, err
 	}
 	if len(bytes.TrimSpace(commits)) == 0 {
 		return paths, nil
 	}
-	b, err := r.History(ctx, w.Store, bytes.NewReader(commits), "diff-tree", "--stdin", "--root", "-r", "--no-commit-id", "--no-renames", "--name-only", "-z")
+	b, err := r.HistoryListing(ctx, w.Store, bytes.NewReader(commits), "diff-tree", "--stdin", "--root", "-r", "--no-commit-id", "--no-renames", "--name-only", "-z")
 	if err != nil {
 		return nil, err
 	}
@@ -68,7 +68,7 @@ func rewriteStore(ctx context.Context, r *gitexec.Runner, w workspace.Context, d
 	if err := gitexec.ValidateStore(destination); err != nil {
 		return MigrationResult{}, err
 	}
-	refs, err := r.History(ctx, w.Store, nil, "show-ref")
+	refs, err := r.HistoryListing(ctx, w.Store, nil, "show-ref")
 	if err != nil {
 		var ge *gitexec.Error
 		if !errors.As(err, &ge) || ge.Code != 1 {
@@ -119,7 +119,7 @@ func rewriteStore(ctx context.Context, r *gitexec.Runner, w workspace.Context, d
 		if _, err := AuditWorkspaceLocked(ctx, r, w, source); err != nil {
 			return MigrationResult{}, fmt.Errorf("audit workspace %s before migration: %w", source, err)
 		}
-		out, err := r.History(ctx, w.Store, nil, "rev-list", "--reverse", "--parents", heads[source])
+		out, err := r.HistoryListing(ctx, w.Store, nil, "rev-list", "--reverse", "--parents", heads[source])
 		if err != nil {
 			return MigrationResult{}, err
 		}
@@ -174,14 +174,14 @@ func VerifyEncryptedStore(ctx context.Context, r *gitexec.Runner, w workspace.Co
 	if err := gitexec.ValidateStore(store); err != nil {
 		return err
 	}
-	if _, err := r.History(ctx, store, nil, "fsck", "--full", "--no-reflogs"); err != nil {
+	if _, err := r.History(ctx, store, nil, "fsck", "--full", "--no-reflogs", "--no-dangling"); err != nil {
 		return err
 	}
 	other := map[string]string{}
 	if len(otherRefs) > 0 {
 		other = otherRefs[0]
 	}
-	refs, err := r.History(ctx, store, nil, "show-ref")
+	refs, err := r.HistoryListing(ctx, store, nil, "show-ref")
 	if err != nil {
 		var ge *gitexec.Error
 		if !errors.As(err, &ge) || ge.Code != 1 || len(heads)+len(other) != 0 {
@@ -214,7 +214,7 @@ func VerifyEncryptedStore(ctx context.Context, r *gitexec.Runner, w workspace.Co
 		return errors.New("migrated history is missing workspace heads")
 	}
 	for source, tip := range heads {
-		out, err := r.History(ctx, store, nil, "rev-list", "--parents", tip)
+		out, err := r.HistoryListing(ctx, store, nil, "rev-list", "--parents", tip)
 		if err != nil {
 			return err
 		}

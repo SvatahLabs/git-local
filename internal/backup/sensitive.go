@@ -135,7 +135,7 @@ func verifySensitiveBackup(ctx context.Context, r *gitexec.Runner, w workspace.C
 		recovery[ref] = record.RecoverySnapshot
 	}
 	heads := map[string]string{}
-	refs, err := r.History(ctx, store, nil, "show-ref")
+	refs, err := r.HistoryListing(ctx, store, nil, "show-ref")
 	if err != nil {
 		var gitErr *gitexec.Error
 		if !errors.As(err, &gitErr) || gitErr.Code != 1 {

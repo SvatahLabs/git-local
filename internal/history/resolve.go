@@ -75,7 +75,7 @@ func ResolveLocked(ctx context.Context, r *gitexec.Runner, w workspace.Context, 
 		}
 		id = ids[0]
 	}
-	ancestry, err := r.History(ctx, w.Store, nil, "rev-list", "--first-parent", "--parents", tip)
+	ancestry, err := r.HistoryListing(ctx, w.Store, nil, "rev-list", "--first-parent", "--parents", tip)
 	if err != nil {
 		return snapshot, err
 	}
@@ -162,7 +162,7 @@ func validateSnapshotLocked(ctx context.Context, r *gitexec.Runner, w workspace.
 	}
 	// Validate tree entries as well: recursive file-only enumeration hides empty or
 	// ambiguous directories, which the snapshot schema does not admit.
-	trees, err := r.History(ctx, w.Store, nil, "ls-tree", "-r", "-t", "-z", "--full-tree", snapshot.FilesTree)
+	trees, err := r.HistoryListing(ctx, w.Store, nil, "ls-tree", "-r", "-t", "-z", "--full-tree", snapshot.FilesTree)
 	if err != nil {
 		return snapshot, err
 	}
@@ -201,7 +201,7 @@ func validateSnapshotLocked(ctx context.Context, r *gitexec.Runner, w workspace.
 	}
 	sort.Strings(ids)
 	if len(ids) > 0 {
-		out, e := r.History(ctx, w.Store, strings.NewReader(strings.Join(ids, "\n")+"\n"), "cat-file", "--batch-check=%(objectname) %(objecttype) %(objectsize)")
+		out, e := r.HistoryListing(ctx, w.Store, strings.NewReader(strings.Join(ids, "\n")+"\n"), "cat-file", "--batch-check=%(objectname) %(objecttype) %(objectsize)")
 		if e != nil {
 			return snapshot, e
 		}

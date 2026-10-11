@@ -197,7 +197,7 @@ func Run(ctx context.Context, r *gitexec.Runner, cwd string) (Report, error) {
 			result.add("history store", "error", storeErr.Error(), "Restore a supported private store configuration from a trusted backup.")
 		}
 		if storeErr == nil {
-			if _, err := r.History(ctx, d.Workspace.Store, nil, "fsck", "--full", "--strict", "--no-reflogs", "--no-progress"); err != nil {
+			if _, err := r.History(ctx, d.Workspace.Store, nil, "fsck", "--full", "--strict", "--no-reflogs", "--no-progress", "--no-dangling"); err != nil {
 				result.add("objects", "error", err.Error(), "Inspect the private store and a trusted backup; do not prune objects automatically.")
 			} else {
 				result.add("objects", "ok", "private object graph passes Git integrity checks", "")

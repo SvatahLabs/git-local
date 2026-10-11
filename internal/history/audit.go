@@ -29,7 +29,7 @@ func AuditWorkspaceLocked(ctx context.Context, r *gitexec.Runner, w workspace.Co
 	if tip == "" {
 		return 0, nil
 	}
-	raw, err := r.History(ctx, w.Store, nil, "rev-list", "--parents", tip)
+	raw, err := r.HistoryListing(ctx, w.Store, nil, "rev-list", "--parents", tip)
 	if err != nil {
 		return 0, err
 	}

@@ -78,7 +78,7 @@ func ValidateStaged(ctx context.Context, r *gitexec.Runner, stage string) (Stage
 	if err := gitexec.ValidateStore(filepath.Join(statePath, "history.git")); err != nil {
 		return result, err
 	}
-	if _, err := r.History(ctx, filepath.Join(statePath, "history.git"), nil, "fsck", "--full", "--no-reflogs"); err != nil {
+	if _, err := r.History(ctx, filepath.Join(statePath, "history.git"), nil, "fsck", "--full", "--no-reflogs", "--no-dangling"); err != nil {
 		return result, fmt.Errorf("invalid backed-up history store: %w", err)
 	}
 	transactions, err := state.ReadDir("transactions")

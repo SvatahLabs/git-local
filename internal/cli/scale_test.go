@@ -52,3 +52,57 @@ func TestLargeIndexAndTreeListingsExceedOutputCap(t *testing.T) {
 	}
 	doctorReportsNoErrors(t, repo.Root)
 }
+
+// A snapshot tree and its file listing can each exceed the buffered output
+// cap; they're listings, so commit, status, log, show, diff, restore and doctor
+// still work with the cap enforced (GL-105).
+func TestLargeSnapshotListingsExceedOutputCap(t *testing.T) {
+	repo := layoutRepo(t)
+	saved := gitexec.MaxOutput
+	gitexec.MaxOutput = 8 << 10
+	defer func() { gitexec.MaxOutput = saved }()
+	write := func(content string) {
+		t.Helper()
+		for i := 0; i < 400; i++ {
+			path := filepath.Join(repo.Root, "notes", fmt.Sprintf("local-note-with-a-long-name-%04d.txt", i))
+			if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	write("v1\n")
+	successful(t, repo.Root, "track", "notes")
+	successful(t, repo.Root, "commit", "-m", "many local notes")
+	if err := os.WriteFile(filepath.Join(repo.Root, "notes", "local-note-with-a-long-name-0007.txt"), []byte("v2\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	// The patch itself is content and stays capped; one changed note fits.
+	if out := successful(t, repo.Root, "diff"); !strings.Contains(out, "+v2") {
+		t.Fatalf("diff:\n%s", out)
+	}
+	write("v2\n")
+	if out := successful(t, repo.Root, "status"); strings.Count(out, "local-note-with-a-long-name-") != 400 {
+		t.Fatalf("status lists %d notes:\n%s", strings.Count(out, "local-note-with-a-long-name-"), out)
+	}
+	successful(t, repo.Root, "commit", "-m", "many local notes v2")
+	if out := successful(t, repo.Root, "log", "--stat"); !strings.Contains(out, "many local notes v2") {
+		t.Fatalf("log:\n%s", out)
+	}
+	if out := successful(t, repo.Root, "show", "latest:notes/local-note-with-a-long-name-0399.txt"); out != "v2\n" {
+		t.Fatalf("show: %q", out)
+	}
+	// Restoring one file still resolves the whole snapshot tree. (Restore time
+	// grows with the square of the restored file count: GL-109.)
+	note := filepath.Join(repo.Root, "notes", "local-note-with-a-long-name-0399.txt")
+	if err := os.Remove(note); err != nil {
+		t.Fatal(err)
+	}
+	successful(t, repo.Root, "restore", "--source", "latest", "--", "notes/local-note-with-a-long-name-0399.txt")
+	if data, err := os.ReadFile(note); err != nil || string(data) != "v2\n" {
+		t.Fatalf("restored note: %q, %v", data, err)
+	}
+	doctorReportsNoErrors(t, repo.Root)
+}
