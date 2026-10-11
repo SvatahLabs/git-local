@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path"
 	"reflect"
@@ -263,6 +264,14 @@ type guard struct {
 	// pinned when recovery starts.
 	evidence selection.Evidence
 	branch   string
+	// images caches each path's last hashed image with the Lstat it was
+	// hashed under; see inspect.
+	images map[string]cachedImage
+}
+
+type cachedImage struct {
+	info   fs.FileInfo // nil when the path didn't exist
+	actual Fingerprint
 }
 
 // newGuard checks the operation and stage paths against main ownership. A
@@ -273,7 +282,7 @@ func newGuard(ctx context.Context, r *gitexec.Runner, w workspace.Context, files
 	if err != nil {
 		return nil, err
 	}
-	g := &guard{r: r, w: w, files: files, engine: e, journal: j, recheck: recheck, evidence: j.Manifest.Plan.Ownership, branch: j.Manifest.MainBranch}
+	g := &guard{r: r, w: w, files: files, engine: e, journal: j, recheck: recheck, evidence: j.Manifest.Plan.Ownership, branch: j.Manifest.MainBranch, images: map[string]cachedImage{}}
 	if j.SchemaVersion == 2 {
 		policy, key, e := loadRestoreKey(w)
 		if e != nil {
@@ -328,17 +337,61 @@ func newGuard(ctx context.Context, r *gitexec.Runner, w workspace.Context, files
 	return g, nil
 }
 func (g *guard) close() { g.engine.Close() }
-func (g *guard) matchesImage(ctx context.Context, path string, image Fingerprint, workspaceID, identityPath string) (bool, error) {
-	var actual Fingerprint
-	var err error
+
+// inspect returns path's current image. Every operation re-checks every
+// path, so it reuses an earlier hash while Lstat still shows the same file
+// (same file identity, size, mode and modification time): a recognize pass
+// then costs a stat per path rather than a Git process, and a restore stays
+// linear in its number of files. A path that changed is hashed again.
+func (g *guard) inspect(ctx context.Context, path string, image Fingerprint, workspaceID, identityPath string) (Fingerprint, error) {
+	key := path
+	identity := secureblob.Identity{RepositoryID: g.w.RepositoryID, WorkspaceID: workspaceID, Path: identityPath, Mode: image.GitMode}
 	if image.KeyedDigest != "" {
-		identity := secureblob.Identity{RepositoryID: g.w.RepositoryID, WorkspaceID: workspaceID, Path: identityPath, Mode: image.GitMode}
+		key += "\x00" + identity.WorkspaceID + "\x00" + identity.Path + "\x00" + identity.Mode
+	}
+	info, err := g.files.Lstat(path)
+	if os.IsNotExist(err) {
+		info, err = nil, nil
+	}
+	if err != nil {
+		return Fingerprint{}, err
+	}
+	if cached, ok := g.images[key]; ok && sameStat(cached.info, info) {
+		return cached.actual, nil
+	}
+	var actual Fingerprint
+	if image.KeyedDigest != "" {
 		protected, e := inspectSensitiveFile(g.files, path, g.key, identity)
 		err = e
 		actual = protectedFingerprint(protected)
 	} else {
 		actual, err = inspectFile(ctx, g.r, g.w.Store, g.files, path)
 	}
+	if err != nil {
+		return Fingerprint{}, err
+	}
+	g.images[key] = cachedImage{info, actual}
+	return actual, nil
+}
+
+// forget drops cached images of path, so the next check hashes it again.
+func (g *guard) forget(path string) {
+	for key := range g.images {
+		if key == path || strings.HasPrefix(key, path+"\x00") {
+			delete(g.images, key)
+		}
+	}
+}
+
+func sameStat(a, b fs.FileInfo) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return sameFile(a, b) && a.Size() == b.Size() && a.ModTime().Equal(b.ModTime()) && a.Mode() == b.Mode()
+}
+
+func (g *guard) matchesImage(ctx context.Context, path string, image Fingerprint, workspaceID, identityPath string) (bool, error) {
+	actual, err := g.inspect(ctx, path, image, workspaceID, identityPath)
 	return imageEqual(actual, image), err
 }
 
@@ -347,16 +400,7 @@ func (g *guard) matchesImage(ctx context.Context, path string, image Fingerprint
 // died after the last write but before StageNamed's Chmod leaves it there.
 // created reports that case, so the caller applies the final mode.
 func (g *guard) stageMatches(ctx context.Context, path string, image Fingerprint, workspaceID, identityPath string) (bool, bool, error) {
-	var actual Fingerprint
-	var err error
-	if image.KeyedDigest != "" {
-		identity := secureblob.Identity{RepositoryID: g.w.RepositoryID, WorkspaceID: workspaceID, Path: identityPath, Mode: image.GitMode}
-		protected, e := inspectSensitiveFile(g.files, path, g.key, identity)
-		err = e
-		actual = protectedFingerprint(protected)
-	} else {
-		actual, err = inspectFile(ctx, g.r, g.w.Store, g.files, path)
-	}
+	actual, err := g.inspect(ctx, path, image, workspaceID, identityPath)
 	if err != nil || imageEqual(actual, image) {
 		return err == nil, false, err
 	}
@@ -506,6 +550,8 @@ func run(ctx context.Context, r *gitexec.Runner, w workspace.Context, files, met
 		if rollback {
 			desired = op.Before
 		}
+		// The path about to change is hashed again, not taken from the cache.
+		g.forget(op.Path)
 		if err := g.recognize(ctx); err != nil {
 			return err
 		}
@@ -909,7 +955,7 @@ func Abandon(ctx context.Context, r *gitexec.Runner, cwd, id string) (configtx.A
 		if err != nil {
 			return err
 		}
-		g := &guard{r: r, w: w, files: files, journal: &j, key: key}
+		g := &guard{r: r, w: w, files: files, journal: &j, key: key, images: map[string]cachedImage{}}
 		m := j.Manifest
 		for i, stages := range m.Stages {
 			op := m.Plan.Operations[i]
