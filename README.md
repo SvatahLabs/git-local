@@ -168,7 +168,16 @@ run `backup push`. An HTTPS remote authenticates through the credential
 helpers in your global or system Git config (`credential.helper`, or
 `credential.<url>.helper` for that URL); repository config is ignored and Git
 never prompts, so store the credential with your helper first, for example by
-fetching from that URL once. The printed `refs/gitlocal/backups/...` ref identifies that
+fetching from that URL once. From the same global and system config, backup
+transport also uses `credential.useHttpPath`, `credential.<url>.username`,
+`http.sslCAInfo`, `http.sslCAPath` and `http.proxy` (each also as
+`http.<url>.*`), for example to trust a self-hosted server's private CA. No
+other HTTP setting is used, redirects aren't followed, and these settings are
+passed to Git as `-c` options, so a credential helper written inline with a
+secret in it is visible in the process list; use a helper program instead.
+SSH never prompts either (`SSH_ASKPASS_REQUIRE=never`). Backup hosts are
+compared after canonicalizing addresses, including forms such as `127.1` or
+`2130706433` that resolvers read as IPv4. The printed `refs/gitlocal/backups/...` ref identifies that
 backup; the archive is bound to it, so restore refuses an archive the backup
 host serves under another ref (an older backup or another repository's).
 Archives from earlier releases aren't bound and are refused; restore them with

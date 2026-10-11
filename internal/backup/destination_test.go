@@ -1,6 +1,9 @@
 package backup
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestRemoteHostParsesEffectiveGitURLs(t *testing.T) {
 	for raw, want := range map[string]string{
@@ -64,5 +67,50 @@ func TestRemoteHostCanonicalizesIPsAndRejectsOptionLikeHosts(t *testing.T) {
 		if _, err := RemoteHost(raw); err == nil {
 			t.Fatalf("option-like backup remote %q accepted", raw)
 		}
+	}
+}
+
+// GL-107: hosts the OS resolver reads as IPv4 addresses (inet_aton forms)
+// get the dotted-quad spelling, so they can't pass the same-host check or
+// the loopback refusal as host names.
+func TestRemoteHostCanonicalizesResolverIPv4Forms(t *testing.T) {
+	for raw, want := range map[string]string{
+		"https://16909060/y":               "1.2.3.4",
+		"https://0x01020304/y":             "1.2.3.4",
+		"ssh://git@1.2.3/r.git":            "1.2.0.3",
+		"git@1.131844:r.git":               "1.2.3.4",
+		"https://0x1.0x2.03.4/r":           "1.2.3.4",
+		"https://001.002.003.004/r":        "1.2.3.4",
+		"https://1.2.3.4./r":               "1.2.3.4",
+		"https://backup.example/r":         "backup.example",
+		"https://1e3.example/r":            "1e3.example",
+		"https://08.example/r":             "08.example",
+		"https://123.example.0x10/r":       "123.example.0x10",
+		"https://4294967296/r":             "4294967296",
+		"https://1.2.3.256/r":              "1.2.3.256",
+		"https://9.9.9.9.9/r":              "9.9.9.9.9",
+		"ssh://git@backup-1.example/r.git": "backup-1.example",
+		"https://[::ffff:127.1.2.3]/r":     "",
+		"ssh://git@0x7f000001/owner/r.git": "",
+		"https://127.1/r":                  "",
+		"https://2130706433/r":             "",
+		"https://0x7f.0.0.1/r":             "",
+		"https://0177.0.0.1/r":             "",
+		"https://0/r":                      "",
+		"git@0x0:owner/repo.git":           "",
+	} {
+		got, err := RemoteHost(raw)
+		if want == "" {
+			if err == nil || !strings.Contains(err.Error(), "loopback") {
+				t.Fatalf("%q: accepted as %q (%v)", raw, got, err)
+			}
+			continue
+		}
+		if err != nil || got != want {
+			t.Fatalf("%q: %q %v, want %q", raw, got, err, want)
+		}
+	}
+	if err := ValidateDestination("backup", []string{"https://16909060/y"}, []string{"https://1.2.3.4/x"}); err == nil {
+		t.Fatal("a decimal spelling of the origin address passed the same-host check")
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -47,8 +48,11 @@ func RemoteHost(raw string) (string, error) {
 		return "", errors.New("invalid backup remote host")
 	}
 	// One spelling per address, so the same-host rule can't be bypassed
-	// with another IPv6 form or an IPv4-mapped address.
+	// with another IPv6 form, an IPv4-mapped address, or a form the OS
+	// resolver reads as IPv4 (127.1, 0x7f.0.0.1, 2130706433).
 	if ip := net.ParseIP(host); ip != nil {
+		host = ip.String()
+	} else if ip, ok := resolverIPv4(host); ok {
 		host = ip.String()
 	}
 	if host == "localhost" {
@@ -87,4 +91,44 @@ func ValidateDestination(name string, destinationURLs, originURLs []string) erro
 		}
 	}
 	return nil
+}
+
+// resolverIPv4 parses the IPv4 forms inet_aton accepts and resolvers use for
+// host names: one to four dot-separated parts, each decimal, octal (leading
+// 0) or hexadecimal (0x), the last part filling the remaining bytes.
+func resolverIPv4(host string) (net.IP, bool) {
+	parts := strings.Split(host, ".")
+	if len(parts) > 4 {
+		return nil, false
+	}
+	values := make([]uint64, len(parts))
+	for i, part := range parts {
+		base, digits := 10, part
+		if len(part) > 2 && (part[:2] == "0x" || part[:2] == "0X") {
+			base, digits = 16, part[2:]
+		} else if len(part) > 1 && part[0] == '0' {
+			base, digits = 8, part[1:]
+		}
+		if digits == "" || strings.ContainsAny(digits, "+-_") {
+			return nil, false
+		}
+		v, err := strconv.ParseUint(digits, base, 32)
+		if err != nil {
+			return nil, false
+		}
+		values[i] = v
+	}
+	last := len(values) - 1
+	var addr uint64
+	for i, v := range values[:last] {
+		if v > 255 {
+			return nil, false
+		}
+		addr |= v << (24 - 8*i)
+	}
+	if values[last] >= 1<<(32-8*last) {
+		return nil, false
+	}
+	addr |= values[last]
+	return net.IPv4(byte(addr>>24), byte(addr>>16), byte(addr>>8), byte(addr)), true
 }

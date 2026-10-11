@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -189,5 +190,94 @@ func TestBackupTransportRefusesHTTPSRedirects(t *testing.T) {
 	cmd.Env = repo.RunnerEnv()
 	if out, err := cmd.Output(); err == nil {
 		t.Fatalf("redirected push landed on the other host: %s", out)
+	}
+}
+
+// GL-107: the certificate authority, proxy and credential settings of the
+// user's global config reach the backup transport; other HTTP settings don't,
+// and ssh can't prompt through SSH_ASKPASS.
+func TestBackupTransportForwardsUserHTTPSSettings(t *testing.T) {
+	repo := testutil.New(t)
+	url, remote, ca := httpsBackupRemote(t, repo)
+	home := ""
+	for _, entry := range repo.RunnerEnv() {
+		if value, ok := strings.CutPrefix(entry, "HOME="); ok {
+			home = value
+		}
+	}
+	if home == "" || !strings.HasPrefix(home, repo.Root+string(filepath.Separator)) {
+		t.Fatalf("test HOME isn't isolated: %q", home)
+	}
+	host := strings.TrimSuffix(url, "/backup.git")
+	helper := `"!f() { test \"$1\" = get && printf 'username=backup-user\\npassword=backup-secret\\n'; }; f"`
+	base := "[credential]\n\thelper =\n[credential \"" + host + "\"]\n\thelper = " + helper + "\n\tuseHttpPath\n\tusername = backup-user\n" +
+		"[http]\n\tsslVerify = false\n\textraHeader = X-Leak: yes\n"
+	writeConfig := func(extra string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(home, ".gitconfig"), []byte(base+extra), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeConfig("")
+	r, err := New(repo.RunnerEnv())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	ctx := context.Background()
+	store := filepath.Join(t.TempDir(), "stage.git")
+	if err := r.InitBare(ctx, store); err != nil {
+		t.Fatal(err)
+	}
+	tree, err := r.History(ctx, store, strings.NewReader(""), "mktree", "-z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	commit, err := r.History(ctx, store, strings.NewReader("backup\n"), "commit-tree", strings.TrimSpace(string(tree)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := strings.TrimSpace(string(commit))
+	ref := "refs/gitlocal/backups/00000000-0000-4000-8000-000000000000/20260101T000000Z-00000000-0000-4000-8000-000000000001"
+	// http.sslVerify=false isn't forwarded: without the CA the push fails.
+	if err := r.BackupPush(ctx, store, url, id, ref); err == nil {
+		t.Fatal("HTTPS push succeeded without a trusted CA (sslVerify=false was forwarded)")
+	}
+	writeConfig("[http \"" + host + "\"]\n\tsslCAInfo = " + ca + "\n\tproxy = \n")
+	if err := r.BackupPush(ctx, store, url, id, ref); err != nil {
+		t.Fatalf("HTTPS push with the user's http.<url>.sslCAInfo: %v", err)
+	}
+	cmd := exec.Command(repo.GitPath, "--git-dir="+remote, "rev-parse", ref)
+	cmd.Env = repo.RunnerEnv()
+	if out, err := cmd.Output(); err != nil || strings.TrimSpace(string(out)) != id {
+		t.Fatalf("pushed backup ref: %q %v", out, err)
+	}
+	fetched := filepath.Join(t.TempDir(), "fetch.git")
+	if err := r.InitBare(ctx, fetched); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.BackupFetch(ctx, fetched, url, ref); err != nil {
+		t.Fatalf("HTTPS fetch with the user's http.<url>.sslCAInfo: %v", err)
+	}
+	prefix, _, err := r.backupTransport(ctx, store, url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := strings.Join(prefix, "\x00") + "\x00"
+	for _, key := range []string{"credential.helper", "credential." + host + ".helper", "credential." + host + ".usehttppath", "credential." + host + ".username", "http." + host + ".sslcainfo", "http." + host + ".proxy"} {
+		if !strings.Contains(args, "\x00"+key+"=") {
+			t.Fatalf("%s not forwarded: %q", key, prefix)
+		}
+	}
+	for _, key := range []string{"http.sslverify", "http.extraheader"} {
+		if strings.Contains(args, "\x00"+key+"=") {
+			t.Fatalf("%s forwarded: %q", key, prefix)
+		}
+	}
+	for _, target := range []string{url, "ssh://git@backup.example/r.git"} {
+		_, env, err := r.backupTransport(ctx, store, target)
+		if err != nil || !slices.Contains(env, "SSH_ASKPASS_REQUIRE=never") {
+			t.Fatalf("%s transport environment: %q %v", target, env, err)
+		}
 	}
 }
