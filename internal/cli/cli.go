@@ -853,7 +853,12 @@ func New(out, errOut io.Writer) *cobra.Command {
 				transactions := []map[string]any{}
 				for _, p := range pending {
 					next, state := p.Next()
-					ids = append(ids, p.ID)
+					// Scripts pass transactionIds to recover, so only IDs it
+					// accepts are listed there; an unknown or unreadable entry
+					// appears only in transactions.
+					if storage.ValidUUID(p.ID) {
+						ids = append(ids, p.ID)
+					}
 					transactions = append(transactions, map[string]any{"id": p.ID, "kind": p.Kind, "workspaceId": p.WorkspaceID, "root": p.Root, "state": state, "next": next})
 				}
 				if setJSON(c, map[string]any{"transactionIds": ids, "transactions": transactions}) {
