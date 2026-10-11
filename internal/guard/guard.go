@@ -1,6 +1,7 @@
 package guard
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -223,16 +224,15 @@ func push(ctx context.Context, r *gitexec.Runner, cwd, remote string, input io.R
 	if err != nil {
 		return nil, err
 	}
-	data, err := io.ReadAll(io.LimitReader(input, 1<<20+1))
-	if err != nil {
-		return nil, err
-	}
-	if len(data) > 1<<20 {
-		return nil, errors.New("pre-push input exceeds safety limit")
-	}
-	seen := map[string]bool{}
-	findings := []Finding{}
-	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+	// Every ref update goes into one rev-list, so a push of many refs
+	// (--mirror, --tags) costs a fixed number of Git processes. Excluding
+	// everything the remote has from all updates at once is what each update
+	// would exclude anyway: a commit the remote has isn't newly published.
+	var locals, upstreams []string
+	scanner := bufio.NewScanner(input)
+	scanner.Buffer(make([]byte, 0, 4096), 64<<10)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
 			continue
 		}
@@ -240,83 +240,91 @@ func push(ctx context.Context, r *gitexec.Runner, cwd, remote string, input io.R
 		if len(fields) != 4 || !objectID.MatchString(fields[1]) || !objectID.MatchString(fields[3]) {
 			return nil, fmt.Errorf("invalid pre-push ref update %q", line)
 		}
-		local, upstream := fields[1], fields[3]
-		if allZero(local) {
+		if allZero(fields[1]) {
 			continue
 		} // Deleting a remote ref cannot introduce a leak.
-		args := []string{"rev-list", local}
-		if !full {
-			known := !allZero(upstream)
-			if known {
-				// The remote's old commit is missing when someone else pushed
-				// and this repository hasn't fetched since, as in a force push.
-				if known, err = hasCommit(ctx, r, snapshot.Root, upstream); err != nil {
-					return nil, err
-				}
-			}
-			if known {
-				args = append(args, "^"+upstream)
-			} else if !strings.ContainsAny(remote, "/\\") && remote != "." && remote != ".." {
-				// A new remote branch, or one whose old commit is unknown, may
-				// share ancestry with branches already on this remote. Exclude
-				// those known remote-tracking refs so an old, already-published
-				// leak does not block an unrelated new branch.
-				args = append(args, "--not", "--remotes="+remote)
-			}
-		}
-		b, err := r.Guard(ctx, snapshot.Root, "", args...)
+		locals = append(locals, fields[1])
+		upstreams = append(upstreams, fields[3])
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("read pre-push ref updates: %w", err)
+	}
+	if len(locals) == 0 {
+		return []Finding{}, nil
+	}
+	revs := strings.Join(locals, "\n") + "\n"
+	if !full {
+		known, err := knownCommits(ctx, r, snapshot.Root, upstreams)
 		if err != nil {
 			return nil, err
 		}
-		for _, commit := range strings.Fields(string(b)) {
-			if seen[commit] {
-				continue
+		unknown := false
+		for _, upstream := range upstreams {
+			if known[upstream] {
+				revs += "^" + upstream + "\n"
+			} else {
+				unknown = true
 			}
-			seen[commit] = true
-			pathsRaw, err := r.Guard(ctx, snapshot.Root, "", "diff-tree", "--root", "-m", "--no-commit-id", "--name-only", "-r", "-z", "--no-renames", "--diff-filter=ACMRTUXB", commit)
+		}
+		// A new remote branch, or one whose old commit is missing because
+		// someone else pushed and this repository hasn't fetched (as in a
+		// force push), may share ancestry with branches already on this
+		// remote. Excluding those known remote-tracking refs keeps an old,
+		// already-published leak from blocking an unrelated new branch.
+		if unknown && !strings.ContainsAny(remote, "/\\") && remote != "" && remote != "." && remote != ".." {
+			revs += "--not\n--remotes=" + remote + "\n"
+		}
+	}
+	listed, err := r.GuardInput(ctx, snapshot.Root, strings.NewReader(revs), "rev-list", "--stdin")
+	if err != nil {
+		return nil, err
+	}
+	commits := strings.Fields(string(listed))
+	changed, err := changedPaths(ctx, r, snapshot.Root, commits)
+	if err != nil {
+		return nil, err
+	}
+	findings := []Finding{}
+	for _, commit := range commits {
+		paths := changed[commit]
+		if len(paths) == 0 {
+			continue
+		}
+		conflicts, err := snapshot.Check(paths)
+		if err != nil {
+			return nil, err
+		}
+		for _, c := range conflicts {
+			findings = append(findings, Finding{HookConflict: c, Commit: commit})
+		}
+		versions, err := overlay.LoadForPaths(ctx, snapshot.Common, "", paths)
+		if err != nil {
+			return nil, err
+		}
+		var parents []string
+		if len(versions) > 0 {
+			b, err := r.Guard(ctx, snapshot.Root, "", "rev-parse", commit+"^@")
 			if err != nil {
 				return nil, err
 			}
-			paths, err := names(pathsRaw)
-			if err != nil {
-				return nil, err
-			}
-			conflicts, err := snapshot.Check(paths)
-			if err != nil {
-				return nil, err
-			}
-			for _, c := range conflicts {
-				findings = append(findings, Finding{HookConflict: c, Commit: commit})
-			}
-			versions, err := overlay.LoadForPaths(ctx, snapshot.Common, "", paths)
-			if err != nil {
-				return nil, err
-			}
-			var parents []string
-			if len(versions) > 0 {
-				b, err := r.Guard(ctx, snapshot.Root, "", "rev-parse", commit+"^@")
+			parents = strings.Fields(string(b))
+		}
+		for _, version := range versions {
+			for _, pushed := range aliasPaths(paths, version.Manifest.Path) {
+				candidate, err := r.Guard(ctx, snapshot.Root, "", "cat-file", "blob", commit+":"+pushed)
 				if err != nil {
 					return nil, err
 				}
-				parents = strings.Fields(string(b))
-			}
-			for _, version := range versions {
-				for _, pushed := range aliasPaths(paths, version.Manifest.Path) {
-					candidate, err := r.Guard(ctx, snapshot.Root, "", "cat-file", "blob", commit+":"+pushed)
-					if err != nil {
-						return nil, err
-					}
-					previous, err := committedBlobs(ctx, r, snapshot.Root, pushed, parents...)
-					if err != nil {
-						return nil, err
-					}
-					reason, err := overlayReason(ctx, r, version, candidate, previous)
-					if err != nil {
-						return nil, err
-					}
-					if reason != "" {
-						findings = append(findings, Finding{HookConflict: configtx.HookConflict{Path: pushed, WorkspaceID: version.Manifest.WorkspaceID}, Commit: commit, OverlayName: version.Manifest.Name, OverlayReason: reason})
-					}
+				previous, err := committedBlobs(ctx, r, snapshot.Root, pushed, parents...)
+				if err != nil {
+					return nil, err
+				}
+				reason, err := overlayReason(ctx, r, version, candidate, previous)
+				if err != nil {
+					return nil, err
+				}
+				if reason != "" {
+					findings = append(findings, Finding{HookConflict: configtx.HookConflict{Path: pushed, WorkspaceID: version.Manifest.WorkspaceID}, Commit: commit, OverlayName: version.Manifest.Name, OverlayReason: reason})
 				}
 			}
 		}
@@ -324,17 +332,75 @@ func push(ctx context.Context, r *gitexec.Runner, cwd, remote string, input io.R
 	return findings, nil
 }
 
-func allZero(id string) bool { return strings.Trim(id, "0") == "" }
-
-// hasCommit reports whether the repository has the commit id.
-func hasCommit(ctx context.Context, r *gitexec.Runner, root, id string) (bool, error) {
-	_, err := r.Guard(ctx, root, "", "cat-file", "-e", id+"^{commit}")
-	var ge *gitexec.Error
-	if errors.As(err, &ge) && (ge.Code == 1 || ge.Code == 128) {
-		return false, nil
+// changedPaths runs one diff-tree over commits and returns the paths each
+// adds or changes against any parent. The format puts an empty token before
+// every commit ID, which no path can be, and Git ends that header line with a
+// newline the first path carries.
+func changedPaths(ctx context.Context, r *gitexec.Runner, root string, commits []string) (map[string][]string, error) {
+	result := map[string][]string{}
+	if len(commits) == 0 {
+		return result, nil
 	}
-	return err == nil, err
+	out, err := r.GuardInput(ctx, root, strings.NewReader(strings.Join(commits, "\n")+"\n"), "diff-tree", "--stdin", "--root", "-m", "-r", "-z", "--name-only", "--no-renames", "--diff-filter=ACMRTUXB", "--format=%x00%H")
+	if err != nil {
+		return nil, err
+	}
+	tokens, err := names(out)
+	if err != nil {
+		return nil, err
+	}
+	current, first := "", false
+	for i := 0; i < len(tokens); i++ {
+		if tokens[i] == "" {
+			if i+1 == len(tokens) || !objectID.MatchString(tokens[i+1]) {
+				return nil, errors.New("invalid Git commit change list")
+			}
+			current, first = tokens[i+1], true
+			i++
+			continue
+		}
+		path := tokens[i]
+		if first {
+			if !strings.HasPrefix(path, "\n") {
+				return nil, errors.New("invalid Git commit change list")
+			}
+			path, first = path[1:], false
+		}
+		if current == "" || path == "" {
+			return nil, errors.New("invalid Git commit change list")
+		}
+		result[current] = append(result[current], path)
+	}
+	return result, nil
 }
+
+// knownCommits reports which of ids this repository has as commits, with one
+// Git process.
+func knownCommits(ctx context.Context, r *gitexec.Runner, root string, ids []string) (map[string]bool, error) {
+	known := map[string]bool{}
+	var query strings.Builder
+	for _, id := range ids {
+		if !allZero(id) {
+			query.WriteString(id + "^{commit}\n")
+		}
+	}
+	if query.Len() == 0 {
+		return known, nil
+	}
+	out, err := r.GuardInput(ctx, root, strings.NewReader(query.String()), "cat-file", "--batch-check=%(objectname)")
+	if err != nil {
+		return nil, err
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		// Missing objects print "<name> missing".
+		if fields := strings.Fields(line); len(fields) == 1 && objectID.MatchString(fields[0]) {
+			known[fields[0]] = true
+		}
+	}
+	return known, nil
+}
+
+func allZero(id string) bool { return strings.Trim(id, "0") == "" }
 
 // AuditUpstream scans local branches that declare an upstream. Doctor uses a
 // full ancestry scan so an already-pushed leak is visible too.
@@ -343,24 +409,26 @@ func AuditUpstream(ctx context.Context, r *gitexec.Runner, cwd string) ([]Findin
 	if err != nil {
 		return nil, err
 	}
-	seen := map[string]bool{}
-	result := []Finding{}
+	// All branches go into one scan, so shared history is read once.
+	var input strings.Builder
 	for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
 		fields := strings.Fields(line)
 		if len(fields) != 3 || !objectID.MatchString(fields[2]) {
 			continue
 		}
-		input := strings.NewReader(fields[0] + " " + fields[2] + " " + fields[1] + " " + strings.Repeat("0", len(fields[2])) + "\n")
-		findings, err := push(ctx, r, cwd, "", input, true)
-		if err != nil {
-			return nil, err
-		}
-		for _, finding := range findings {
-			key := finding.Commit + "\x00" + finding.Path
-			if !seen[key] {
-				seen[key] = true
-				result = append(result, finding)
-			}
+		input.WriteString(fields[0] + " " + fields[2] + " " + fields[1] + " " + strings.Repeat("0", len(fields[2])) + "\n")
+	}
+	findings, err := push(ctx, r, cwd, "", strings.NewReader(input.String()), true)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	result := []Finding{}
+	for _, finding := range findings {
+		key := finding.Commit + "\x00" + finding.Path
+		if !seen[key] {
+			seen[key] = true
+			result = append(result, finding)
 		}
 	}
 	return result, nil

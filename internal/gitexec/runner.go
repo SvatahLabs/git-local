@@ -125,6 +125,16 @@ func (r *Runner) Guard(ctx context.Context, cwd, index string, args ...string) (
 	return r.run(ctx, cwd, false, extra, nil, nil, args...)
 }
 
+// GuardInput is Guard for the batch commands that read their arguments from
+// standard input: rev-list --stdin, diff-tree --stdin and cat-file
+// --batch-check.
+func (r *Runner) GuardInput(ctx context.Context, cwd string, input io.Reader, args ...string) ([]byte, error) {
+	if len(args) < 2 || !(args[0] == "rev-list" && args[1] == "--stdin" || args[0] == "diff-tree" && args[1] == "--stdin" || args[0] == "cat-file" && strings.HasPrefix(args[1], "--batch-check")) {
+		return nil, errors.New("command not allowed by guard policy")
+	}
+	return r.run(ctx, cwd, false, nil, nil, input, args...)
+}
+
 // IndexBlob reads a stage-zero blob without filters or text conversion. A
 // filter process may pass Git's temporary GIT_INDEX_FILE here.
 func (r *Runner) IndexBlob(ctx context.Context, cwd, index, path string) ([]byte, error) {
