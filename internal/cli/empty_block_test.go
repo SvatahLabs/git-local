@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"gitlocal/internal/exclude"
+	"gitlocal/internal/testutil"
 )
 
 // TestInitWritesStageRuleWithoutSelections: 0.1.4 wrote no managed block for
@@ -31,7 +32,7 @@ func TestInitWritesStageRuleWithoutSelections(t *testing.T) {
 	if code != 0 || !strings.Contains(out, "managed ignore block is missing") || !strings.Contains(out, "git local init") {
 		t.Fatalf("doctor with no managed block (exit %d):\n%s", code, out)
 	}
-	if out := successful(t, repo.Root, "init"); !strings.Contains(out, "Managed ignore block: rewritten") {
+	if out := successful(t, repo.Root, "init"); !strings.Contains(out, "Managed ignore block: added.") {
 		t.Fatalf("init output:\n%s", out)
 	}
 	if !hasStageRule() {
@@ -51,5 +52,25 @@ func TestInitWritesStageRuleWithoutSelections(t *testing.T) {
 	successful(t, repo.Root, "init")
 	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0600 || !hasStageRule() {
 		t.Fatalf("init without info/exclude: %v %v", info, err)
+	}
+}
+
+// TestFreshInitSaysBlockAdded: a fresh repository has no managed block, so
+// init adds one; "rewritten for this release" is only for an older block.
+func TestFreshInitSaysBlockAdded(t *testing.T) {
+	repo := testutil.New(t)
+	repo.Commit()
+	home := filepath.Join(repo.Root, "fixture-home")
+	if err := os.MkdirAll(home, 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", home)
+	if out := successful(t, repo.Root, "init"); !strings.Contains(out, "Managed ignore block: added.") || strings.Contains(out, "rewritten") {
+		t.Fatalf("fresh init output:\n%s", out)
+	}
+	if out := successful(t, repo.Root, "init"); strings.Contains(out, "Managed ignore block") {
+		t.Fatalf("second init output:\n%s", out)
 	}
 }

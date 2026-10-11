@@ -2,6 +2,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -20,6 +21,7 @@ import (
 	"gitlocal/internal/configtx"
 	"gitlocal/internal/doctor"
 	"gitlocal/internal/encryption"
+	"gitlocal/internal/exclude"
 	"gitlocal/internal/gitexec"
 	"gitlocal/internal/guard"
 	"gitlocal/internal/history"
@@ -118,8 +120,10 @@ func New(out, errOut io.Writer) *cobra.Command {
 			if err != nil {
 				err = fmt.Errorf("initialized local workspace %s, but the overlay filter needs repair: %w", w.WorkspaceID, err)
 			}
-			// It also rewrites a managed ignore block an earlier release wrote.
+			// It also rewrites a managed ignore block an earlier release wrote,
+			// or adds one where there was none (a fresh or 0.1.4 repository).
 			var refreshed bool
+			previous, _ := os.ReadFile(w.Exclude)
 			warnings := w.Warnings
 			if err == nil {
 				var refreshWarnings []string
@@ -142,7 +146,11 @@ func New(out, errOut io.Writer) *cobra.Command {
 				return err
 			}
 			if refreshed {
-				if _, err = fmt.Fprintln(c.OutOrStdout(), "Managed ignore block: rewritten for this release."); err != nil {
+				change := "added"
+				if bytes.Contains(previous, []byte(exclude.Begin)) {
+					change = "rewritten for this release"
+				}
+				if _, err = fmt.Fprintf(c.OutOrStdout(), "Managed ignore block: %s.\n", change); err != nil {
 					return err
 				}
 			}

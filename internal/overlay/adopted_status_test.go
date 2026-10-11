@@ -68,7 +68,7 @@ func TestOverlayStatusNamesHunksAlreadyUpstream(t *testing.T) {
 	if err != nil || json.Unmarshal(out, &envelope) != nil || len(envelope.Data.Overlays) != 1 || envelope.Data.Overlays[0].AdoptedHunks != 1 || envelope.Data.Overlays[0].Hunks != 2 {
 		t.Fatalf("status JSON: %v\n%s", err, out)
 	}
-	if out, _ := local("doctor"); !bytes.Contains(out, []byte("overlay dev on app.conf is stale")) || !bytes.Contains(out, []byte("git local overlay remove dev")) {
+	if out, _ := local("doctor"); !bytes.Contains(out, []byte("overlay dev on app.conf is stale")) || !bytes.Contains(out, []byte("git local overlay remove dev")) || !bytes.Contains(out, []byte("git local overlay add dev -- 'app.conf'")) {
 		t.Fatalf("doctor:\n%s", out)
 	}
 }
