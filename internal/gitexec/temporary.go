@@ -18,7 +18,7 @@ type TemporaryHistory struct {
 }
 
 func (r *Runner) TemporaryHistory(ctx context.Context, source string) (*TemporaryHistory, error) {
-	if err := ValidateStore(source); err != nil {
+	if err := r.checkStore(source); err != nil {
 		return nil, err
 	}
 	base, err := os.MkdirTemp(r.private, "diff-")
@@ -59,10 +59,10 @@ func (t *TemporaryHistory) History(ctx context.Context, store string, input io.R
 	default:
 		return nil, errors.New("command is not allowed in a temporary diff store")
 	}
-	if err := ValidateStore(t.source); err != nil {
+	if err := t.r.checkStore(t.source); err != nil {
 		return nil, err
 	}
-	if err := ValidateStore(t.Path); err != nil {
+	if err := t.r.checkStore(t.Path); err != nil {
 		return nil, err
 	}
 	// Object writers may freshen an existing alternate object's mtime. Expose

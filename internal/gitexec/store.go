@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 
 	"gitlocal/internal/storage"
 )
@@ -34,14 +35,52 @@ func (r *Runner) InitBare(ctx context.Context, path string) error {
 	return ValidateStore(path)
 }
 
+// storeWalks counts full store walks, for tests.
+var storeWalks atomic.Int64
+
 // The v1 store uses one exact config rather than accepting includes, remotes or
 // subtly executable settings. Future extensions must explicitly version this.
+// ValidateStore also walks every file in the store.
 func ValidateStore(path string) error {
 	dir, err := storage.OpenDir(path)
 	if err != nil {
 		return err
 	}
 	defer dir.Close()
+	if err := validateStoreSettings(dir); err != nil {
+		return err
+	}
+	return walkStore(path, dir)
+}
+
+// checkStore validates a store before each runner command. The config and
+// redirection files are checked every time; the walk of every file, which
+// grows with the store, runs once per store for this runner (one command).
+func (r *Runner) checkStore(path string) error {
+	r.mu.Lock()
+	walked := r.walked[path]
+	r.mu.Unlock()
+	if !walked {
+		if err := ValidateStore(path); err != nil {
+			return err
+		}
+		r.mu.Lock()
+		if r.walked == nil {
+			r.walked = map[string]bool{}
+		}
+		r.walked[path] = true
+		r.mu.Unlock()
+		return nil
+	}
+	dir, err := storage.OpenDir(path)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return validateStoreSettings(dir)
+}
+
+func validateStoreSettings(dir *storage.Dir) error {
 	config, err := dir.ReadFile("config", 64<<10)
 	if err != nil {
 		return err
@@ -56,6 +95,11 @@ func ValidateStore(path string) error {
 			return err
 		}
 	}
+	return nil
+}
+
+func walkStore(path string, dir *storage.Dir) error {
+	storeWalks.Add(1)
 	// Walk without following links, including descendants of objects and refs.
 	return filepath.WalkDir(path, func(p string, d os.DirEntry, err error) error {
 		if err != nil {

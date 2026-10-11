@@ -31,6 +31,8 @@ type Runner struct {
 	private    string
 	mu         sync.Mutex
 	checked    bool
+	// walked lists the stores this runner fully validated (checkStore).
+	walked map[string]bool
 	// backupConfig holds extra -c settings for backup transports; only
 	// tests set it (to trust a test server's certificate).
 	backupConfig []string
@@ -485,7 +487,7 @@ func (r *Runner) History(ctx context.Context, store string, input io.Reader, arg
 	if err := r.CheckCapabilities(ctx); err != nil {
 		return nil, err
 	}
-	if err := ValidateStore(store); err != nil {
+	if err := r.checkStore(store); err != nil {
 		return nil, err
 	}
 	return r.run(ctx, store, true, []string{"GIT_AUTHOR_NAME=Git Local", "GIT_AUTHOR_EMAIL=git-local@localhost", "GIT_COMMITTER_NAME=Git Local", "GIT_COMMITTER_EMAIL=git-local@localhost"}, []string{"--git-dir=" + store}, input, args...)
@@ -495,7 +497,7 @@ func (r *Runner) History(ctx context.Context, store string, input io.Reader, arg
 // private store. All other protocols, local Git hooks and inherited Git config
 // remain disabled. The caller must validate the effective destination URL.
 func (r *Runner) BackupPush(ctx context.Context, store, remoteURL, commit, ref string) error {
-	if err := ValidateStore(store); err != nil {
+	if err := r.checkStore(store); err != nil {
 		return err
 	}
 	if remoteURL == "" || strings.ContainsAny(remoteURL, "\x00\r\n") || !strings.HasPrefix(ref, "refs/gitlocal/backups/") || strings.ContainsAny(ref, "\x00\r\n :") || len(commit) != 40 {
@@ -562,7 +564,7 @@ func (r *Runner) backupTransport(ctx context.Context, store, remoteURL string) (
 // BackupFetch retrieves one explicit backup ref into a disposable store. It
 // cannot fetch mainline refs or use local/custom transports.
 func (r *Runner) BackupFetch(ctx context.Context, store, remoteURL, ref string) error {
-	if err := ValidateStore(store); err != nil {
+	if err := r.checkStore(store); err != nil {
 		return err
 	}
 	if remoteURL == "" || strings.ContainsAny(remoteURL, "\x00\r\n") || !strings.HasPrefix(ref, "refs/gitlocal/backups/") || strings.ContainsAny(ref, "\x00\r\n :") {
@@ -579,7 +581,7 @@ func (r *Runner) BackupFetch(ctx context.Context, store, remoteURL, ref string) 
 // HistoryBlobTo streams one private blob, avoiding the bounded diagnostic
 // buffer for encrypted archives that may be larger than 16 MiB.
 func (r *Runner) HistoryBlobTo(ctx context.Context, store, id string, dst io.Writer) error {
-	if err := ValidateStore(store); err != nil {
+	if err := r.checkStore(store); err != nil {
 		return err
 	}
 	if len(id) != 40 && len(id) != 64 {
@@ -827,7 +829,7 @@ func (r *Runner) HistoryBlob(ctx context.Context, store, id string, output io.Wr
 	if err := r.CheckCapabilities(ctx); err != nil {
 		return err
 	}
-	if err := ValidateStore(store); err != nil {
+	if err := r.checkStore(store); err != nil {
 		return err
 	}
 	_, err := r.runOutput(ctx, store, true, nil, []string{"--git-dir=" + store}, nil, output, "cat-file", "blob", id)
