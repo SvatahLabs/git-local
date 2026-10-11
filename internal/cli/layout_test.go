@@ -224,6 +224,41 @@ func TestRegisteredWorktreeThatIsNoCheckout(t *testing.T) {
 	successful(t, linked, "status")
 }
 
+// TestUnreadableWorktreeRegistrationStopsInit: init can't tell whether a
+// registered worktree that is no checkout holds a workspace when its gitdir
+// file can't be read, so it stops and names the file instead of skipping it.
+func TestUnreadableWorktreeRegistrationStopsInit(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads unreadable files")
+	}
+	repo := layoutRepo(t)
+	linked := linkedWorkspace(t, repo, t.TempDir(), "unreadable")
+	if err := os.Remove(filepath.Join(linked, ".git")); err != nil {
+		t.Fatal(err)
+	}
+	gitdir := strings.TrimSpace(string(repo.Git("rev-parse", "--git-common-dir")))
+	admins, err := filepath.Glob(filepath.Join(repo.Root, gitdir, "worktrees", "*", "gitdir"))
+	if err != nil || len(admins) != 1 {
+		t.Fatalf("worktree registrations: %v %v", admins, err)
+	}
+	gitdir = admins[0]
+	if err := os.Chmod(gitdir, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(gitdir, 0600) })
+	code, _, diagnostic := callCLI(t, repo.Root, "init")
+	if code != 3 || !strings.Contains(diagnostic, gitdir) {
+		t.Fatalf("init beside a worktree with an unreadable gitdir: exit %d: %s", code, diagnostic)
+	}
+	if err := os.Chmod(gitdir, 0600); err != nil {
+		t.Fatal(err)
+	}
+	code, _, diagnostic = callCLI(t, repo.Root, "init")
+	if code != 3 || !strings.Contains(diagnostic, "git worktree repair "+linked) {
+		t.Fatalf("init once the gitdir is readable: exit %d: %s", code, diagnostic)
+	}
+}
+
 // TestBareRepositoryWorktreesRetire: Git lists a bare repository first among
 // its worktrees, though it isn't one. Removed linked worktrees must still be
 // retired, and --from main must say there is no main checkout.

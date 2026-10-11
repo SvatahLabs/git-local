@@ -427,9 +427,43 @@ func registeredAdmin(common, root string) (string, error) {
 	return "", nil
 }
 
+// unreadableRegistrations refuses a linked worktree registration that holds
+// a git-local identity but whose gitdir file can't be read: Git then leaves
+// the worktree out of its list, so its workspace would go unchecked.
+func unreadableRegistrations(common string) error {
+	entries, err := os.ReadDir(filepath.Join(common, "worktrees"))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		admin := filepath.Join(common, "worktrees", entry.Name())
+		gitdir := filepath.Join(admin, "gitdir")
+		file, err := os.Open(gitdir)
+		if err == nil {
+			file.Close()
+			continue
+		}
+		if os.IsNotExist(err) {
+			continue
+		}
+		if _, e := os.Lstat(filepath.Join(admin, "gitlocal-workspace.json")); e == nil {
+			return fmt.Errorf("%w: worktree registration %s holds a git-local workspace, but its gitdir file can't be read (%v), so Git doesn't list the worktree; fix the file's permissions", storage.ErrConflict, gitdir, err)
+		} else if !os.IsNotExist(e) {
+			return e
+		}
+	}
+	return nil
+}
+
 func checkDuplicates(ctx context.Context, r *gitexec.Runner, w *Context) error {
 	roots, err := registeredRoots(ctx, r, w)
 	if err != nil {
+		return err
+	}
+	if err := unreadableRegistrations(w.Common); err != nil {
 		return err
 	}
 	seen := map[string]string{w.WorkspaceID: w.Admin}
