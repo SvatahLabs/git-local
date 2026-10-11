@@ -87,6 +87,11 @@ func Create(path, repoRoot string) error {
 			os.Remove(path)
 		}
 	}()
+	// On Windows the file inherits its folder's ACL; replace it before any
+	// key byte is written.
+	if err := protectKey(path); err != nil {
+		return err
+	}
 	if n, err := file.Write(key); err != nil {
 		return err
 	} else if n != len(key) {
@@ -114,6 +119,9 @@ func Load(path, repoRoot string) ([]byte, error) {
 	}
 	if !info.Mode().IsRegular() || info.Size() != 32 || runtime.GOOS != "windows" && info.Mode().Perm()&0077 != 0 {
 		return nil, errors.New("key must be a 32-byte owner-private regular file")
+	}
+	if err := checkKeyACL(path); err != nil {
+		return nil, err
 	}
 	dir, err := storage.OpenDir(filepath.Dir(path))
 	if err != nil {
