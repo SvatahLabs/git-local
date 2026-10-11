@@ -77,6 +77,11 @@ git local encrypt rebind-key /secure/new-location/gitlocal-files.key
 git local completion bash
 ```
 
+To complete both `git-local` and `git local`, load the script after Git's own
+completion: in bash, `eval "$(git-local completion bash)"` (it needs the
+bash-completion package, as Git's does); in zsh with compinit,
+`source <(git-local completion zsh)`.
+
 An interrupted transaction blocks git-local commands and the commit and push
 guards until it is resolved. `git local doctor` lists every pending journal
 (configuration, seed, restore, encryption migration and initialization) with the

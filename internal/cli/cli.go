@@ -1449,6 +1449,73 @@ func resaveSteps(name, path string) string {
 	return fmt.Sprintf("git local overlay remove %s, edit %s to the local value you want, then git local overlay add %s -- %s", name, path, name, shellQuote(path))
 }
 
+// bashGitForm lets Git's bash completion, which calls _git_<command> for
+// `git <command> ...`, complete `git local ...` with the function above: it
+// passes the words after "local" as a git-local command line.
+const bashGitForm = `
+_git_local()
+{
+    local idx=${__git_cmd_idx:-1}
+    local -a rest=("${words[@]:idx+1:cword-idx}")
+    local -a words=(git-local "${rest[@]}")
+    local cword=${#rest[@]}
+    local out directive
+    __git-local_get_completion_results
+    __git-local_process_completion_results
+}
+`
+
+// zshGitRequest is the zsh script's completion request. zsh's _git completes
+// `git local ...` through _git-local with words[1] set to "local", so the
+// request must name git-local itself.
+const zshGitRequest = `    requestComp="${words[1]} __complete ${words[2,-1]}"`
+
+// gitFormCompletion extends the bash and zsh scripts to complete the
+// `git local` form as well as `git-local`.
+func gitFormCompletion(root *cobra.Command) {
+	completion, _, err := root.Find([]string{"completion"})
+	if err != nil || completion == root {
+		return
+	}
+	for _, shell := range completion.Commands() {
+		switch shell.Name() {
+		case "bash":
+			run := shell.RunE
+			shell.RunE = func(c *cobra.Command, args []string) error {
+				if err := run(c, args); err != nil {
+					return err
+				}
+				_, err := io.WriteString(c.OutOrStdout(), bashGitForm)
+				return err
+			}
+		case "zsh":
+			shell.RunE = func(c *cobra.Command, args []string) error {
+				noDescriptions, _ := c.Flags().GetBool("no-descriptions")
+				var script bytes.Buffer
+				var err error
+				if noDescriptions {
+					err = c.Root().GenZshCompletionNoDesc(&script)
+				} else {
+					err = c.Root().GenZshCompletion(&script)
+				}
+				if err != nil {
+					return err
+				}
+				request := zshGitRequest
+				if noDescriptions {
+					request = strings.Replace(request, "__complete", cobra.ShellCompNoDescRequestCmd, 1)
+				}
+				if !strings.Contains(script.String(), request) {
+					return errors.New("unexpected zsh completion script")
+				}
+				program := "    local program=${words[1]}\n    [[ $program == local ]] && program=git-local\n"
+				_, err = io.WriteString(c.OutOrStdout(), strings.Replace(script.String(), request, program+strings.Replace(request, "${words[1]}", "${program}", 1), 1))
+				return err
+			}
+		}
+	}
+}
+
 func Execute(ctx context.Context, args []string, out, errOut io.Writer) int {
 	completion := len(args) > 0 && (args[0] == cobra.ShellCompRequestCmd || args[0] == cobra.ShellCompNoDescRequestCmd)
 	// A completion request carries the command line being completed, which
@@ -1470,6 +1537,7 @@ func Execute(ctx context.Context, args []string, out, errOut io.Writer) int {
 	c.SetArgs(args)
 	c.InitDefaultHelpCmd()
 	c.InitDefaultCompletionCmd()
+	gitFormCompletion(c)
 	enforceUsage(c)
 	// Cobra adds its hidden completion request commands only while executing,
 	// so they skip the unknown-command check. A help topic must name a command.
