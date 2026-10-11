@@ -169,7 +169,7 @@ func (d *Dir) mkdir(name string) error {
 	if err = unix.Mkdirat(fd, base, 0700); err != nil {
 		return &os.PathError{Op: "mkdir", Path: name, Err: err}
 	}
-	return unix.Fsync(fd)
+	return syncDir(fd)
 }
 func (d *Dir) Rename(old, new string) error {
 	a, base, err := d.parent(old)
@@ -185,10 +185,10 @@ func (d *Dir) Rename(old, new string) error {
 	if err = unix.Renameat(a, base, b, target); err != nil {
 		return err
 	}
-	if err = unix.Fsync(b); err != nil {
+	if err = syncDir(b); err != nil {
 		return err
 	}
-	return unix.Fsync(a)
+	return syncDir(a)
 }
 
 // flushed records nothing: SyncStaged can always reopen a stage for writing.
@@ -223,10 +223,10 @@ func (d *Dir) RenameNoReplace(old, new string) error {
 	if err = renameNoReplace(a, base, b, target); err != nil {
 		return &os.LinkError{Op: "rename", Old: old, New: new, Err: err}
 	}
-	if err = unix.Fsync(b); err != nil {
+	if err = syncDir(b); err != nil {
 		return err
 	}
-	return unix.Fsync(a)
+	return syncDir(a)
 }
 func (d *Dir) Remove(name string) error {
 	fd, base, err := d.parent(name)
@@ -237,7 +237,7 @@ func (d *Dir) Remove(name string) error {
 	if err = unix.Unlinkat(fd, base, 0); err != nil {
 		return &os.PathError{Op: "remove", Path: name, Err: err}
 	}
-	return unix.Fsync(fd)
+	return syncDir(fd)
 }
 func tryLock(f *os.File, shared bool) (bool, error) {
 	how := unix.LOCK_EX
@@ -314,7 +314,7 @@ func (d *Dir) StageNamedSymlink(name, target string) error {
 	if err = unix.Symlinkat(target, fd, base); err != nil {
 		return err
 	}
-	return unix.Fsync(fd)
+	return syncDir(fd)
 }
 
 func (d *Dir) RemoveDirectory(name string) error {
@@ -326,7 +326,7 @@ func (d *Dir) RemoveDirectory(name string) error {
 	if err = unix.Unlinkat(fd, base, unix.AT_REMOVEDIR); err != nil {
 		return err
 	}
-	return unix.Fsync(fd)
+	return syncDir(fd)
 }
 
 // SyncStaged re-establishes durability after a process died before closing or
@@ -355,5 +355,5 @@ func (d *Dir) SyncStaged(name string) error {
 		return err
 	}
 	defer unix.Close(fd)
-	return unix.Fsync(fd)
+	return syncDir(fd)
 }

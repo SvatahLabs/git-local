@@ -32,3 +32,6 @@ func renameNoReplace(fromfd int, from string, tofd int, to string) error {
 	}
 	return unix.Unlinkat(fromfd, from, 0)
 }
+
+// syncDir makes a directory's entries durable.
+func syncDir(fd int) error { return unix.Fsync(fd) }
