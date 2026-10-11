@@ -79,7 +79,8 @@ func encode(v any) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(b) > journalLimit {
+	// The written journal, with its newline, must fit what readJournal reads.
+	if len(b)+1 > journalLimit {
 		return nil, errors.New("restore journal exceeds metadata limit")
 	}
 	return append(b, '\n'), nil
