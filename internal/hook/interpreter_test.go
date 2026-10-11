@@ -56,7 +56,7 @@ func TestInstallKeepsHookModeAndRefusesOtherInterpreters(t *testing.T) {
 		t.Fatalf("uninstall mode: %v %v", info.Mode(), err)
 	}
 
-	for _, shebang := range []string{"#!/usr/bin/env pwsh", "#!/usr/bin/fish", "#!/bin/csh -f", "#!/usr/bin/env xonsh", "#!/usr/bin/env python3"} {
+	for _, shebang := range []string{"#!/usr/bin/env pwsh", "#!/usr/bin/fish", "#!/bin/csh -f", "#!/usr/bin/env xonsh", "#!/usr/bin/env python3", "#!/bin/busybox awk", "#!/usr/bin/env -u sh python3", "#!/usr/bin/env VAR=sh"} {
 		other := []byte(shebang + "\necho other interpreter\n")
 		if err := os.WriteFile(preCommit, other, 0700); err != nil {
 			t.Fatal(err)
@@ -73,7 +73,7 @@ func TestInstallKeepsHookModeAndRefusesOtherInterpreters(t *testing.T) {
 		}
 	}
 
-	for _, shebang := range []string{"#!/bin/sh", "#!/bin/bash -e", "#!/usr/bin/env bash", "#!/usr/bin/env -S bash -e", "#!/bin/dash", "#!/bin/ksh", "#!/bin/zsh"} {
+	for _, shebang := range []string{"#!/bin/sh", "#!/bin/bash -e", "#!/usr/bin/env bash", "#!/usr/bin/env -S bash -e", "#!/bin/dash", "#!/bin/ksh", "#!/bin/zsh", "#!/bin/ash", "#!/bin/mksh", "#!/bin/busybox sh", "#!/usr/bin/env -u NAME sh", "#!/usr/bin/env --unset=NAME sh", "#!/usr/bin/env VAR=x sh", "#!/usr/bin/env -i PATH=/bin:/usr/bin sh"} {
 		shell := []byte(shebang + "\necho shell hook\n")
 		if err := os.WriteFile(preCommit, shell, 0700); err != nil {
 			t.Fatal(err)

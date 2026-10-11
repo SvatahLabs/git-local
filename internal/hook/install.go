@@ -105,26 +105,35 @@ func managed(data []byte, name string) bool {
 	return bytes.Contains(data, []byte(start)) && bytes.Contains(data, []byte(end))
 }
 
-// posixShell reports whether a shebang line runs sh, bash, dash, ksh or zsh,
-// directly or through env.
+// posixShell reports whether a shebang line runs sh, bash, dash, ksh, zsh,
+// ash or mksh, directly, through busybox, or through env (skipping its
+// options, -u's argument and NAME=value assignments).
 func posixShell(shebang string) bool {
 	fields := strings.Fields(strings.TrimPrefix(shebang, "#!"))
 	if len(fields) == 0 {
 		return false
 	}
-	interpreter := path.Base(fields[0])
+	interpreter, args := path.Base(fields[0]), fields[1:]
 	if interpreter == "env" {
-		args := fields[1:]
-		for len(args) > 0 && strings.HasPrefix(args[0], "-") {
+		for len(args) > 0 && (strings.HasPrefix(args[0], "-") || strings.Contains(args[0], "=")) {
+			if args[0] == "-u" && len(args) > 1 {
+				args = args[1:]
+			}
 			args = args[1:]
 		}
 		if len(args) == 0 {
 			return false
 		}
-		interpreter = path.Base(args[0])
+		interpreter, args = path.Base(args[0]), args[1:]
+	}
+	if interpreter == "busybox" {
+		if len(args) == 0 {
+			return false
+		}
+		interpreter = args[0]
 	}
 	switch interpreter {
-	case "sh", "bash", "dash", "ksh", "zsh":
+	case "sh", "bash", "dash", "ksh", "zsh", "ash", "mksh":
 		return true
 	}
 	return false
@@ -145,7 +154,7 @@ func insert(name string, data, addition []byte) ([]byte, error) {
 	}
 	i := bytes.IndexByte(data, '\n')
 	if !bytes.HasPrefix(data, []byte("#!")) || i < 0 || !posixShell(string(data[:i])) {
-		return nil, fmt.Errorf("%w: the existing %s hook is not a POSIX shell script (sh, bash, dash, ksh or zsh), so git-local can't add its block. %s", storage.ErrConflict, name, callInstead(name))
+		return nil, fmt.Errorf("%w: the existing %s hook is not a POSIX shell script (sh, bash, dash, ksh, zsh, ash or mksh), so git-local can't add its block. %s", storage.ErrConflict, name, callInstead(name))
 	}
 	out := append([]byte{}, data[:i+1]...)
 	out = append(out, addition...)

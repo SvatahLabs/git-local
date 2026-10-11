@@ -319,8 +319,9 @@ other repositories lose those hooks too.
 Install keeps an existing hook's file mode, so a hook you disabled by removing
 its execute bits stays disabled; install warns that Git won't run it, and
 `hook status` and `doctor` report it. Install adds its block
-only to `sh`, `bash`, `dash`, `ksh` or `zsh` hooks (directly or through
-`env`); for any other interpreter it refuses and explains how to call the
+only to `sh`, `bash`, `dash`, `ksh`, `zsh`, `ash` or `mksh` hooks (directly,
+through `busybox`, or through `env`, also with `-u NAME` or `NAME=value`
+arguments); for any other interpreter it refuses and explains how to call the
 guards from that hook.
 On a new branch, the pre-push guard excludes commits reachable from known
 remote-tracking branches; without those refs it scans the branch's full ancestry.
