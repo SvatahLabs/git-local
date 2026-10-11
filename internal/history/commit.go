@@ -157,7 +157,7 @@ func commitWithOptions(ctx context.Context, r *gitexec.Runner, cwd, message, wri
 		// (a policy from an earlier release) would be saved as plaintext.
 		for _, entry := range entries {
 			if rule, ok := secure.uncoveredRule(entry.Path); ok {
-				return fmt.Errorf("%w: %q matches sensitive path %q only by spelling or kind and would be saved unencrypted; correct the policy with git local encrypt migrate (see git local doctor), or untrack the file", storage.ErrConflict, entry.Path, rule)
+				return fmt.Errorf("%w: %q matches sensitive path %q only by spelling or kind and would be saved unencrypted; correct the policy with git local encrypt migrate (see git local doctor); untracking the file lets other snapshots continue until then, but it must be tracked again for the correction", storage.ErrConflict, entry.Path, rule)
 			}
 		}
 		plainRegular := 0

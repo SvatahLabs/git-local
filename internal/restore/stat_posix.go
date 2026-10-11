@@ -5,6 +5,7 @@ package restore
 import (
 	"io/fs"
 	"os"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -18,4 +19,12 @@ func sameFile(a, b fs.FileInfo) bool {
 		return os.SameFile(a, b)
 	}
 	return sa.Dev == sb.Dev && sa.Ino == sb.Ino && sa.Ctim == sb.Ctim
+}
+
+// changeTime returns the inode change time, or zero when it is unknown.
+func changeTime(info fs.FileInfo) time.Time {
+	if st, ok := info.Sys().(*unix.Stat_t); ok {
+		return time.Unix(int64(st.Ctim.Sec), int64(st.Ctim.Nsec))
+	}
+	return time.Time{}
 }

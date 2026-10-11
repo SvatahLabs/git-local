@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"io"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -121,7 +122,7 @@ func TestDecryptRefusesOtherRefAndUnboundArchive(t *testing.T) {
 		t.Fatalf("bound archive: %q %v", plain.String(), err)
 	}
 	other := testRef("00000000-0000-4000-8000-000000000002")
-	if err := Decrypt(io.Discard, bytes.NewReader(encrypted.Bytes()), key, other); err == nil || !strings.Contains(err.Error(), "pushed as "+codecRef) {
+	if err := Decrypt(io.Discard, bytes.NewReader(encrypted.Bytes()), key, other); err == nil || !strings.Contains(err.Error(), strconv.Quote(codecRef)+" (unverified)") {
 		t.Fatalf("archive accepted under another ref: %v", err)
 	}
 	// Rewriting the bound ref in the header (same length) fails authentication.

@@ -25,4 +25,18 @@ func TestShellCompletionRequestsListSubcommands(t *testing.T) {
 	if code, out, _ := callCLI(t, dir, "help", "hook"); code != 0 || !strings.Contains(out, "install") {
 		t.Fatalf("help hook: exit %d %q", code, out)
 	}
+	for _, args := range [][]string{{"help", "hook", "bogus"}, {"--json", "help", "bogus"}} {
+		if code, out, diagnostic := callCLI(t, dir, args...); code != 2 || !strings.Contains(out+diagnostic, "bogus") {
+			t.Fatalf("%v: exit %d %s %s", args, code, out, diagnostic)
+		}
+	}
+}
+
+// A command line being completed may already hold --json; the shell still
+// gets completion lines and a directive, not a JSON envelope.
+func TestShellCompletionIgnoresJSONFlagBeingCompleted(t *testing.T) {
+	code, out, diagnostic := callCLI(t, t.TempDir(), "__complete", "hook", "--json", "")
+	if code != 0 || strings.Contains(out, "schemaVersion") || !strings.Contains(out, "install") || !strings.Contains(out, ":") {
+		t.Fatalf("__complete hook --json: exit %d\n%s\n%s", code, out, diagnostic)
+	}
 }

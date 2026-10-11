@@ -148,7 +148,12 @@ seed and restore records are converted, and interruption is resumed or rolled
 back with `encrypt recover` as for a first migration; until the new policy is
 published, the old one stays in service. Snapshot IDs change. Backups taken
 before the correction still hold the plaintext. Until the policy is corrected,
-untracking the file lets other snapshots continue. Restoring over unsaved
+untracking the file lets other snapshots continue, but track it again before
+running the correction, which only accepts selected paths. Commands that take
+a snapshot (`commit`, the Git event hooks, including the one before
+`git rebase`, worktree seeding and `workspace remove`) are refused meanwhile.
+Run the printed command from the checkout root: its paths are relative to the
+current directory. Restoring over unsaved
 changes to such a file is refused, because the recovery copy restore keeps would
 be plaintext; move the file aside first.
 If the key is moved, `encrypt rebind-key` accepts its new absolute path only

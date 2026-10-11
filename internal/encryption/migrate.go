@@ -404,7 +404,7 @@ func migrationPolicy(ctx context.Context, r *gitexec.Runner, cwd string, w works
 			return secureblob.Policy{}, nil, err
 		}
 		if !state.Selected(path) {
-			return secureblob.Policy{}, nil, fmt.Errorf("%w: %q is not selected for local history", storage.ErrConflict, path)
+			return secureblob.Policy{}, nil, fmt.Errorf("%w: %q is not selected for local history; track it (git local track) before encrypting it, also when correcting a policy after untracking it", storage.ErrConflict, path)
 		}
 		normalized = append(normalized, path)
 	}

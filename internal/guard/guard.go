@@ -379,9 +379,11 @@ func changedPaths(ctx context.Context, r *gitexec.Runner, root string, commits [
 func knownCommits(ctx context.Context, r *gitexec.Runner, root string, ids []string) (map[string]bool, error) {
 	known := map[string]bool{}
 	var query strings.Builder
+	var asked []string
 	for _, id := range ids {
 		if !allZero(id) {
 			query.WriteString(id + "^{commit}\n")
+			asked = append(asked, id)
 		}
 	}
 	if query.Len() == 0 {
@@ -391,10 +393,16 @@ func knownCommits(ctx context.Context, r *gitexec.Runner, root string, ids []str
 	if err != nil {
 		return nil, err
 	}
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		// Missing objects print "<name> missing".
+	// One line per query, in order. A found object prints the commit it peels
+	// to (an annotated tag's differs from the tag's ID); a missing one prints
+	// "<name> missing".
+	lines := strings.Split(strings.TrimSuffix(string(out), "\n"), "\n")
+	if len(lines) != len(asked) {
+		return nil, errors.New("invalid Git object check output")
+	}
+	for i, line := range lines {
 		if fields := strings.Fields(line); len(fields) == 1 && objectID.MatchString(fields[0]) {
-			known[fields[0]] = true
+			known[asked[i]] = true
 		}
 	}
 	return known, nil

@@ -65,3 +65,27 @@ func TestStoreIsWalkedOncePerRunner(t *testing.T) {
 		t.Fatal("a new runner didn't walk the store")
 	}
 }
+
+// auto watch keeps one runner for hours; it asks for a new walk on each tick.
+func TestWalkStoresAgainWalksOnTheNextCommand(t *testing.T) {
+	repo := testutil.New(t)
+	r := newRunner(t, repo)
+	ctx := context.Background()
+	store := filepath.Join(t.TempDir(), "history.git")
+	if err := r.InitBare(ctx, store); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.History(ctx, store, nil, "rev-parse", "--git-dir"); err != nil {
+		t.Fatal(err)
+	}
+	before := storeWalks.Load()
+	r.WalkStoresAgain()
+	for i := 0; i < 3; i++ {
+		if _, err := r.History(ctx, store, nil, "rev-parse", "--git-dir"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if walks := storeWalks.Load() - before; walks != 1 {
+		t.Fatalf("commands after WalkStoresAgain walked the store %d times, want 1", walks)
+	}
+}

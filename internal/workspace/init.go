@@ -407,6 +407,9 @@ func registeredAdmin(common, root string) (string, error) {
 		return "", err
 	}
 	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue // Git keeps only directories here and ignores stray files (.DS_Store).
+		}
 		admin := filepath.Join(common, "worktrees", entry.Name())
 		b, err := os.ReadFile(filepath.Join(admin, "gitdir"))
 		if err != nil {
@@ -439,6 +442,9 @@ func unreadableRegistrations(common string) error {
 		return err
 	}
 	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue // Git keeps only directories here and ignores stray files (.DS_Store).
+		}
 		admin := filepath.Join(common, "worktrees", entry.Name())
 		gitdir := filepath.Join(admin, "gitdir")
 		file, err := os.Open(gitdir)
@@ -452,7 +458,7 @@ func unreadableRegistrations(common string) error {
 		if _, e := os.Lstat(filepath.Join(admin, "gitlocal-workspace.json")); e == nil {
 			return fmt.Errorf("%w: worktree registration %s holds a git-local workspace, but its gitdir file can't be read (%v), so Git doesn't list the worktree; fix the file's permissions", storage.ErrConflict, gitdir, err)
 		} else if !os.IsNotExist(e) {
-			return e
+			return fmt.Errorf("worktree registration %s: gitdir file can't be read (%v), and whether it holds a git-local workspace can't be checked: %w", admin, err, e)
 		}
 	}
 	return nil

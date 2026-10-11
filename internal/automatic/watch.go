@@ -36,6 +36,7 @@ func Watch(ctx context.Context, r *gitexec.Runner, cwd string, interval time.Dur
 func watchTicks(ctx context.Context, r *gitexec.Runner, cwd string, ticks <-chan time.Time, onSnapshot func(history.Result) error, onConflict func(error)) error {
 	conflicts := 0
 	capture := func() error {
+		r.WalkStoresAgain()
 		result, err := history.Commit(ctx, r, cwd, "Automatic local snapshot on timer")
 		if errors.Is(err, storage.ErrConflict) && ctx.Err() == nil {
 			if reportErr := reportSnapshot(result, nil, onSnapshot); reportErr != nil {

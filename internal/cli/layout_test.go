@@ -259,6 +259,35 @@ func TestUnreadableWorktreeRegistrationStopsInit(t *testing.T) {
 	}
 }
 
+// TestStrayFileInWorktreesDirectoryIsIgnored: Git ignores files such as
+// .DS_Store under .git/worktrees, and so must init.
+func TestStrayFileInWorktreesDirectoryIsIgnored(t *testing.T) {
+	repo := testutil.New(t)
+	repo.Commit()
+	home := filepath.Join(repo.Root, "fixture-home")
+	if err := os.MkdirAll(home, 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", home)
+	common := strings.TrimSpace(string(repo.Git("rev-parse", "--git-common-dir")))
+	if !filepath.IsAbs(common) {
+		common = filepath.Join(repo.Root, common)
+	}
+	worktrees := filepath.Join(common, "worktrees")
+	if err := os.MkdirAll(worktrees, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(worktrees, ".DS_Store"), []byte("x"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	successful(t, repo.Root, "init")
+	if _, err := os.Stat(filepath.Join(common, "gitlocal", "repository.json")); err != nil {
+		t.Fatalf("init beside a stray file in .git/worktrees: %v", err)
+	}
+}
+
 // TestBareRepositoryWorktreesRetire: Git lists a bare repository first among
 // its worktrees, though it isn't one. Removed linked worktrees must still be
 // retired, and --from main must say there is no main checkout.

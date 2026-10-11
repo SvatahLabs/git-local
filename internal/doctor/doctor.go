@@ -189,7 +189,7 @@ func Run(ctx context.Context, r *gitexec.Runner, cwd string) (Report, error) {
 			result.add("encryption", "error", e.Error(), "Inspect the sensitive-file policy.")
 		} else {
 			for _, problem := range paths {
-				result.add("encryption", "error", problem+"; files it should cover were saved unencrypted, and snapshots that would save them are refused until the policy is corrected", "Run "+correction+" to encrypt them in every snapshot (add any other sensitive path you want). Keep the private store and its backups private until then.")
+				result.add("encryption", "error", problem+"; files it should cover were saved unencrypted, and snapshots that would save them are refused until the policy is corrected", "From the checkout root, run "+correction+" to encrypt them in every snapshot (add any other sensitive path you want). A path you untracked must be tracked again first. Keep the private store and its backups private until then.")
 			}
 		}
 		storeErr := gitexec.ValidateStore(d.Workspace.Store)

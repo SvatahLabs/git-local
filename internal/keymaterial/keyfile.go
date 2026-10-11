@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -47,9 +48,15 @@ func keyPath(path, repoRoot string, existing bool) (string, error) {
 // Inside reports whether path is root or lies below it. It compares
 // directories by file identity rather than spelling, so on a case-insensitive
 // or normalizing volume a differently spelled path into root still counts.
-// path itself need not exist.
+// path itself need not exist, but its parent must: callers pass a path whose
+// parent is already resolved, so nothing can lie below a root that doesn't
+// exist (a registered worktree deleted without git worktree prune, or on an
+// unmounted volume), and such a root doesn't contain it.
 func Inside(root, path string) (bool, error) {
 	rootInfo, err := os.Stat(root)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
 	if err != nil {
 		return false, err
 	}

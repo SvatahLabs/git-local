@@ -166,7 +166,7 @@ func Decrypt(dst io.Writer, src io.Reader, master []byte, ref string) error {
 		return fmt.Errorf("truncated backup header: %w", err)
 	}
 	if string(bound) != ref {
-		return fmt.Errorf("backup archive was pushed as %s, not %s; the backup remote may have swapped refs", bound, ref)
+		return fmt.Errorf("backup archive names ref %q (unverified), not %s; the backup remote may have swapped refs", bound, ref)
 	}
 	header, err := archiveHeader(salt, ref)
 	if err != nil {

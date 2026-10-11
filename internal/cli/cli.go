@@ -861,9 +861,11 @@ func New(out, errOut io.Writer) *cobra.Command {
 				transactions := []map[string]any{}
 				for _, p := range pending {
 					next, state := p.Next()
-					// Scripts pass transactionIds to recover, so only IDs it
-					// accepts are listed there; an unknown or unreadable entry
-					// appears only in transactions.
+					// Scripts pass transactionIds to recover, so only valid
+					// transaction IDs are listed there; an unknown or
+					// unreadable entry appears only in transactions. Each
+					// entry's next command says how to resolve it (an
+					// encryption journal through encrypt recover).
 					if storage.ValidUUID(p.ID) {
 						ids = append(ids, p.ID)
 					}
@@ -1448,7 +1450,10 @@ func resaveSteps(name, path string) string {
 }
 
 func Execute(ctx context.Context, args []string, out, errOut io.Writer) int {
-	jsonMode := wantsJSON(args)
+	completion := len(args) > 0 && (args[0] == cobra.ShellCompRequestCmd || args[0] == cobra.ShellCompNoDescRequestCmd)
+	// A completion request carries the command line being completed, which
+	// may include --json; the shell still needs plain completion lines.
+	jsonMode := !completion && wantsJSON(args)
 	commandOut, commandErr, capturedOut, capturedErr := newJSONBuffers(jsonMode, out, errOut)
 	state := &jsonState{}
 	if ctx.Err() != nil {
@@ -1469,10 +1474,19 @@ func Execute(ctx context.Context, args []string, out, errOut io.Writer) int {
 	// Cobra adds its hidden completion request commands only while executing,
 	// so they skip the unknown-command check. A help topic must name a command.
 	var findErr error
+	topic := args
+	for len(topic) > 0 && (topic[0] == "--json" || strings.HasPrefix(topic[0], "--json=")) {
+		topic = topic[1:]
+	}
 	switch {
-	case len(args) > 0 && (args[0] == cobra.ShellCompRequestCmd || args[0] == cobra.ShellCompNoDescRequestCmd):
-	case len(args) > 0 && args[0] == "help":
-		_, _, findErr = c.Find(args[1:])
+	case completion:
+	case len(topic) > 0 && topic[0] == "help":
+		var found *cobra.Command
+		var rest []string
+		found, rest, findErr = c.Find(topic[1:])
+		if findErr == nil && len(rest) > 0 && found.HasSubCommands() {
+			findErr = unknownCommand(found, rest[0])
+		}
 	default:
 		_, _, findErr = c.Find(args)
 	}

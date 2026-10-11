@@ -1,11 +1,13 @@
 package guard
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"strings"
 	"testing"
 
+	"gitlocal/internal/gitexec"
 	"gitlocal/internal/testutil"
 )
 
@@ -86,4 +88,28 @@ func TestScansUseFixedGitProcessesForLargeHistories(t *testing.T) {
 		t.Fatalf("pre-push of %d refs ran %d Git processes", commits, spent)
 	}
 	t.Logf("pre-push: %d Git processes", spent)
+}
+
+// A force-updated annotated tag's old remote value is the tag object, which
+// peels to a commit with another ID; it must still count as known, so its
+// history isn't scanned again.
+func TestKnownCommitsRecognizesAnnotatedTags(t *testing.T) {
+	repo := testutil.New(t)
+	repo.Commit()
+	repo.Git("tag", "-a", "-m", "release", "v1")
+	tag := strings.TrimSpace(string(repo.Git("rev-parse", "v1")))
+	commit := strings.TrimSpace(string(repo.Git("rev-parse", "HEAD")))
+	missing := strings.Repeat("1", len(commit))
+	r, err := gitexec.New(repo.RunnerEnv())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	known, err := knownCommits(context.Background(), r, repo.Root, []string{tag, missing, commit})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !known[tag] || !known[commit] || known[missing] || len(known) != 2 {
+		t.Fatalf("known commits: %v (tag %s, commit %s)", known, tag, commit)
+	}
 }

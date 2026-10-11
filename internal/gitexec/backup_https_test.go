@@ -132,3 +132,62 @@ func TestBackupArgsSeparateTheURL(t *testing.T) {
 		}
 	}
 }
+
+// A backup host that redirects must not move the push to another host (which
+// the backup destination checks never saw), with the credentials Git would
+// fetch for that host.
+func TestBackupTransportRefusesHTTPSRedirects(t *testing.T) {
+	repo := testutil.New(t)
+	url, remote, ca := httpsBackupRemote(t, repo)
+	home := ""
+	for _, entry := range repo.RunnerEnv() {
+		if value, ok := strings.CutPrefix(entry, "HOME="); ok {
+			home = value
+		}
+	}
+	if home == "" || !strings.HasPrefix(home, repo.Root+string(filepath.Separator)) {
+		t.Fatalf("test HOME isn't isolated: %q", home)
+	}
+	helper := `"!f() { test \"$1\" = get && printf 'username=backup-user\\npassword=backup-secret\\n'; }; f"`
+	if err := os.WriteFile(filepath.Join(home, ".gitconfig"), []byte("[credential]\n\thelper =\n\thelper = "+helper+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	target := strings.TrimSuffix(url, "/backup.git")
+	redirector := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target+r.URL.RequestURI(), http.StatusMovedPermanently)
+	}))
+	t.Cleanup(redirector.Close)
+	r, err := New(repo.RunnerEnv())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	// Both servers use httptest's certificate.
+	r.backupConfig = []string{"http.sslCAInfo=" + ca}
+	ctx := context.Background()
+	store := filepath.Join(t.TempDir(), "stage.git")
+	if err := r.InitBare(ctx, store); err != nil {
+		t.Fatal(err)
+	}
+	tree, err := r.History(ctx, store, strings.NewReader(""), "mktree", "-z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	commit, err := r.History(ctx, store, strings.NewReader("backup\n"), "commit-tree", strings.TrimSpace(string(tree)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := "refs/gitlocal/backups/00000000-0000-4000-8000-000000000000/20260101T000000Z-00000000-0000-4000-8000-000000000001"
+	if err := r.BackupPush(ctx, store, url, strings.TrimSpace(string(commit)), ref); err != nil {
+		t.Fatalf("direct HTTPS push: %v", err)
+	}
+	redirected := "refs/gitlocal/backups/00000000-0000-4000-8000-000000000000/20260101T000000Z-00000000-0000-4000-8000-000000000002"
+	if err := r.BackupPush(ctx, store, redirector.URL+"/backup.git", strings.TrimSpace(string(commit)), redirected); err == nil {
+		t.Fatal("HTTPS push followed a redirect to another host")
+	}
+	cmd := exec.Command(repo.GitPath, "--git-dir="+remote, "rev-parse", "--verify", "--quiet", redirected)
+	cmd.Env = repo.RunnerEnv()
+	if out, err := cmd.Output(); err == nil {
+		t.Fatalf("redirected push landed on the other host: %s", out)
+	}
+}

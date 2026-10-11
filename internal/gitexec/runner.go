@@ -534,7 +534,9 @@ func backupArgs(verb, remoteURL, refspec string) []string {
 // Git's order, so Git applies its own URL matching to them. Repository config
 // stays ignored, and terminal and askpass prompts stay disabled.
 func (r *Runner) backupTransport(ctx context.Context, store, remoteURL string) ([]string, error) {
-	prefix := []string{"--git-dir=" + store, "-c", "protocol.ssh.allow=always", "-c", "protocol.https.allow=always"}
+	// A redirect could send the push, with the user's credentials for the new
+	// host, to a host the backup destination checks never saw (origin).
+	prefix := []string{"--git-dir=" + store, "-c", "protocol.ssh.allow=always", "-c", "protocol.https.allow=always", "-c", "http.followRedirects=false"}
 	for _, setting := range r.backupConfig {
 		prefix = append(prefix, "-c", setting)
 	}

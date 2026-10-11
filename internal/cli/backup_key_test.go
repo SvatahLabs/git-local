@@ -35,3 +35,21 @@ func TestBackupKeyOutsideEveryCheckoutFromLinkedWorktree(t *testing.T) {
 		t.Fatalf("backup key outside the checkouts: %v", err)
 	}
 }
+
+// A linked worktree deleted without git worktree prune stays registered. No
+// key can lie below it, so backup and encrypt keygen still work.
+func TestKeygenIgnoresDeletedWorktree(t *testing.T) {
+	repo := layoutRepo(t)
+	gone := filepath.Join(t.TempDir(), "gone")
+	repo.Git("worktree", "add", "-q", gone)
+	if err := os.RemoveAll(gone); err != nil {
+		t.Fatal(err)
+	}
+	for _, command := range []string{"backup", "encrypt"} {
+		key := filepath.Join(t.TempDir(), command+".key")
+		successful(t, repo.Root, command, "keygen", key)
+		if info, err := os.Stat(key); err != nil || info.Size() != 32 {
+			t.Fatalf("%s keygen with a deleted worktree: %v", command, err)
+		}
+	}
+}

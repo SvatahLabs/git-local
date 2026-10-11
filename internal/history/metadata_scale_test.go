@@ -104,3 +104,25 @@ func TestTenThousandEncryptedDigestsRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+// A changed-path list too large for the reader is refused when written, so
+// no snapshot is published that later commands can't read. Not parallel: it
+// lowers maxListBlob.
+func TestOversizedChangedPathListIsRefusedWhenWritten(t *testing.T) {
+	saved := maxListBlob
+	maxListBlob = 3 << 19 // 1.5 MiB, above the 1 MiB inline limit
+	t.Cleanup(func() { maxListBlob = saved })
+	ctx := context.Background()
+	_, g, w := fixture(t)
+	empty, err := g.History(ctx, w.Store, strings.NewReader(""), "mktree", "-z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var paths []string
+	for i := 0; i < 16000; i++ {
+		paths = append(paths, fmt.Sprintf("bulk/%s%05d.txt", strings.Repeat("long-file-name-", 8), i))
+	}
+	if _, err := writeWrapper(ctx, g, w.Store, strings.TrimSpace(string(empty)), Metadata{ChangedPaths: paths}); err == nil || !strings.Contains(err.Error(), "size limit") {
+		t.Fatalf("changed-path list over the read limit: %v", err)
+	}
+}

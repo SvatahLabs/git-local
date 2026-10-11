@@ -42,13 +42,14 @@ func Ref(workspaceID string) string { return "refs/gitlocal/workspaces/" + works
 const (
 	// maxInlineMetadata is the metadata.json limit; every earlier release
 	// reads snapshots within it.
-	maxInlineMetadata = 1 << 20
-	// maxListBlob bounds a changed-path list or digest map stored in its
-	// own wrapper blob.
-	maxListBlob          = 256 << 20
+	maxInlineMetadata    = 1 << 20
 	changedPathsBlob     = "changed-paths"
 	encryptedDigestsBlob = "encrypted-digests.json"
 )
+
+// maxListBlob bounds a changed-path list or digest map stored in its own
+// wrapper blob, when written and when read.
+var maxListBlob = 256 << 20
 
 // writeWrapper stores a snapshot's files tree and metadata. Metadata that
 // fits maxInlineMetadata stays in metadata.json, as earlier releases wrote it.
@@ -68,6 +69,9 @@ func writeWrapper(ctx context.Context, r historyGit, store, filesTree string, m 
 				list.WriteString(path)
 				list.WriteByte(0)
 			}
+			if list.Len() > maxListBlob {
+				return "", errors.New("snapshot changed-path list exceeds size limit")
+			}
 			id, err := hash(ctx, r, store, &list)
 			if err != nil {
 				return "", err
@@ -78,6 +82,9 @@ func writeWrapper(ctx context.Context, r historyGit, store, filesTree string, m 
 			digests, err := json.Marshal(m.EncryptedDigests)
 			if err != nil {
 				return "", err
+			}
+			if len(digests)+1 > maxListBlob {
+				return "", errors.New("snapshot encrypted digests exceed size limit")
 			}
 			id, err := hash(ctx, r, store, bytes.NewReader(append(digests, '\n')))
 			if err != nil {
@@ -101,7 +108,9 @@ func writeWrapper(ctx context.Context, r historyGit, store, filesTree string, m 
 	return tree(ctx, r, store, append(entries, treeEntry{"100644", "blob", metadataID, "metadata.json"}))
 }
 
-// readWrapperBlob reads a wrapper blob of at most limit bytes.
+// readWrapperBlob reads a wrapper blob of at most limit bytes. It streams the
+// blob rather than using the bounded output of a history command, whose cap is
+// smaller than maxListBlob.
 func readWrapperBlob(ctx context.Context, r *gitexec.Runner, store, id string, limit int64) ([]byte, error) {
 	size, err := r.History(ctx, store, nil, "cat-file", "-s", id)
 	if err != nil {
@@ -111,7 +120,12 @@ func readWrapperBlob(ctx context.Context, r *gitexec.Runner, store, id string, l
 	if err != nil || n < 0 || n > limit {
 		return nil, errors.New("snapshot metadata exceeds size limit")
 	}
-	return r.History(ctx, store, nil, "cat-file", "blob", id)
+	var out bytes.Buffer
+	out.Grow(int(n))
+	if err := r.HistoryBlobTo(ctx, store, id, &out); err != nil {
+		return nil, err
+	}
+	return out.Bytes(), nil
 }
 func validDigest(s string) bool {
 	if len(s) != 64 {
@@ -268,7 +282,7 @@ func readPrevious(ctx context.Context, r *gitexec.Runner, store, id, repo, works
 	}
 	// A list kept in its own blob must not also be inline.
 	if changed != "" {
-		list, err := readWrapperBlob(ctx, r, store, changed, maxListBlob)
+		list, err := readWrapperBlob(ctx, r, store, changed, int64(maxListBlob))
 		if err != nil {
 			return "", m, err
 		}
@@ -278,7 +292,7 @@ func readPrevious(ctx context.Context, r *gitexec.Runner, store, id, repo, works
 		m.ChangedPaths = strings.Split(string(list[:len(list)-1]), "\x00")
 	}
 	if digests != "" {
-		data, err := readWrapperBlob(ctx, r, store, digests, maxListBlob)
+		data, err := readWrapperBlob(ctx, r, store, digests, int64(maxListBlob))
 		if err != nil {
 			return "", m, err
 		}

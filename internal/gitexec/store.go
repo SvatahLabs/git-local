@@ -80,6 +80,15 @@ func (r *Runner) checkStore(path string) error {
 	return validateStoreSettings(dir)
 }
 
+// WalkStoresAgain makes the next command on each store walk it again. A
+// long-running command (auto watch) calls it for each unit of work, so a
+// store changed after it started is still checked in full.
+func (r *Runner) WalkStoresAgain() {
+	r.mu.Lock()
+	r.walked = nil
+	r.mu.Unlock()
+}
+
 func validateStoreSettings(dir *storage.Dir) error {
 	config, err := dir.ReadFile("config", 64<<10)
 	if err != nil {

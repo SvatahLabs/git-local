@@ -106,15 +106,33 @@ func managed(data []byte, name string) bool {
 }
 
 // posixShell reports whether a shebang line runs sh, bash, dash, ksh, zsh,
-// ash or mksh, directly, through busybox, or through env (skipping its
-// options, -u's argument and NAME=value assignments).
+// ash or mksh, directly, through busybox, or through env, on this system.
 func posixShell(shebang string) bool {
+	return posixShellOn(shebang, runtime.GOOS != "linux")
+}
+
+// posixShellOn is posixShell for a kernel that splits shebang arguments at
+// whitespace (macOS and the BSDs) or one that passes everything after the
+// interpreter as a single argument (Linux). There, env sees its options,
+// NAME=value assignments and the shell as one word unless -S splits them, and
+// busybox gets one applet name.
+func posixShellOn(shebang string, splits bool) bool {
 	fields := strings.Fields(strings.TrimPrefix(shebang, "#!"))
 	if len(fields) == 0 {
 		return false
 	}
 	interpreter, args := path.Base(fields[0]), fields[1:]
 	if interpreter == "env" {
+		if len(args) > 0 && strings.HasPrefix(args[0], "-S") {
+			if args[0] == "-S" {
+				args = args[1:]
+			} else {
+				args[0] = strings.TrimPrefix(args[0], "-S")
+			}
+		} else if !splits && len(args) != 1 {
+			return false
+		}
+		// Skip env's options, -u's argument and NAME=value assignments.
 		for len(args) > 0 && (strings.HasPrefix(args[0], "-") || strings.Contains(args[0], "=")) {
 			if args[0] == "-u" && len(args) > 1 {
 				args = args[1:]
@@ -127,7 +145,7 @@ func posixShell(shebang string) bool {
 		interpreter, args = path.Base(args[0]), args[1:]
 	}
 	if interpreter == "busybox" {
-		if len(args) == 0 {
+		if len(args) == 0 || !splits && len(args) != 1 {
 			return false
 		}
 		interpreter = args[0]

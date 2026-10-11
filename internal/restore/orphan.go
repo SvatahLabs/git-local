@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"gitlocal/internal/configtx"
 	"gitlocal/internal/gitexec"
@@ -81,6 +82,10 @@ func OrphanRefs(ctx context.Context, r *gitexec.Runner, w workspace.Context) ([]
 		for _, q := range quarantines {
 			if _, err := meta.Lstat(filepath.Join(configtx.QuarantineDir, q.Name(), "journals", filepath.Base(completedPath(id)))); err == nil {
 				orphan.Quarantine = filepath.Join(w.Common, "gitlocal", configtx.QuarantineDir, q.Name())
+			} else if !errors.Is(err, os.ErrNotExist) && !errors.Is(err, syscall.ENOTDIR) {
+				// Unknown: the ref may keep the only copy of a quarantined
+				// restore's previous versions, so it isn't listed as plain.
+				return nil, err
 			}
 		}
 		orphans = append(orphans, orphan)

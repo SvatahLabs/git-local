@@ -412,3 +412,33 @@ func TestPolicyCorrectionAbandonBeforePublicationKeepsOldPolicy(t *testing.T) {
 		t.Fatalf("correction after abandon: %v", err)
 	}
 }
+
+// Untracking the mis-covered directory lets other snapshots continue, as the
+// refusal says; the correction then names the way forward (track it again)
+// and succeeds once it is selected.
+func TestPolicyCorrectionAfterUntrackNeedsTrackingAgain(t *testing.T) {
+	t.Parallel()
+	f := legacyPolicyFixture(t)
+	ctx := context.Background()
+	if _, err := history.Commit(ctx, f.r, f.root, "legacy"); err == nil || !strings.Contains(err.Error(), "tracked again") {
+		t.Fatalf("snapshot under the legacy policy: %v", err)
+	}
+	if _, err := configtx.Change(ctx, f.r, f.root, false, "config/secrets"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := history.Commit(ctx, f.r, f.root, "without config/secrets"); err != nil {
+		t.Fatalf("snapshot after untracking: %v", err)
+	}
+	if _, err := Migrate(ctx, f.r, f.root, f.key, []string{".env.local", "config/secrets"}); !errors.Is(err, storage.ErrConflict) || !strings.Contains(err.Error(), "git local track") {
+		t.Fatalf("correction of an untracked path: %v", err)
+	}
+	if _, err := configtx.Change(ctx, f.r, f.root, true, "config/secrets"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Migrate(ctx, f.r, f.root, f.key, []string{".env.local", "config/secrets"}); err != nil {
+		t.Fatalf("correction after tracking again: %v", err)
+	}
+	if got := f.policy(t); len(got.Sensitive) != 2 || got.Sensitive[1].Path != "config/secrets" || got.Sensitive[1].Kind != "directory" {
+		t.Fatalf("corrected policy: %+v", got.Sensitive)
+	}
+}

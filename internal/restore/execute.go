@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"runtime"
 	"strings"
+	"time"
 
 	"gitlocal/internal/configtx"
 	"gitlocal/internal/gitexec"
@@ -359,6 +360,7 @@ func (g *guard) inspect(ctx context.Context, path string, image Fingerprint, wor
 	if cached, ok := g.images[key]; ok && sameStat(cached.info, info) {
 		return cached.actual, nil
 	}
+	hashed := time.Now()
 	var actual Fingerprint
 	if image.KeyedDigest != "" {
 		protected, e := inspectSensitiveFile(g.files, path, g.key, identity)
@@ -370,8 +372,31 @@ func (g *guard) inspect(ctx context.Context, path string, image Fingerprint, wor
 	if err != nil {
 		return Fingerprint{}, err
 	}
-	g.images[key] = cachedImage{info, actual}
+	if info == nil || !racy(info, hashed) {
+		g.images[key] = cachedImage{info, actual}
+	}
 	return actual, nil
+}
+
+// racy reports whether a file's timestamps are too close to when it was hashed
+// for a later Lstat to show a change, as Git's racy-clean rule: a same-size
+// rewrite within the same timestamp tick would leave every field equal. A
+// timestamp with no sub-second part may come from a filesystem with up to
+// two-second granularity (HFS+, FAT).
+func racy(info fs.FileInfo, hashed time.Time) bool {
+	for _, t := range []time.Time{info.ModTime(), changeTime(info)} {
+		if t.IsZero() {
+			continue
+		}
+		limit := hashed
+		if t.Nanosecond() == 0 {
+			limit = hashed.Add(-2 * time.Second)
+		}
+		if !t.Before(limit) {
+			return true
+		}
+	}
+	return false
 }
 
 // forget drops cached images of path, so the next check hashes it again.
@@ -383,11 +408,15 @@ func (g *guard) forget(path string) {
 	}
 }
 
+// sameIdentity is sameFile; tests replace it to model a filesystem whose
+// change time is too coarse to show a rewrite.
+var sameIdentity = sameFile
+
 func sameStat(a, b fs.FileInfo) bool {
 	if a == nil || b == nil {
 		return a == nil && b == nil
 	}
-	return sameFile(a, b) && a.Size() == b.Size() && a.ModTime().Equal(b.ModTime()) && a.Mode() == b.Mode()
+	return sameIdentity(a, b) && a.Size() == b.Size() && a.ModTime().Equal(b.ModTime()) && a.Mode() == b.Mode()
 }
 
 func (g *guard) matchesImage(ctx context.Context, path string, image Fingerprint, workspaceID, identityPath string) (bool, error) {
@@ -722,6 +751,11 @@ func install(ctx context.Context, r *gitexec.Runner, w workspace.Context, files 
 	if err := point(ctx, f, fmt.Sprintf("before-install:%d", i)); err != nil {
 		return err
 	}
+	// The destination and stage are hashed again, not taken from the cache,
+	// immediately before the rename: staging may have taken long enough for
+	// another program to rewrite the destination.
+	g.forget(path)
+	g.forget(stage)
 	if err := g.recognize(ctx); err != nil {
 		return err
 	}

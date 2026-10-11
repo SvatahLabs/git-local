@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -73,7 +74,11 @@ func TestInstallKeepsHookModeAndRefusesOtherInterpreters(t *testing.T) {
 		}
 	}
 
-	for _, shebang := range []string{"#!/bin/sh", "#!/bin/bash -e", "#!/usr/bin/env bash", "#!/usr/bin/env -S bash -e", "#!/bin/dash", "#!/bin/ksh", "#!/bin/zsh", "#!/bin/ash", "#!/bin/mksh", "#!/bin/busybox sh", "#!/usr/bin/env -u NAME sh", "#!/usr/bin/env --unset=NAME sh", "#!/usr/bin/env VAR=x sh", "#!/usr/bin/env -i PATH=/bin:/usr/bin sh"} {
+	shells := []string{"#!/bin/sh", "#!/bin/bash -e", "#!/usr/bin/env bash", "#!/usr/bin/env -S bash -e", "#!/bin/dash", "#!/bin/ksh", "#!/bin/zsh", "#!/bin/ash", "#!/bin/mksh", "#!/bin/busybox sh", "#!/usr/bin/env -S -u NAME sh"}
+	if runtime.GOOS != "linux" {
+		shells = append(shells, "#!/usr/bin/env -u NAME sh", "#!/usr/bin/env --unset=NAME sh", "#!/usr/bin/env VAR=x sh", "#!/usr/bin/env -i PATH=/bin:/usr/bin sh")
+	}
+	for _, shebang := range shells {
 		shell := []byte(shebang + "\necho shell hook\n")
 		if err := os.WriteFile(preCommit, shell, 0700); err != nil {
 			t.Fatal(err)

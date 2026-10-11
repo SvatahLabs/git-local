@@ -112,7 +112,7 @@ func TestRestoreRefusesSwappedRefAndForeignArchive(t *testing.T) {
 			os.RemoveAll(stage)
 			t.Fatalf("%s served as %s was accepted: %q %v", name, newer, stage, err)
 		}
-		if !strings.Contains(err.Error(), "pushed as") {
+		if !strings.Contains(err.Error(), "(unverified)") {
 			t.Fatalf("%s refusal: %v", name, err)
 		}
 	}
