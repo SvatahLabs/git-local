@@ -1453,7 +1453,16 @@ func Execute(ctx context.Context, args []string, out, errOut io.Writer) int {
 	c.InitDefaultHelpCmd()
 	c.InitDefaultCompletionCmd()
 	enforceUsage(c)
-	_, _, findErr := c.Find(args)
+	// Cobra adds its hidden completion request commands only while executing,
+	// so they skip the unknown-command check. A help topic must name a command.
+	var findErr error
+	switch {
+	case len(args) > 0 && (args[0] == cobra.ShellCompRequestCmd || args[0] == cobra.ShellCompNoDescRequestCmd):
+	case len(args) > 0 && args[0] == "help":
+		_, _, findErr = c.Find(args[1:])
+	default:
+		_, _, findErr = c.Find(args)
+	}
 	if findErr != nil {
 		if jsonMode {
 			if err := writeJSON(out, "git local", "usage", findErr, state, "", ""); err != nil {
