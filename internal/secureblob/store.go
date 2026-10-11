@@ -10,7 +10,9 @@ import (
 const PolicyFile = "gitlocal/encryption.json"
 
 // ReadLocked loads the common policy from an anchored Git directory. The
-// caller must hold the repository's common lock while using the result.
+// caller must hold the repository's common lock while using the result. A
+// policy whose key is unavailable still exists: it returns true with an error
+// matching ErrKeyUnavailable.
 func ReadLocked(common *storage.Dir, repoRoot, commonGitDir string) (Policy, bool, error) {
 	var policy Policy
 	if err := common.ReadJSON(PolicyFile, &policy); err != nil {
@@ -21,7 +23,7 @@ func ReadLocked(common *storage.Dir, repoRoot, commonGitDir string) (Policy, boo
 	}
 	canonical, err := Canonical(policy, repoRoot, commonGitDir)
 	if err != nil {
-		return Policy{}, false, err
+		return Policy{}, errors.Is(err, ErrKeyUnavailable), err
 	}
 	return canonical, true, nil
 }

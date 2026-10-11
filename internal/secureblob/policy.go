@@ -3,6 +3,7 @@ package secureblob
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -31,9 +32,30 @@ type Policy struct {
 func resolvedPath(path string) (string, error) {
 	parent, err := filepath.EvalSymlinks(filepath.Dir(path))
 	if err != nil {
-		return "", err
+		return "", keyUnavailable(path, err)
 	}
 	return filepath.Join(parent, filepath.Base(path)), nil
+}
+
+// ErrKeyUnavailable marks a key file, or its directory, that doesn't exist:
+// for example on a drive that isn't connected, or a key that was moved.
+var ErrKeyUnavailable = errors.New("sensitive-file key is unavailable")
+
+type keyUnavailableError struct {
+	path string
+	err  error
+}
+
+func (e keyUnavailableError) Error() string {
+	return fmt.Sprintf("sensitive-file key %s doesn't exist; reconnect the drive or directory that holds it, or if the key moved, run git local encrypt rebind-key <new-absolute-path>", e.path)
+}
+func (e keyUnavailableError) Unwrap() []error { return []error{ErrKeyUnavailable, e.err} }
+
+func keyUnavailable(path string, err error) error {
+	if errors.Is(err, fs.ErrNotExist) {
+		return keyUnavailableError{path: path, err: err}
+	}
+	return err
 }
 
 func validFingerprint(value string) bool {
@@ -138,7 +160,7 @@ func LoadKey(policy Policy, repoRoot, commonGitDir string) ([]byte, error) {
 	}
 	key, err := keymaterial.Load(canonical.KeyFile, repoRoot)
 	if err != nil {
-		return nil, err
+		return nil, keyUnavailable(canonical.KeyFile, err)
 	}
 	fingerprint, err := keymaterial.Fingerprint(key)
 	if err != nil {
@@ -157,7 +179,7 @@ func PolicyForKey(keyFile, repoRoot, commonGitDir string, rules []PathRule) (Pol
 	}
 	key, err := keymaterial.Load(keyFile, repoRoot)
 	if err != nil {
-		return Policy{}, err
+		return Policy{}, keyUnavailable(keyFile, err)
 	}
 	fingerprint, err := keymaterial.Fingerprint(key)
 	if err != nil {

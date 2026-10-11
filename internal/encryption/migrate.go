@@ -714,15 +714,20 @@ func RecoverMigration(ctx context.Context, r *gitexec.Runner, cwd, id, direction
 	if err != nil {
 		return err
 	}
-	policy, exists, err := secureblob.ReadLocked(common, w.Root, w.Common)
-	if err != nil {
-		return err
+	// Rolling back before publication doesn't need the key, so its directory
+	// may be gone (an ejected drive); everything else does.
+	policy, exists, keyErr := secureblob.ReadLocked(common, w.Root, w.Common)
+	if keyErr != nil && !errors.Is(keyErr, secureblob.ErrKeyUnavailable) {
+		return keyErr
 	}
 	published := false
 	if exists {
 		if published, err = secureblob.Published(common, j.Policy, j.OldPolicy); err != nil {
 			return err
 		}
+	}
+	if keyErr != nil && (published || direction == "resume") {
+		return keyErr
 	}
 	// After publication the plaintext store only awaits deletion. A crash or
 	// I/O error partway through removing it can leave it without config or

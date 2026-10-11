@@ -117,3 +117,39 @@ func TestRebindKeyAfterOldKeyDirectoryIsGone(t *testing.T) {
 		t.Fatalf("show after rebinding: %q", got)
 	}
 }
+
+// GL-108: commands that need the key name the relocation command, not a raw
+// path error, when the key's directory is gone.
+func TestMissingKeyDirectoryNamesRebindKey(t *testing.T) {
+	repo := layoutRepo(t)
+	if err := os.WriteFile(filepath.Join(repo.Root, ".env.local"), []byte("TOKEN=private\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	successful(t, repo.Root, "track", ".env.local")
+	drive := filepath.Join(t.TempDir(), "usb")
+	if err := os.MkdirAll(filepath.Join(drive, "keys"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	keyPath := filepath.Join(drive, "keys", "sensitive.key")
+	successful(t, repo.Root, "encrypt", "keygen", keyPath)
+	successful(t, repo.Root, "encrypt", "enable", "--key-file", keyPath, "--", ".env.local")
+	successful(t, repo.Root, "commit", "-m", "encrypted")
+	if err := os.Rename(drive, drive+"-ejected"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo.Root, ".env.local"), []byte("TOKEN=changed\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"commit", "-m", "needs the key"}, {"show", "latest:.env.local"}} {
+		if code, _, diagnostic := callCLI(t, repo.Root, args...); code == 0 || !strings.Contains(diagnostic, "git local encrypt rebind-key") || strings.Contains(diagnostic, "lstat") {
+			t.Fatalf("%v without the key's directory: exit %d %s", args, code, diagnostic)
+		}
+	}
+	if err := os.Rename(drive+"-ejected", drive); err != nil {
+		t.Fatal(err)
+	}
+	successful(t, repo.Root, "commit", "-m", "key back")
+	if got := successful(t, repo.Root, "show", "latest:.env.local"); got != "TOKEN=changed\n" {
+		t.Fatalf("show with the key back: %q", got)
+	}
+}

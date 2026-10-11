@@ -157,7 +157,10 @@ current directory. Restoring over unsaved
 changes to such a file is refused, because the recovery copy restore keeps would
 be plaintext; move the file aside first.
 If the key is moved, `encrypt rebind-key` accepts its new absolute path only
-when the replacement bytes match the stored key fingerprint.
+when the replacement bytes match the stored key fingerprint. While the key or
+its directory is missing (for example on a disconnected drive), commands that
+need it say so and name `encrypt rebind-key`; an encryption migration
+interrupted before its policy was published can still be rolled back.
 
 For encrypted remote backup, add a named SSH or HTTPS Git remote on a host
 different from `origin`, generate and preserve a key outside the checkout, and
