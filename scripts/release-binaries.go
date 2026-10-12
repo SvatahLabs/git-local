@@ -46,58 +46,69 @@ type manifest struct {
 }
 
 func main() {
-	output := flag.String("out", "", "new artifact directory (default dist/binaries/v<VERSION>)")
-	hostOnly := flag.Bool("host-only", false, "build and smoke-test only the current OS and architecture")
-	smokeExisting := flag.String("smoke-existing", "", "smoke-test a previously built native artifact without a Go toolchain")
-	goBinary := flag.String("go", "go", "Go toolchain executable")
-	flag.Parse()
-	if *smokeExisting != "" {
-		if flag.NArg() != 0 || *output != "" || *hostOnly {
-			fail(errors.New("-smoke-existing cannot be combined with build options"))
-		}
-		if err := smokeExistingArtifact(*smokeExisting); err != nil {
-			fail(err)
-		}
-		fmt.Printf("Native artifact smoke test passed: %s\n", *smokeExisting)
-		return
-	}
-	if flag.NArg() != 0 {
-		fail(errors.New("usage: go run ./scripts/release-binaries.go [-host-only] [-out new-directory]"))
-	}
 	root, err := os.Getwd()
+	if err == nil {
+		err = run(root, os.Args[1:])
+	}
 	if err != nil {
 		fail(err)
 	}
+}
+
+// run builds the release from the module root. It returns errors instead of
+// exiting, so the staging directory is always removed.
+func run(root string, args []string) error {
+	flags := flag.NewFlagSet("release-binaries", flag.ContinueOnError)
+	output := flags.String("out", "", "new artifact directory (default dist/binaries/v<VERSION>)")
+	hostOnly := flags.Bool("host-only", false, "build and smoke-test only the current OS and architecture")
+	smokeExisting := flags.String("smoke-existing", "", "smoke-test a previously built native artifact without a Go toolchain")
+	goBinary := flags.String("go", "go", "Go toolchain executable")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if *smokeExisting != "" {
+		if flags.NArg() != 0 || *output != "" || *hostOnly {
+			return errors.New("-smoke-existing cannot be combined with build options")
+		}
+		if err := smokeExistingArtifact(*smokeExisting); err != nil {
+			return err
+		}
+		fmt.Printf("Native artifact smoke test passed: %s\n", *smokeExisting)
+		return nil
+	}
+	if flags.NArg() != 0 {
+		return errors.New("usage: go run ./scripts/release-binaries.go [-host-only] [-out new-directory]")
+	}
 	if _, err := os.Stat(filepath.Join(root, "go.mod")); err != nil {
-		fail(errors.New("run the release builder from the module root"))
+		return errors.New("run the release builder from the module root")
 	}
 	version, err := readVersion(root)
 	if err != nil {
-		fail(err)
+		return err
 	}
 	if *output == "" {
 		*output = filepath.Join(root, "dist", "binaries", "v"+version)
 	}
 	final, err := filepath.Abs(*output)
 	if err != nil {
-		fail(err)
+		return err
 	}
 	if _, err := os.Lstat(final); err == nil {
-		fail(fmt.Errorf("artifact directory already exists: %s", final))
+		return fmt.Errorf("artifact directory already exists: %s", final)
 	} else if !os.IsNotExist(err) {
-		fail(err)
+		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(final), 0755); err != nil {
-		fail(err)
+		return err
 	}
 	stage, err := os.MkdirTemp(filepath.Dir(final), ".gitlocal-release-")
 	if err != nil {
-		fail(err)
+		return err
 	}
 	defer os.RemoveAll(stage)
 	goVersion, err := goEnv(*goBinary, root, "GOVERSION")
 	if err != nil {
-		fail(err)
+		return err
 	}
 	selected := releaseTargets
 	if *hostOnly {
@@ -105,7 +116,7 @@ func main() {
 	}
 	info := manifest{SchemaVersion: 1, Version: version, MinimumGit: gitexec.MinimumGit, GoVersion: goVersion}
 	if info.SourceRevision, err = gitRevision(root); err != nil {
-		fail(fmt.Errorf("read the source commit: %w", err))
+		return fmt.Errorf("read the source commit: %w", err)
 	}
 	for _, platform := range selected {
 		name := artifactName(version, platform)
@@ -114,24 +125,24 @@ func main() {
 		cmd.Dir = root
 		cmd.Env = buildEnv(platform)
 		if output, err := cmd.CombinedOutput(); err != nil {
-			fail(fmt.Errorf("build %s/%s: %w\n%s", platform.OS, platform.Arch, err, output))
+			return fmt.Errorf("build %s/%s: %w\n%s", platform.OS, platform.Arch, err, output)
 		}
 		digest, err := fileSHA256(path)
 		if err != nil {
-			fail(err)
+			return err
 		}
 		info.Artifacts = append(info.Artifacts, artifact{platform.OS + "/" + platform.Arch, name, digest})
 	}
 	if err := smokeHost(stage, info); err != nil {
-		fail(err)
+		return err
 	}
 	data, err := json.MarshalIndent(info, "", "  ")
 	if err != nil {
-		fail(err)
+		return err
 	}
 	data = append(data, '\n')
 	if err := os.WriteFile(filepath.Join(stage, "release.json"), data, 0644); err != nil {
-		fail(err)
+		return err
 	}
 	var sums strings.Builder
 	for _, item := range info.Artifacts {
@@ -140,12 +151,13 @@ func main() {
 	manifestHash := sha256.Sum256(data)
 	fmt.Fprintf(&sums, "%x  release.json\n", manifestHash)
 	if err := os.WriteFile(filepath.Join(stage, "SHA256SUMS"), []byte(sums.String()), 0644); err != nil {
-		fail(err)
+		return err
 	}
 	if err := os.Rename(stage, final); err != nil {
-		fail(err)
+		return err
 	}
 	fmt.Printf("Built %d binaries in %s\n", len(info.Artifacts), final)
+	return nil
 }
 
 func fail(err error) { fmt.Fprintln(os.Stderr, err); os.Exit(1) }

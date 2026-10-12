@@ -35,3 +35,31 @@ func TestSmokeExistingRejectsTamperedNativeArtifact(t *testing.T) {
 		t.Fatalf("tampered artifact was not rejected before execution: %v", err)
 	}
 }
+
+// GL-072: a failure after the staging directory exists (here, a missing Go
+// toolchain) leaves no .gitlocal-release-* directory behind; an existing
+// artifact directory is refused before anything is staged.
+func TestReleaseFailureRemovesStaging(t *testing.T) {
+	parent := t.TempDir()
+	out := filepath.Join(parent, "v-test")
+	err := run("..", []string{"-host-only", "-out", out, "-go", filepath.Join(parent, "missing-go")})
+	if err == nil || !strings.Contains(err.Error(), "read Go version") {
+		t.Fatalf("release with a missing Go toolchain: %v", err)
+	}
+	entries, readErr := os.ReadDir(parent)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("failed release left %v", entries)
+	}
+	if err := os.Mkdir(out, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := run("..", []string{"-host-only", "-out", out}); err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("release over an existing directory: %v", err)
+	}
+	if entries, _ := os.ReadDir(parent); len(entries) != 1 {
+		t.Fatalf("refused release left %v", entries)
+	}
+}
