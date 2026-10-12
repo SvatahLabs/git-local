@@ -38,14 +38,6 @@ func archiveHeader(salt []byte, ref string) ([]byte, error) {
 	return append(header, ref...), nil
 }
 
-// GenerateKey creates a raw AES-256 master key. Callers must keep it outside
-// the clone; losing the clone and its key must not make a remote backup useless.
-func GenerateKey() ([]byte, error) {
-	key := make([]byte, 32)
-	_, err := rand.Read(key)
-	return key, err
-}
-
 func archiveAEAD(master, salt []byte) (cipher.AEAD, error) {
 	if len(master) != 32 || len(salt) != 16 {
 		return nil, errors.New("backup key must be 32 bytes and archive salt 16 bytes")

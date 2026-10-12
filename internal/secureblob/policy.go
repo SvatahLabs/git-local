@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -196,13 +195,6 @@ func RebindKeyPath(policy Policy, keyFile, repoRoot, commonGitDir string) (Polic
 		return Policy{}, err
 	}
 	return Canonical(policy, repoRoot, commonGitDir)
-}
-
-// MissingKey reports a missing external file without weakening LoadKey's
-// authentication checks. It is intended for diagnostic output only.
-func MissingKey(policy Policy) bool {
-	_, err := os.Lstat(policy.KeyFile)
-	return errors.Is(err, os.ErrNotExist)
 }
 
 // SameRules reports whether two policies use the same key fingerprint and

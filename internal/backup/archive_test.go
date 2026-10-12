@@ -80,7 +80,8 @@ func TestPackEncryptedIncludesPrivateStoreAndIdentity(t *testing.T) {
 	if !bytes.Contains(entries["identity.json"], []byte(w.WorkspaceID)) || !bytes.Contains(entries["state/repository.json"], []byte(w.RepositoryID)) || len(entries["state/history.git/config"]) == 0 {
 		t.Fatalf("incomplete encrypted archive: %d entries", len(entries))
 	}
-	if len(entries["state/locks/repository.lock"]) != 0 {
+	// The lock file is empty: check that it's absent, not that it's empty.
+	if _, archived := entries["state/locks/repository.lock"]; archived || len(entries["state/repository.json"]) == 0 {
 		t.Fatal("transient repository lock was archived")
 	}
 	stage, err := DecryptStaged(context.Background(), bytes.NewReader(encrypted.Bytes()), key, testRef(w.RepositoryID))

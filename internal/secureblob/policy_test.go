@@ -1,6 +1,7 @@
 package secureblob
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -49,8 +50,14 @@ func TestPolicyKeyLifecycleAndPathRules(t *testing.T) {
 	if rebound, err := RebindKeyPath(policy, copyPath, repo, common); err != nil || rebound.KeyFile != resolvedCopy {
 		t.Fatalf("same key did not rebind: %+v %v", rebound, err)
 	}
-	if MissingKey(policy) {
-		t.Fatal("existing key reported missing")
+	if _, err := LoadKey(policy, repo, common); err != nil {
+		t.Fatalf("existing key reported unavailable: %v", err)
+	}
+	if err := os.Remove(policy.KeyFile); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadKey(policy, repo, common); !errors.Is(err, ErrKeyUnavailable) {
+		t.Fatalf("missing key: %v", err)
 	}
 }
 

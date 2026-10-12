@@ -155,7 +155,11 @@ func TestPruneRetiresOnlyMissingWorkspaces(t *testing.T) {
 }
 func TestRetirementRecoveryAndSharedRules(t *testing.T) {
 	for _, rollback := range []bool{false, true} {
-		for _, stage := range []string{"journal", "union", "selection", "final-exclude"} {
+		// After "committed" the retirement is published: it can only resume.
+		for _, stage := range []string{"journal", "union", "selection", "final-exclude", "committed", "before-archive", "archived"} {
+			if rollback && (stage == "committed" || stage == "before-archive" || stage == "archived") {
+				continue
+			}
 			t.Run(stage+map[bool]string{false: "-resume", true: "-rollback"}[rollback], func(t *testing.T) {
 				t.Parallel()
 				r, g, main := fixture(t)

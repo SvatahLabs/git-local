@@ -10,6 +10,14 @@ import (
 	"testing"
 )
 
+// GenerateKey creates a raw AES-256 master key for tests; the CLI writes keys
+// with keymaterial.Create.
+func GenerateKey() ([]byte, error) {
+	key := make([]byte, 32)
+	_, err := rand.Read(key)
+	return key, err
+}
+
 func TestEncryptedArchiveRoundTripAndRandomization(t *testing.T) {
 	key, err := GenerateKey()
 	if err != nil {
