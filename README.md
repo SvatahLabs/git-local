@@ -22,11 +22,11 @@ go build -o bin/git-local ./cmd/git-local
 ./bin/git-local --version
 ```
 
-On macOS, [build a universal local installer](project/specifications/proposal/MAC_INSTALLER.md)
+On macOS, [build a universal local installer](docs/install.md#install-the-macos-package)
 with `scripts/build-macos-installer.sh`. It installs the CLI at
 `/usr/local/bin/git-local` and leaves all repository history untouched.
 For standalone macOS, Linux and Windows binaries, see the
-[binary distribution guide](project/specifications/proposal/RELEASE_BINARIES.md).
+[binary distribution guide](docs/install.md#install-a-release-binary).
 
 Place the built `git-local` executable on `PATH`, then run inside a checkout:
 
@@ -215,8 +215,7 @@ mainline-owned selected path. Active tracked-file overlays require their
 source clone's filter setup, so backup restore preserves their saved versions
 but deactivates them in the new clone. Inspect a saved version with
 `git local overlay show <name>`; after editing the tracked file to the desired
-local content, run `git local overlay add <name> -- <file>` before staging it. See the
-[backup contract](project/specifications/proposal/BACKUP_STATUS.md).
+local content, run `git local overlay add <name> -- <file>` before staging it.
 
 On Windows, build as `bin/git-local.exe`. `git -C <checkout> local init` and
 invocation from a subdirectory are supported. Initialization is idempotent; rerun
@@ -438,9 +437,7 @@ archive. Export without overlays by disabling the filter for that command:
 git -c filter.gitlocal-overlay.process= -c filter.gitlocal-overlay.required=false archive HEAD -o release.tar
 ```
 
-The commit and push guards don't cover archives. See the
-[overlay implementation contract](project/specifications/proposal/OVERLAY_PLAN.md)
-for remaining broader qualification. `overlay remove`
+The commit and push guards don't cover archives. `overlay remove`
 leaves the working file and saved versions intact; the former patch becomes an
 ordinary edit that Git can stage. An overlay of a removed and retained linked
 worktree is removed from any other checkout with
@@ -493,10 +490,9 @@ Exit codes: `0` success, `1` operation failure/cancellation, `2` invalid usage
 conflict or recovery required. Alternate-index/object/configuration injection
 contexts, including `git -c ... local`, are rejected.
 
-See the [public command reference](project/specifications/proposal/COMMANDS.md)
-for every flag, machine-readable output, binary behavior, limits, and complete
-restore examples. `doctor` checks health without replaying or repairing anything;
-see the [T12 diagnostic contract](project/specifications/proposal/DOCTOR_STATUS.md).
+See the [command reference](docs/commands.md) for every flag, machine-readable
+output, binary behavior, limits, and complete restore examples. `doctor` checks
+health without replaying or repairing anything.
 
 The private history store keeps every object it ever wrote until you run
 `git local maintenance`: it packs the store and deletes objects that no
@@ -520,46 +516,13 @@ To remove the program itself, delete `git-local` from your `PATH`; for the
 macOS package, `sudo rm /usr/local/bin/git-local && sudo pkgutil --forget
 org.gitlocal.cli`.
 
-Native platform qualification is still pending. See the
-[foundation status](project/specifications/proposal/FOUNDATION_STATUS.md) for
-filesystem admission rules, durability limits and validation coverage.
+Native platform qualification is still pending.
 
 The Go module path remains `gitlocal` until the published repository is chosen.
 Dependencies are Cobra plus Go's platform syscall and Unicode libraries.
 
 ## Design
 
-- [Proposal](project/specifications/proposal/README.md): product contract and scope.
-- [Technical design](project/specifications/proposal/DESIGN.md): storage and algorithms.
-- [Adversarial review](project/specifications/proposal/ADVERSARIAL_REVIEW.md): original
-  Git behavior probes and design corrections.
-- [Implementation plan](project/specifications/proposal/IMPLEMENTATION_PLAN.md): task
-  dependencies and acceptance gates.
-- [Feature roadmap](project/specifications/proposal/FEATURE_ROADMAP.md): requested
-  overlays, automation, browsing, backup, writer scope and encryption gates.
-- [Foundation status](project/specifications/proposal/FOUNDATION_STATUS.md): implemented
-  T01–T04 behavior, test coverage and remaining platform qualification.
-
-See the [T05 selection contract](project/specifications/proposal/SELECTION_STATUS.md)
-for exclusion precedence, re-tracking, schema compatibility and ownership checks.
-
-See the [T06 configuration contract](project/specifications/proposal/CONFIGURATION_STATUS.md)
-for shared ignore rules, preservation of user rules, unavailable worktrees and recovery.
-
-See the [T07 snapshot contract](project/specifications/proposal/SNAPSHOT_STATUS.md)
-for raw capture, no-change detection, publication and isolation checks.
-
-See the [T08 inspection contract](project/specifications/proposal/INSPECTION_STATUS.md)
-for porcelain v1, temporary diff storage, conflict reporting and log scope.
-
-See the [T09 lifecycle contract](project/specifications/proposal/LIFECYCLE_STATUS.md)
-for retirement, retained-source logs and historical path selection.
-
-See the [T10 restore planning contract](project/specifications/proposal/RESTORE_PLAN_STATUS.md)
-for exact restore scope, overwrite rules and read-only guarantees.
-
-See the [T11 restore and recovery contract](project/specifications/proposal/RESTORE_STATUS.md)
-for journaled execution, interruption handling and platform limits.
-
-See the [T12 diagnostic contract](project/specifications/proposal/DOCTOR_STATUS.md)
-for read-only health checks and actionable recovery findings.
+The design specifications (proposal, technical design, adversarial review and
+implementation contracts) are maintained outside this repository; the
+[command reference](docs/commands.md) is the user-facing contract.
