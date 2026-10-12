@@ -34,7 +34,7 @@ func completionBinary(t *testing.T) string {
 		}
 		return dir
 	}
-	build := exec.Command(filepath.Join(runtime.GOROOT(), "bin", "go"), "build", "-o", bin, "../../cmd/git-local")
+	build := exec.Command("go", "build", "-o", bin, "../../cmd/git-local")
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build git-local: %v\n%s", err, output)
 	}

@@ -98,7 +98,7 @@ func extractTar(ctx context.Context, stage string, src io.Reader) error {
 			if name == "state" {
 				state = true
 			}
-		case tar.TypeReg, tar.TypeRegA:
+		case tar.TypeReg: // The reader reports old TypeRegA entries as TypeReg.
 			if name == "state" || header.Size < 0 || name == "identity.json" && header.Size > 64<<10 {
 				return errors.New("invalid backup archive file")
 			}

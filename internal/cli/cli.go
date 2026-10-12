@@ -1019,7 +1019,7 @@ func hookCommand() *cobra.Command {
 						return err
 					}
 					for _, p := range paths {
-						fmt.Fprintf(c.OutOrStdout(), "%s guard at %s.\n", strings.Title(action)+"ed", p)
+						fmt.Fprintf(c.OutOrStdout(), "%s guard at %s.\n", strings.ToUpper(action[:1])+action[1:]+"ed", p)
 					}
 					return nil
 				})
@@ -1087,7 +1087,7 @@ func autoCommand() *cobra.Command {
 					return err
 				}
 				for _, path := range paths {
-					if _, err := fmt.Fprintf(c.OutOrStdout(), "%s snapshot hook at %s.\n", strings.Title(action)+"ed", path); err != nil {
+					if _, err := fmt.Fprintf(c.OutOrStdout(), "%s snapshot hook at %s.\n", strings.ToUpper(action[:1])+action[1:]+"ed", path); err != nil {
 						return err
 					}
 				}

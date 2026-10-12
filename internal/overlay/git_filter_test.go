@@ -31,7 +31,7 @@ func integrationBinary(t *testing.T) string {
 		name += ".exe"
 	}
 	bin := filepath.Join(t.TempDir(), name)
-	build := exec.Command(filepath.Join(runtime.GOROOT(), "bin", "go"), "build", "-o", bin, "../../cmd/git-local")
+	build := exec.Command("go", "build", "-o", bin, "../../cmd/git-local")
 	build.Dir = "."
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build filter binary: %v\n%s", err, out)

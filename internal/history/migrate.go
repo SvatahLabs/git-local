@@ -165,7 +165,7 @@ func SnapshotFileFromStore(ctx context.Context, r *gitexec.Runner, w workspace.C
 	if !ok {
 		return SnapshotFile{}, "", fmt.Errorf("snapshot has no file %q", path)
 	}
-	return SnapshotFile{Mode: file.Mode, ID: file.ID}, metadata.EncryptedDigests[path], nil
+	return SnapshotFile(file), metadata.EncryptedDigests[path], nil
 }
 
 // VerifyEncryptedStore authenticates all migrated user snapshots before the
@@ -310,7 +310,7 @@ func rewriteSnapshot(ctx context.Context, r *gitexec.Runner, w workspace.Context
 	digests := map[string]string{}
 	for _, path := range paths {
 		file := oldFiles[path]
-		id := file.ID
+		var id string
 		encrypted := metadata.EncryptedDigests[path]
 		if encrypted != "" && !policy.Covers(path) {
 			return "", fmt.Errorf("%w: historical file %q is encrypted, and the corrected policy doesn't cover it; a correction can't decrypt history", storage.ErrConflict, path)

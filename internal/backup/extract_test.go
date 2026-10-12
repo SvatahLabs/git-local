@@ -14,7 +14,6 @@ type tarEntry struct {
 	name     string
 	typeflag byte
 	body     string
-	size     int64 // overrides len(body) when set: a truncated entry
 	link     string
 }
 

@@ -210,7 +210,7 @@ func (d *directory) write(ctx context.Context, r historyGit, store string) (stri
 }
 func head(ctx context.Context, r historyGit, store, ref string) (string, error) {
 	// Symbolic history heads are not part of the snapshot schema.
-	out, err := r.History(ctx, store, nil, "symbolic-ref", "--quiet", ref)
+	_, err := r.History(ctx, store, nil, "symbolic-ref", "--quiet", ref)
 	var ge *gitexec.Error
 	if err == nil {
 		return "", errors.New("symbolic history head is unsupported")
@@ -225,8 +225,7 @@ func head(ctx context.Context, r historyGit, store, ref string) (string, error) 
 		}
 		return "", err
 	}
-	out, err = r.History(ctx, store, nil, "rev-parse", "--verify", ref)
-	return oid(out, err)
+	return oid(r.History(ctx, store, nil, "rev-parse", "--verify", ref))
 }
 func readPrevious(ctx context.Context, r *gitexec.Runner, store, id, repo, workspace string) (string, Metadata, error) {
 	var m Metadata

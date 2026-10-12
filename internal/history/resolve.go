@@ -149,7 +149,7 @@ func validateSnapshotLocked(ctx context.Context, r *gitexec.Runner, w workspace.
 				return snapshot, errors.New("snapshot selection kind conflicts with stored file")
 			}
 		}
-		snapshot.Files[path] = SnapshotFile{file.Mode, file.ID}
+		snapshot.Files[path] = SnapshotFile(file)
 		parts := strings.Split(path, "/")
 		for i := 1; i < len(parts); i++ {
 			snapshot.Directories[strings.Join(parts[:i], "/")] = true
