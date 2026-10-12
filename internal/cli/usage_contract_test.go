@@ -18,6 +18,7 @@ var usageInvocations = map[string][][]string{
 	"git-local":                        {{"instal"}},
 	"git-local auto event":             {{"post-commit", "extra"}},
 	"git-local auto install":           {{"extra"}},
+	"git-local deinit":                 {{"extra"}},
 	"git-local auto status":            {{"extra"}},
 	"git-local auto uninstall":         {{"extra"}},
 	"git-local auto watch":             {{"extra"}},

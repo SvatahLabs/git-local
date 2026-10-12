@@ -815,6 +815,7 @@ func New(out, errOut io.Writer) *cobra.Command {
 	root.AddCommand(reset)
 	root.AddCommand(guardCommand())
 	root.AddCommand(overlayCommand())
+	root.AddCommand(deinitCommand())
 	var resume, rollback, abandon, list, discardRecovery bool
 	recover := &cobra.Command{Use: "recover <transaction-id> --resume|--rollback|--abandon", Short: "Resume, roll back or abandon an interrupted configuration, seed, restore, encryption or initialization transaction",
 		Args: func(_ *cobra.Command, args []string) error {

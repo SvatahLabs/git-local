@@ -66,6 +66,7 @@ git local recover <transaction-id> --abandon
 git local doctor
 git local doctor --json
 git local maintenance
+git local deinit
 git local workspace list --json
 git local show latest:notes/my-file --json
 git local commit -m "Agent snapshot" --writer session-42 --json -- notes/my-file
@@ -503,6 +504,21 @@ snapshot, retained workspace or restore recovery ref uses (leftovers of
 interrupted or conflicting snapshots). It refuses while a transaction is
 pending; history, `show` and `restore` are unchanged. `doctor` reports the
 store's size and loose-object count. Nothing runs it automatically.
+
+`git local deinit` removes git-local from the repository and all its
+worktrees: it removes every overlay (each file keeps its local content, now an
+ordinary change), the guard and snapshot hooks, the required filter and the
+managed `info/attributes` and `info/exclude` blocks (selected files then show as
+untracked), and each worktree's identity. It refuses while a transaction is
+pending, while an overlay's file holds changes the overlay doesn't, and for an
+overlay of a worktree that is missing (prune it first). The private history
+and state are kept as `.git/gitlocal-removed-<id>`; delete that directory when
+you no longer need it, or pass `--remove-history`, which refuses while a
+quarantine or a restore recovery ref would be lost. Encryption keys outside the
+repository are never touched. An interrupted `deinit` finishes when run again.
+To remove the program itself, delete `git-local` from your `PATH`; for the
+macOS package, `sudo rm /usr/local/bin/git-local && sudo pkgutil --forget
+org.gitlocal.cli`.
 
 Native platform qualification is still pending. See the
 [foundation status](project/specifications/proposal/FOUNDATION_STATUS.md) for
