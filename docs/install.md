@@ -66,7 +66,7 @@ main` in a new linked worktree to seed it), then `git local track <path>` and
 `git local commit -m <message>`. Opt in to the guards that keep selected files
 out of mainline commits and pushes with `git local hook install`, and to
 automatic snapshots with `git local auto install`. Teammates need nothing
-unless they want their own local history. See the [README](../README.md).
+unless they want their own local history. See the [user guide](guide.md).
 
 ## Remove git-local from a repository
 
