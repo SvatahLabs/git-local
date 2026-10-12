@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path"
+	"path/filepath"
 	"reflect"
 	"runtime"
 	"strings"
@@ -265,9 +266,33 @@ type guard struct {
 	// pinned when recovery starts.
 	evidence selection.Evidence
 	branch   string
-	// images caches each path's last hashed image with the Lstat it was
-	// hashed under; see inspect.
-	images map[string]cachedImage
+	// images caches each path's last hashed images, by identity, with the
+	// Lstat they were hashed under; see inspect.
+	images map[string]map[string]cachedImage
+	// index is the main index file; checked is the cheap global state seen at
+	// the start of the last full check, or nil when the next check must be
+	// full; parents indexes the plan's parent directories and created the
+	// directories it creates. See recognizeScope.
+	index   string
+	checked *globalState
+	parents map[string]Parent
+	created map[string]bool
+}
+
+// globalState is what can change the plan's preconditions outside the
+// restored paths and is cheap to read: the main HEAD and branch, and the index
+// file's identity, size and time (Git replaces the index file to change it).
+type globalState struct {
+	head, branch string
+	index        fs.FileInfo
+	at           time.Time
+}
+
+func (s globalState) same(o globalState) bool {
+	if s.head != o.head || s.branch != o.branch || (s.index == nil) != (o.index == nil) {
+		return false
+	}
+	return s.index == nil || sameFile(s.index, o.index) && s.index.Size() == o.index.Size() && s.index.ModTime().Equal(o.index.ModTime()) && s.index.Mode() == o.index.Mode()
 }
 
 type cachedImage struct {
@@ -283,7 +308,22 @@ func newGuard(ctx context.Context, r *gitexec.Runner, w workspace.Context, files
 	if err != nil {
 		return nil, err
 	}
-	g := &guard{r: r, w: w, files: files, engine: e, journal: j, recheck: recheck, evidence: j.Manifest.Plan.Ownership, branch: j.Manifest.MainBranch, images: map[string]cachedImage{}}
+	g := &guard{r: r, w: w, files: files, engine: e, journal: j, recheck: recheck, evidence: j.Manifest.Plan.Ownership, branch: j.Manifest.MainBranch, images: map[string]map[string]cachedImage{}, parents: map[string]Parent{}, created: map[string]bool{}}
+	for _, parent := range j.Manifest.Plan.Parents {
+		g.parents[parent.Path] = parent
+	}
+	for _, dir := range j.Manifest.Plan.CreateDirectories {
+		g.created[dir] = true
+	}
+	index, err := r.Main(ctx, w.Root, w.Admin, "rev-parse", "--git-path", "index")
+	if err != nil {
+		e.Close()
+		return nil, err
+	}
+	g.index = strings.TrimSpace(string(index))
+	if !filepath.IsAbs(g.index) {
+		g.index = filepath.Join(w.Root, g.index)
+	}
 	if j.SchemaVersion == 2 {
 		policy, key, e := loadRestoreKey(w)
 		if e != nil {
@@ -339,16 +379,21 @@ func newGuard(ctx context.Context, r *gitexec.Runner, w workspace.Context, files
 }
 func (g *guard) close() { g.engine.Close() }
 
-// inspect returns path's current image. Every operation re-checks every
-// path, so it reuses an earlier hash while Lstat still shows the same file
-// (same file identity, size, mode and modification time): a recognize pass
-// then costs a stat per path rather than a Git process, and a restore stays
-// linear in its number of files. A path that changed is hashed again.
+// pathChecked is called for each path a guard checks; tests replace it to
+// count the checks.
+var pathChecked = func(string) {}
+
+// inspect returns path's current image. A full check re-checks every path,
+// so it reuses an earlier hash while Lstat still shows the same file (same
+// file identity, size, mode and modification time): a full check then costs
+// a stat per path rather than a Git process. A path that changed is hashed
+// again.
 func (g *guard) inspect(ctx context.Context, path string, image Fingerprint, workspaceID, identityPath string) (Fingerprint, error) {
-	key := path
+	pathChecked(path)
+	key := ""
 	identity := secureblob.Identity{RepositoryID: g.w.RepositoryID, WorkspaceID: workspaceID, Path: identityPath, Mode: image.GitMode}
 	if image.KeyedDigest != "" {
-		key += "\x00" + identity.WorkspaceID + "\x00" + identity.Path + "\x00" + identity.Mode
+		key = identity.WorkspaceID + "\x00" + identity.Path + "\x00" + identity.Mode
 	}
 	info, err := g.files.Lstat(path)
 	if os.IsNotExist(err) {
@@ -357,7 +402,7 @@ func (g *guard) inspect(ctx context.Context, path string, image Fingerprint, wor
 	if err != nil {
 		return Fingerprint{}, err
 	}
-	if cached, ok := g.images[key]; ok && sameStat(cached.info, info) {
+	if cached, ok := g.images[path][key]; ok && sameStat(cached.info, info) {
 		return cached.actual, nil
 	}
 	hashed := time.Now()
@@ -373,7 +418,10 @@ func (g *guard) inspect(ctx context.Context, path string, image Fingerprint, wor
 		return Fingerprint{}, err
 	}
 	if info == nil || !racy(info, hashed) {
-		g.images[key] = cachedImage{info, actual}
+		if g.images[path] == nil {
+			g.images[path] = map[string]cachedImage{}
+		}
+		g.images[path][key] = cachedImage{info, actual}
 	}
 	return actual, nil
 }
@@ -400,13 +448,7 @@ func racy(info fs.FileInfo, hashed time.Time) bool {
 }
 
 // forget drops cached images of path, so the next check hashes it again.
-func (g *guard) forget(path string) {
-	for key := range g.images {
-		if key == path || strings.HasPrefix(key, path+"\x00") {
-			delete(g.images, key)
-		}
-	}
-}
+func (g *guard) forget(path string) { delete(g.images, path) }
 
 // sameIdentity is sameFile; tests replace it to model a filesystem whose
 // change time is too coarse to show a rewrite.
@@ -439,7 +481,25 @@ func (g *guard) stageMatches(ctx context.Context, path string, image Fingerprint
 	actual.GitMode, actual.Permissions = image.GitMode, image.Permissions
 	return imageEqual(actual, image), true, nil
 }
-func (g *guard) recognize(ctx context.Context) error {
+
+// recognize checks every precondition of the plan: configuration, main
+// ownership and branch, both workspace heads, and every operation's path,
+// image and stages, and every parent directory.
+func (g *guard) recognize(ctx context.Context) error { return g.recognizeScope(ctx, -1, "") }
+
+// recognizeScope is recognize for one operation (op) or one created
+// directory (dir). Checking every path for every operation made a restore
+// quadratic in its files, so between full checks only the operation's own path
+// (hashed again just before it changes), its stages and its ancestors are
+// checked, with the configuration, both workspace heads and the cheap global
+// state. Paths elsewhere can't be overwritten unchecked: each is checked again
+// at its own operation, and a change to one already restored is found by the
+// full check at the next phase boundary and at the end. Ownership can change
+// only through HEAD or the index, so whenever the cheap global state differs
+// from the last full check, the check is full: the ownership listing and every
+// operation's image. The callers run a full check before the first change, at
+// each phase boundary and at the end.
+func (g *guard) recognizeScope(ctx context.Context, op int, dir string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -448,15 +508,19 @@ func (g *guard) recognize(ctx context.Context) error {
 	}
 	m := g.journal.Manifest
 	p := m.Plan
-	if err := (selection.Ownership{Evidence: g.evidence}).Revalidate(ctx, g.r, g.w.Root, g.w.Admin); err != nil {
-		return err
-	}
-	branch, err := mainBranch(ctx, g.r, g.w)
+	state, err := g.global(ctx)
 	if err != nil {
 		return err
 	}
-	if branch != g.branch {
-		return fmt.Errorf("%w: main branch changed", storage.ErrConflict)
+	full := op < 0 && dir == "" || g.checked == nil || !state.same(*g.checked)
+	if full {
+		g.checked = nil
+		if err = (selection.Ownership{Evidence: g.evidence}).Revalidate(ctx, g.r, g.w.Root, g.w.Admin); err != nil {
+			return err
+		}
+		if state.branch != g.branch {
+			return fmt.Errorf("%w: main branch changed", storage.ErrConflict)
+		}
 	}
 	for _, entry := range []struct{ id, head string }{{p.SourceWorkspaceID, p.SourceHead}, {p.DestinationWorkspaceID, p.DestinationBaseline}} {
 		head, e := history.WorkspaceHeadLocked(ctx, g.r, g.w, entry.id)
@@ -467,52 +531,38 @@ func (g *guard) recognize(ctx context.Context) error {
 			return fmt.Errorf("%w: user snapshot head changed", storage.ErrConflict)
 		}
 	}
-	for i, op := range p.Operations {
-		if err = g.engine.CheckRestorePath(op.Path); err != nil {
+	if full {
+		// One pass reads each directory once (see CheckRestorePaths).
+		paths := make([]string, 0, 3*len(p.Operations))
+		for i, operation := range p.Operations {
+			paths = append(paths, operation.Path, m.Stages[i].Apply, m.Stages[i].Rollback)
+		}
+		if err = g.engine.CheckRestorePaths(paths); err != nil {
 			return err
 		}
-		beforeMatch, e := g.matchesImage(ctx, op.Path, op.Before, g.w.WorkspaceID, op.Path)
-		if e != nil {
-			return e
-		}
-		postMatch, e := g.matchesImage(ctx, op.Path, m.Post[i], p.SourceWorkspaceID, op.Path)
-		if e != nil {
-			return e
-		}
-		if !beforeMatch && !postMatch {
-			return fmt.Errorf("%w: new external edit at %q; preserved", storage.ErrConflict, op.Path)
-		}
 	}
-	for i, stages := range m.Stages {
-		for _, entry := range []struct {
-			path  string
-			image Fingerprint
-		}{{stages.Apply, m.Post[i]}, {stages.Rollback, p.Operations[i].Before}} {
-			if err = g.engine.CheckRestorePath(entry.path); err != nil {
+	for i := range p.Operations {
+		if full || i == op {
+			if err = g.recognizeOperation(ctx, i, full); err != nil {
 				return err
 			}
-			workspaceID := g.w.WorkspaceID
-			if entry.path == stages.Apply {
-				workspaceID = p.SourceWorkspaceID
-			}
-			match, _, e := g.stageMatches(ctx, entry.path, entry.image, workspaceID, p.Operations[i].Path)
-			if e != nil {
-				return e
-			}
-			info, e := g.files.Lstat(entry.path)
-			if e != nil && !os.IsNotExist(e) {
-				return e
-			}
-			if info != nil && !match {
-				return fmt.Errorf("%w: unrecognized staging bytes at %q; preserved", storage.ErrConflict, entry.path)
+		}
+	}
+	parents := p.Parents
+	if !full {
+		parents = nil
+		target := dir
+		if op >= 0 {
+			target = p.Operations[op].Path
+		}
+		for ; target != "."; target = path.Dir(target) {
+			if parent, ok := g.parents[target]; ok {
+				parents = append(parents, parent)
 			}
 		}
 	}
-	created := map[string]bool{}
-	for _, p := range p.CreateDirectories {
-		created[p] = true
-	}
-	for _, parent := range p.Parents {
+	for _, parent := range parents {
+		pathChecked(parent.Path)
 		now, e := inspectParent(g.files, parent.Path)
 		if e != nil {
 			return e
@@ -524,10 +574,93 @@ func (g *guard) recognize(ctx context.Context) error {
 		if runtime.GOOS == "windows" {
 			permissions = 0777
 		}
-		if !parent.Exists && created[parent.Path] && now.Exists && now.Permissions == permissions {
+		if !parent.Exists && g.created[parent.Path] && now.Exists && now.Permissions == permissions {
 			continue
 		}
 		return fmt.Errorf("%w: parent directory changed at %q", storage.ErrConflict, parent.Path)
+	}
+	if full && (state.index == nil || !racy(state.index, state.at)) {
+		g.checked = &state
+	}
+	return nil
+}
+
+// global reads the cheap global state. It is read before the checks it
+// stamps, so a change made during a full check shows at the next one.
+func (g *guard) global(ctx context.Context) (globalState, error) {
+	state := globalState{at: time.Now()}
+	head, err := g.r.Main(ctx, g.w.Root, g.w.Admin, "rev-parse", "--verify", "--quiet", "HEAD")
+	var ge *gitexec.Error
+	if err != nil && !(errors.As(err, &ge) && ge.Code == 1) {
+		return state, err
+	}
+	if err == nil {
+		state.head = strings.TrimSpace(string(head))
+	}
+	if state.branch, err = mainBranch(ctx, g.r, g.w); err != nil {
+		return state, err
+	}
+	state.index, err = os.Lstat(g.index)
+	if os.IsNotExist(err) {
+		state.index, err = nil, nil
+	}
+	return state, err
+}
+
+// recognizeOperation checks operation i's path, image and stages. A full
+// check has checked the paths already (CheckRestorePaths); outside one, the
+// ancestors are checked by stat only, and the directory scans for aliases and
+// nested repositories, which cost a read of each ancestor directory, wait for
+// the next full check. An alias created meanwhile can't be overwritten
+// unchecked: on a filesystem that folds names, the operation's own image check
+// reads it under the planned name.
+func (g *guard) recognizeOperation(ctx context.Context, i int, full bool) error {
+	m := g.journal.Manifest
+	p := m.Plan
+	op := p.Operations[i]
+	check := g.engine.CheckRestoreAncestors
+	if full {
+		check = func(string) error { return nil }
+	}
+	pathChecked(op.Path)
+	if err := check(op.Path); err != nil {
+		return err
+	}
+	beforeMatch, e := g.matchesImage(ctx, op.Path, op.Before, g.w.WorkspaceID, op.Path)
+	if e != nil {
+		return e
+	}
+	postMatch, e := g.matchesImage(ctx, op.Path, m.Post[i], p.SourceWorkspaceID, op.Path)
+	if e != nil {
+		return e
+	}
+	if !beforeMatch && !postMatch {
+		return fmt.Errorf("%w: new external edit at %q; preserved", storage.ErrConflict, op.Path)
+	}
+	stages := m.Stages[i]
+	for _, entry := range []struct {
+		path  string
+		image Fingerprint
+	}{{stages.Apply, m.Post[i]}, {stages.Rollback, op.Before}} {
+		pathChecked(entry.path)
+		if err := check(entry.path); err != nil {
+			return err
+		}
+		workspaceID := g.w.WorkspaceID
+		if entry.path == stages.Apply {
+			workspaceID = p.SourceWorkspaceID
+		}
+		match, _, e := g.stageMatches(ctx, entry.path, entry.image, workspaceID, op.Path)
+		if e != nil {
+			return e
+		}
+		info, e := g.files.Lstat(entry.path)
+		if e != nil && !os.IsNotExist(e) {
+			return e
+		}
+		if info != nil && !match {
+			return fmt.Errorf("%w: unrecognized staging bytes at %q; preserved", storage.ErrConflict, entry.path)
+		}
 	}
 	return nil
 }
@@ -557,7 +690,7 @@ func run(ctx context.Context, r *gitexec.Runner, w workspace.Context, files, met
 			if err := point(ctx, f, fmt.Sprintf("before-directory:%d", i)); err != nil {
 				return err
 			}
-			if err := g.recognize(ctx); err != nil {
+			if err := g.recognizeScope(ctx, -1, dir); err != nil {
 				return err
 			}
 			before, err := inspectParent(files, dir)
@@ -574,6 +707,10 @@ func run(ctx context.Context, r *gitexec.Runner, w workspace.Context, files, met
 			}
 		}
 	}
+	// Phase boundaries and the end check everything; see recognizeScope.
+	if err := g.recognize(ctx); err != nil {
+		return err
+	}
 	for i, op := range j.Manifest.Plan.Operations {
 		desired := j.Manifest.Post[i]
 		if rollback {
@@ -581,7 +718,7 @@ func run(ctx context.Context, r *gitexec.Runner, w workspace.Context, files, met
 		}
 		// The path about to change is hashed again, not taken from the cache.
 		g.forget(op.Path)
-		if err := g.recognize(ctx); err != nil {
+		if err := g.recognizeScope(ctx, i, ""); err != nil {
 			return err
 		}
 		workspaceID := j.Manifest.Plan.SourceWorkspaceID
@@ -600,13 +737,22 @@ func run(ctx context.Context, r *gitexec.Runner, w workspace.Context, files, met
 		if err = point(ctx, f, fmt.Sprintf("before-progress:%d", i)); err != nil {
 			return err
 		}
+		// Progress is a hint (recovery recognizes each path's image), and the
+		// journal holds every operation, so writing it after each one made a
+		// restore quadratic in its files. It is written when the count reaches
+		// a power of two and after the last operation.
 		j.Progress = i + 1
-		if err = writeJournal(meta, *j); err != nil {
-			return err
+		if j.Progress&(j.Progress-1) == 0 || j.Progress == len(j.Manifest.Plan.Operations) {
+			if err = writeJournal(meta, *j); err != nil {
+				return err
+			}
 		}
 		if err = point(ctx, f, fmt.Sprintf("progress:%d", i)); err != nil {
 			return err
 		}
+	}
+	if err := g.recognize(ctx); err != nil {
+		return err
 	}
 	if err := cleanupStages(ctx, r, w, files, g, f); err != nil {
 		return err
@@ -617,7 +763,7 @@ func run(ctx context.Context, r *gitexec.Runner, w workspace.Context, files, met
 			if err := point(ctx, f, fmt.Sprintf("before-remove-directory:%d", i)); err != nil {
 				return err
 			}
-			if err := g.recognize(ctx); err != nil {
+			if err := g.recognizeScope(ctx, -1, dir); err != nil {
 				return err
 			}
 			current, err := inspectParent(files, dir)
@@ -756,7 +902,7 @@ func install(ctx context.Context, r *gitexec.Runner, w workspace.Context, files 
 	// another program to rewrite the destination.
 	g.forget(path)
 	g.forget(stage)
-	if err := g.recognize(ctx); err != nil {
+	if err := g.recognizeScope(ctx, i, ""); err != nil {
 		return err
 	}
 	// Check staging again after the fault boundary and immediately before rename.
@@ -890,7 +1036,7 @@ func cleanupStages(ctx context.Context, r *gitexec.Runner, w workspace.Context, 
 			if err = point(ctx, f, fmt.Sprintf("before-stage-cleanup:%d", i)); err != nil {
 				return err
 			}
-			if err = g.recognize(ctx); err != nil {
+			if err = g.recognizeScope(ctx, i, ""); err != nil {
 				return err
 			}
 			match, _, e := g.stageMatches(ctx, entry.path, entry.image, workspaceID, g.journal.Manifest.Plan.Operations[i].Path)
@@ -989,7 +1135,7 @@ func Abandon(ctx context.Context, r *gitexec.Runner, cwd, id string) (configtx.A
 		if err != nil {
 			return err
 		}
-		g := &guard{r: r, w: w, files: files, journal: &j, key: key, images: map[string]cachedImage{}}
+		g := &guard{r: r, w: w, files: files, journal: &j, key: key, images: map[string]map[string]cachedImage{}}
 		m := j.Manifest
 		for i, stages := range m.Stages {
 			op := m.Plan.Operations[i]

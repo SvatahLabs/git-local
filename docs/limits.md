@@ -13,7 +13,7 @@ clear error rather than truncating or guessing.
 | `log` | 1,000 entries per call | `-n` above 1,000 is refused. |
 | `grep` | 1–100 snapshots, 1–1,000 matches, 1 MiB per file, 64 MiB per search | Files and snapshots beyond the budget are reported as not searched. |
 | Overlay files | UTF-8 text, at most 1 MiB | `overlay add` refuses. |
-| Restore | grows with the square of the restored file count | A directory of a few hundred files takes minutes. |
+| Restore | time grows linearly with the restored file count, roughly half a second per file on a busy machine | A directory of a few thousand files takes tens of minutes. |
 
 ## Platform and environment
 

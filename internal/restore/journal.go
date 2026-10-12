@@ -101,11 +101,17 @@ func readJournal(meta *storage.Dir, name string) (journal, error) {
 	}
 	return j, nil
 }
+
+// journalWritten is called with the size of each journal written; tests
+// replace it to count the bytes.
+var journalWritten = func(int) {}
+
 func writeJournal(meta *storage.Dir, j journal) error {
 	b, err := encode(j)
 	if err != nil {
 		return err
 	}
+	journalWritten(len(b))
 	return meta.AtomicWrite(journalPath(j.ID), b, 0600)
 }
 func oid(b []byte, err error) (string, error) {

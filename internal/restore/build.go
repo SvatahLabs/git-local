@@ -174,14 +174,15 @@ func planLocked(ctx context.Context, r *gitexec.Runner, cwd string, w workspace.
 		beforeImages := map[string]Fingerprint{}
 		parents := map[string]Parent{}
 		createDirs := map[string]bool{}
+		// One pass reads each directory once (see CheckRestorePaths).
+		if err = engine.CheckRestorePaths(names); err != nil {
+			return err
+		}
 		for _, p := range names {
 			// A directory rule also detects main-owned descendants of a candidate file.
 			scope := selection.Empty()
 			scope.Include = []selection.Rule{{Path: p, Kind: "directory"}}
 			if err = owner.Check(scope); err != nil {
-				return err
-			}
-			if err = engine.CheckRestorePath(p); err != nil {
 				return err
 			}
 			for parent := path.Dir(p); parent != "."; parent = path.Dir(parent) {
@@ -310,10 +311,10 @@ func planLocked(ctx context.Context, r *gitexec.Runner, cwd string, w workspace.
 		if err = owner.Revalidate(ctx, r, w.Root, w.Admin); err != nil {
 			return err
 		}
+		if err = engine.CheckRestorePaths(names); err != nil {
+			return err
+		}
 		for _, p := range names {
-			if err = engine.CheckRestorePath(p); err != nil {
-				return err
-			}
 			now, e := inspectFile(ctx, r, w.Store, files, p)
 			if e != nil {
 				return e

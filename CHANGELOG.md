@@ -112,10 +112,11 @@ About a hundred defects found in pre-release reviews, among them:
   encryption migration, initialization) can be resumed, rolled back or
   abandoned without editing internal files.
 - Scale: large index and tree listings, large snapshot metadata, long exclude
-  patterns, per-commit process spawning in guards and doctor, and the
-  quadratic number of Git processes in restore re-verification, now linear
-  (restore time still grows with the square of the file count; see Known
-  limitations).
+  patterns, per-commit process spawning in guards and doctor, and restore
+  time, which grew with the square of the restored file count and is now
+  linear: each file's step re-checks that file and the cheap global state
+  (main HEAD, branch and index file), and everything is re-checked at each
+  phase boundary, at the end, and whenever that state changed.
 - Backups: archives are bound to their ref, a backup made on another OS is no
   longer refused (tested only by simulation on POSIX), leftover private files
   no longer make backups unrestorable, HTTPS remotes authenticate, and remote
@@ -136,8 +137,8 @@ About a hundred defects found in pre-release reviews, among them:
   change; and keys created by earlier releases are refused on load with no fix
   offered. Until these are fixed, Windows isn't supported for sensitive-file
   or backup keys.
-- **Restore** time grows with the square of the number of restored files:
-  restoring a directory of a few hundred files takes minutes.
+- **Restore** takes roughly half a second per restored file on a busy
+  machine (it runs several Git processes per file).
 - **Maintenance** isn't automatic: run `git local maintenance` now and then.
 - **Seeding** a worktree (`init --from` or automatic seeding) records every
   seeded file in a seed journal limited to 1 MiB, so a very large selection
