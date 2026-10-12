@@ -351,3 +351,82 @@ func TestDeinitAcceptsOverlayFileAfterUpstreamChange(t *testing.T) {
 		t.Fatalf("status after deinit:\n%s", status)
 	}
 }
+
+// GL-112: an overlay add interrupted before its manifest, whose directory the
+// user then deleted as told, leaves the filter's include, required key and
+// attributes block with no overlay; deinit removes them, so Git works on the
+// path afterwards.
+func TestDeinitRemovesFilterLeftByInterruptedOverlayAdd(t *testing.T) {
+	f := newFixture(t)
+	root := f.repo.Root
+	write(t, filepath.Join(root, "config.txt"), "mode=shared\n")
+	f.git(f.plain, root, "add", "config.txt")
+	f.git(f.plain, root, "commit", "-qm", "initial")
+	f.gl(root, "init")
+	write(t, filepath.Join(root, "config.txt"), "mode=local\n")
+	f.gl(root, "overlay", "add", "local-mode", "--", "config.txt")
+	if err := os.RemoveAll(filepath.Join(root, ".git", "gitlocal", "overlays")); err != nil {
+		t.Fatal(err)
+	}
+	out := f.gl(root, "deinit")
+	common := filepath.Join(root, ".git")
+	for _, name := range []string{"info/attributes", "config"} {
+		if data, _ := os.ReadFile(filepath.Join(common, name)); bytes.Contains(data, []byte("git-local")) || bytes.Contains(data, []byte("gitlocal")) {
+			t.Fatalf("%s still mentions git-local:\n%s", name, data)
+		}
+	}
+	if status := f.git(f.plain, root, "status", "--porcelain"); status != " M config.txt\n" {
+		t.Fatalf("status after deinit:\n%s", status)
+	}
+	f.git(f.plain, root, "add", "config.txt")
+	if !strings.Contains(out, "interrupted git local overlay add") {
+		t.Fatalf("deinit doesn't report the filter it removed:\n%s", out)
+	}
+}
+
+// GL-112: checks that can refuse run before deinit changes anything, so a
+// refusal leaves the hooks and private state in place.
+func TestDeinitRefusesBeforeChangingAnything(t *testing.T) {
+	for _, kind := range []string{"edited-exclude-block", "uninitialized-worktree"} {
+		t.Run(kind, func(t *testing.T) {
+			f := newFixture(t)
+			root := f.repo.Root
+			write(t, filepath.Join(root, "app.txt"), "application\n")
+			f.git(f.plain, root, "add", "app.txt")
+			f.git(f.plain, root, "commit", "-qm", "initial")
+			f.gl(root, "init")
+			write(t, filepath.Join(root, "notes.local"), "notes\n")
+			f.gl(root, "track", "notes.local")
+			f.gl(root, "hook", "install")
+			dir, want := root, "info/exclude"
+			switch kind {
+			case "edited-exclude-block":
+				path := filepath.Join(root, ".git", "info", "exclude")
+				data, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				edited := strings.Replace(string(data), "notes.local", "notes.local\n/edited-by-hand", 1)
+				if edited == string(data) {
+					t.Fatalf("no managed line to edit:\n%s", data)
+				}
+				write(t, path, edited)
+			case "uninitialized-worktree":
+				dir = filepath.Join(filepath.Dir(root), filepath.Base(root)+"-plain")
+				f.git(f.plain, root, "worktree", "add", "-q", dir, "-b", "plain")
+				t.Cleanup(func() { os.RemoveAll(dir) })
+				want = root
+			}
+			out, err := f.run(f.withTool, dir, f.bin, "deinit")
+			if err == nil || !strings.Contains(out, want) {
+				t.Fatalf("deinit: %v\n%s", err, out)
+			}
+			if hooks, _ := os.ReadFile(filepath.Join(root, ".git", "hooks", "pre-commit")); !bytes.Contains(hooks, []byte("git-local")) {
+				t.Fatal("refused deinit removed the guards")
+			}
+			if _, err := os.Stat(filepath.Join(root, ".git", "gitlocal")); err != nil {
+				t.Fatalf("refused deinit changed the private state: %v", err)
+			}
+		})
+	}
+}

@@ -15,6 +15,17 @@ import (
 // there is no block (already removed). A block edited by hand is refused, as
 // elsewhere, so no user line is lost.
 func RemoveExcludeBlock(ctx context.Context, r *gitexec.Runner, cwd string) (bool, error) {
+	return excludeBlock(ctx, r, cwd, true)
+}
+
+// CheckExcludeBlock makes RemoveExcludeBlock's checks without changing
+// anything, so deinit can refuse before its first change.
+func CheckExcludeBlock(ctx context.Context, r *gitexec.Runner, cwd string) error {
+	_, err := excludeBlock(ctx, r, cwd, false)
+	return err
+}
+
+func excludeBlock(ctx context.Context, r *gitexec.Runner, cwd string, write bool) (bool, error) {
 	s, err := open(ctx, r, cwd)
 	if err != nil {
 		return false, err
@@ -42,6 +53,9 @@ func RemoveExcludeBlock(ctx context.Context, r *gitexec.Runner, cwd string) (boo
 	user, err := exclude.UserBytes(current.Data, patterns, alternates...)
 	if err != nil {
 		return false, errors.Join(err, errors.New("restore the lines between the git-local markers in .git/info/exclude, or delete the block by hand, then run git local deinit again"))
+	}
+	if !write {
+		return true, nil
 	}
 	return true, s.common.AtomicWrite("info/exclude", user, os.FileMode(current.Mode))
 }

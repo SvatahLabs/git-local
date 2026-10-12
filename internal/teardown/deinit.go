@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"gitlocal/internal/configtx"
+	"gitlocal/internal/exclude"
 	"gitlocal/internal/gitexec"
 	"gitlocal/internal/hook"
 	"gitlocal/internal/overlay"
@@ -37,9 +39,12 @@ type Result struct {
 // overlay's working file holds changes that aren't saved in the overlay.
 //
 // Each step can be run again, so an interrupted deinit is finished by running
-// it again. The private state directory is renamed (kept) in one step, after
-// everything that needs it; removeHistory deletes it instead, only when no
-// quarantine or restore recovery ref would be lost.
+// it again. Every check that can refuse runs before the first change. The
+// private state directory is renamed (kept) in one step, after everything that
+// needs it, under the exclusive repository lock and after a final check that
+// no other git local command installed anything meanwhile; removeHistory
+// deletes it instead, only when no quarantine or restore recovery ref would be
+// lost.
 func Deinit(ctx context.Context, r *gitexec.Runner, cwd string, removeHistory bool) (Result, error) {
 	result := Result{Overlays: []string{}, Hooks: []string{}, Identities: []string{}, Warnings: []string{}}
 	w, err := workspace.Discover(ctx, r, cwd)
@@ -55,8 +60,23 @@ func Deinit(ctx context.Context, r *gitexec.Runner, cwd string, removeHistory bo
 		if err := checkRemovable(ctx, r, w, removeHistory); err != nil {
 			return result, err
 		}
+		if err := checkInitialized(w); err != nil {
+			return result, err
+		}
+		if err := configtx.CheckExcludeBlock(ctx, r, cwd); err != nil {
+			return result, err
+		}
 		if result.Overlays, err = removeOverlays(ctx, r, w); err != nil {
 			return result, err
+		}
+		// An overlay add interrupted before its manifest, whose directory was
+		// then deleted, leaves the filter with no overlay to remove.
+		leftovers, err := overlay.RemoveFilter(ctx, r, cwd)
+		if err != nil {
+			return result, err
+		}
+		if len(leftovers) > 0 && len(result.Overlays) == 0 {
+			result.Warnings = append(result.Warnings, "removed the overlay filter an interrupted git local overlay add left ("+strings.Join(leftovers, ", ")+")")
 		}
 		for _, uninstall := range []func() ([]string, []string, error){
 			func() ([]string, []string, error) { return hook.UninstallSnapshots(ctx, r, cwd) },
@@ -83,21 +103,8 @@ func Deinit(ctx context.Context, r *gitexec.Runner, cwd string, removeHistory bo
 			}
 			result.Warnings = append(result.Warnings, "sensitive paths "+strings.Join(paths, ", ")+" are no longer ignored or guarded: git add -A would stage them and git clean -fd would delete them; add them to .git/info/exclude if Git should keep ignoring them")
 		}
-		id, err := storage.UUID()
-		if err != nil {
+		if result.Archive, result.Removed, err = setAside(ctx, r, w, common, removeHistory); err != nil {
 			return result, err
-		}
-		archive := "gitlocal-removed-" + id
-		if err := common.RenameNoReplace("gitlocal", archive); err != nil {
-			return result, err
-		}
-		if removeHistory {
-			if err := os.RemoveAll(filepath.Join(w.Common, archive)); err != nil {
-				return result, fmt.Errorf("delete the private state %s: %w", filepath.Join(w.Common, archive), err)
-			}
-			result.Removed = true
-		} else {
-			result.Archive = archive
 		}
 	} else if !os.IsNotExist(err) {
 		return result, err
@@ -114,6 +121,132 @@ func Deinit(ctx context.Context, r *gitexec.Runner, cwd string, removeHistory bo
 	}
 	result.Identities, err = removeIdentities(common, w.Common)
 	return result, err
+}
+
+// beforeSetAside runs just before deinit takes the lock to set the private
+// state aside; tests replace it to install something meanwhile.
+var beforeSetAside = func() {}
+
+// setAside renames the private state to gitlocal-removed-<id>, or with
+// removeHistory deletes it, under the exclusive repository lock. Each earlier
+// step took the lock on its own, so another git local command (overlay add,
+// hook install, auto install, track) may have run since; the final check
+// refuses then, leaving everything in place, and a rerun removes what it
+// installed. Commands that wait for the lock meanwhile find no private state
+// afterwards and stop.
+func setAside(ctx context.Context, r *gitexec.Runner, w *workspace.Context, common *storage.Dir, removeHistory bool) (string, bool, error) {
+	beforeSetAside()
+	lock, err := common.Lock(ctx, "gitlocal/locks/repository.lock", false)
+	if err != nil {
+		return "", false, err
+	}
+	defer lock.Close()
+	if err := finalCheck(ctx, r, w, common); err != nil {
+		return "", false, err
+	}
+	id, err := storage.UUID()
+	if err != nil {
+		return "", false, err
+	}
+	archive := "gitlocal-removed-" + id
+	if runtime.GOOS == "windows" {
+		// Windows can't rename a directory while a file in it (the lock) is
+		// open; the check above still ran under the lock.
+		lock.Close()
+	}
+	if err := common.RenameNoReplace("gitlocal", archive); err != nil {
+		return "", false, err
+	}
+	if !removeHistory {
+		return archive, false, nil
+	}
+	if err := os.RemoveAll(filepath.Join(w.Common, archive)); err != nil {
+		return "", false, fmt.Errorf("delete the private state %s: %w", filepath.Join(w.Common, archive), err)
+	}
+	return "", true, nil
+}
+
+// finalCheck looks, without taking a lock, for anything git-local installed
+// after deinit removed it: a pending transaction, an overlay, the overlay
+// filter, a hook record or the managed info/exclude block.
+func finalCheck(ctx context.Context, r *gitexec.Runner, w *workspace.Context, common *storage.Dir) error {
+	var found []string
+	meta, err := storage.OpenDir(filepath.Join(w.Common, "gitlocal"))
+	if err != nil {
+		return err
+	}
+	defer meta.Close()
+	pending, err := configtx.PendingLocked(meta)
+	if err != nil {
+		return err
+	}
+	if len(pending) > 0 {
+		found = append(found, "transaction "+pending[0])
+	}
+	versions, err := overlay.RegisteredLocked(w.Common)
+	if err != nil {
+		return err
+	}
+	for _, v := range versions {
+		found = append(found, "overlay "+v.Manifest.Name)
+	}
+	leftovers, err := overlay.FilterLeftovers(ctx, r, w.Root, w.Common)
+	if err != nil {
+		return err
+	}
+	found = append(found, leftovers...)
+	if _, err := meta.Lstat("hook-install.json"); err == nil {
+		found = append(found, "hooks")
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	data, err := common.ReadFile("info/exclude", 1<<20)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if bytes.Contains(data, []byte(exclude.Begin)) {
+		found = append(found, "the managed block in info/exclude")
+	}
+	if len(found) > 0 {
+		return fmt.Errorf("%w: another git local command installed %s while deinit ran; run git local deinit again", storage.ErrConflict, strings.Join(found, ", "))
+	}
+	return nil
+}
+
+// checkInitialized refuses in a worktree that git local init never ran in,
+// where the steps that need a workspace would fail after earlier ones made
+// changes, and names the worktrees to run deinit from instead.
+func checkInitialized(w *workspace.Context) error {
+	if _, err := os.Stat(filepath.Join(w.Admin, "gitlocal-workspace.json")); err == nil || !os.IsNotExist(err) {
+		return err
+	}
+	var roots []string
+	if _, err := os.Stat(filepath.Join(w.Common, "gitlocal-workspace.json")); err == nil {
+		if root, err := mainRoot(w.Common); err == nil {
+			roots = append(roots, root)
+		}
+	}
+	linked, _ := filepath.Glob(filepath.Join(w.Common, "worktrees", "*", "gitlocal-workspace.json"))
+	for _, identity := range linked {
+		gitdir, err := os.ReadFile(filepath.Join(filepath.Dir(identity), "gitdir"))
+		if err == nil {
+			roots = append(roots, filepath.Dir(strings.TrimSpace(string(gitdir))))
+		}
+	}
+	where := "a worktree where git local init ran"
+	if len(roots) > 0 {
+		where = strings.Join(roots, " or ")
+	}
+	return fmt.Errorf("%w: git local was never initialized in this worktree; run git local deinit from %s", storage.ErrConflict, where)
+}
+
+// mainRoot is the main worktree of a non-bare repository whose common
+// directory is commonPath: its parent, for the usual .git directory.
+func mainRoot(commonPath string) (string, error) {
+	if filepath.Base(commonPath) != ".git" {
+		return "", errors.New("main worktree not found")
+	}
+	return filepath.Dir(commonPath), nil
 }
 
 // checkRemovable refuses what deinit can't undo safely: a pending

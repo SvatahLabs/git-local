@@ -529,8 +529,15 @@ keeps them out of `git add -A` any more, and `git clean -fd` would delete them,
 so add any you want Git to keep ignoring to `.git/info/exclude` (deinit names
 the sensitive paths among them). It refuses while a transaction is pending,
 while an overlay's file holds changes the overlay doesn't or the overlay no
-longer applies to the file, and for an overlay of a worktree that is missing
-(prune it first). The private history and state are kept as
+longer applies to the file, for an overlay of a worktree that is missing
+(prune it first), for a hand-edited managed block in `.git/info/exclude`, and in
+a worktree where git local was never initialized (it names the worktrees to run
+it from); each of these refusals comes before it changes anything. It also
+removes the overlay filter an interrupted `overlay add` left behind. It sets the
+private state aside under the repository lock, after checking that no other git
+local command (an `overlay add`, `hook install` or `track` in another worktree)
+installed something meanwhile; if one did, deinit refuses and running it again
+removes that too. The private history and state are kept as
 `.git/gitlocal-removed-<id>`; delete that directory when you no longer need
 it. `--remove-history` deletes it at once, but refuses while it would lose data
 kept nowhere else: a quarantine, a restore recovery ref (the previous file

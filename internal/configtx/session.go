@@ -310,8 +310,14 @@ func states(sources []Source, target string, next *selection.State) ([]selection
 	}
 	return result, nil
 }
-func (s *session) pending() ([]string, error) {
-	entries, err := s.meta.ReadDir("transactions")
+func (s *session) pending() ([]string, error) { return pendingIn(s.meta) }
+
+// PendingLocked lists the pending transaction IDs for a caller that holds the
+// repository lock; meta is the private state directory.
+func PendingLocked(meta *storage.Dir) ([]string, error) { return pendingIn(meta) }
+
+func pendingIn(meta *storage.Dir) ([]string, error) {
+	entries, err := meta.ReadDir("transactions")
 	if os.IsNotExist(err) {
 		return nil, nil
 	}
