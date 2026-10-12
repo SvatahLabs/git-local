@@ -124,8 +124,10 @@ About a hundred defects found in pre-release reviews, among them:
   were written without one and read back with 1 MiB).
 - Backups: archives are bound to their ref, a backup made on another OS is no
   longer refused (tested only by simulation on POSIX), leftover private files
-  no longer make backups unrestorable, HTTPS remotes authenticate, and remote
-  host checks canonicalize addresses.
+  no longer make backups unrestorable, HTTPS remotes authenticate, remote
+  host checks canonicalize addresses, and a failed push or fetch names its
+  cause (certificate, authentication, connection or proxy, or the remote's
+  refusal) instead of one generic message, without printing credentials.
 - Security: `golang.org/x/text` is updated to v0.39.0; earlier versions could
   loop forever normalizing an invalid path name (GO-2026-5970).
 - Platforms and layouts: relative and bare worktree layouts, shared and

@@ -47,6 +47,9 @@ type Error struct {
 	Command       string
 	Code          int
 	DiscoveryMiss bool
+	// stderr is Git's diagnostic output, kept out of Error because it can
+	// name URLs with credentials; see TransportError.
+	stderr string
 }
 
 func (e *Error) Error() string {
@@ -337,7 +340,7 @@ func (r *Runner) runOutput(ctx context.Context, cwd string, private bool, extraE
 	if err != nil {
 		var exit *exec.ExitError
 		if errors.As(err, &exit) {
-			return out.Bytes(), &Error{Command: args[0], Code: exit.ExitCode(), DiscoveryMiss: strings.Contains(diagnostic.String(), "not a git repository") || strings.Contains(diagnostic.String(), "must be run in a work tree")}
+			return out.Bytes(), &Error{Command: args[0], Code: exit.ExitCode(), DiscoveryMiss: strings.Contains(diagnostic.String(), "not a git repository") || strings.Contains(diagnostic.String(), "must be run in a work tree"), stderr: diagnostic.String()}
 		}
 		return nil, fmt.Errorf("start Git: %w", err)
 	}
@@ -597,8 +600,8 @@ func (r *Runner) BackupPush(ctx context.Context, store, remoteURL, commit, ref s
 	if err != nil {
 		return err
 	}
-	_, err = r.run(ctx, store, true, env, prefix, nil, backupArgs("push", remoteURL, commit+":"+ref)...)
-	return err
+	out, err := r.run(ctx, store, true, env, prefix, nil, backupArgs("push", remoteURL, commit+":"+ref)...)
+	return transportError(err, out)
 }
 
 // backupArgs builds a backup push or fetch. The URL follows "--", so Git never
@@ -684,8 +687,8 @@ func (r *Runner) BackupFetch(ctx context.Context, store, remoteURL, ref string) 
 	if err != nil {
 		return err
 	}
-	_, err = r.run(ctx, store, true, env, prefix, nil, backupArgs("fetch", remoteURL, ref+":refs/heads/import")...)
-	return err
+	out, err := r.run(ctx, store, true, env, prefix, nil, backupArgs("fetch", remoteURL, ref+":refs/heads/import")...)
+	return transportError(err, out)
 }
 
 // HistoryBlobTo streams one private blob, avoiding the bounded diagnostic

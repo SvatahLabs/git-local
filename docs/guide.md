@@ -173,7 +173,10 @@ evaluated outside your repository, so settings they include only for it (for
 example with `gitdir:`) aren't used. No other HTTP setting is used and
 redirects aren't followed. Credential helpers are passed to Git as `-c`
 options, so a helper written inline with a secret in it is visible in the
-process list; use a helper program instead.
+process list; use a helper program instead. When a push or fetch fails, the
+error names the cause Git reported (an untrusted certificate, failed
+authentication, a remote or proxy that couldn't be reached, or a refusal by the
+remote) with Git's line about it, credentials in URLs replaced by `***`.
 Over SSH, askpass programs are disabled too (`SSH_ASKPASS_REQUIRE=never`), but
 ssh itself can still ask on the terminal to accept an unknown host key or for a
 key's passphrase. For unattended backups, use an ssh-agent and accept the host
