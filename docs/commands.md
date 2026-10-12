@@ -288,6 +288,6 @@ Generate completion with `git local completion bash` (or `zsh`, `fish`,
 `powershell`) and install the printed script using that shell's normal setup.
 The bash script completes both `git-local` and `git local`: it defines
 `_git_local` for Git's bash completion. The zsh script's `_git-local` serves the
-`_git` completion bundled with zsh, so both forms complete there; with Git's own
-`git-completion.zsh` (installed by some Git distributions), only `git-local`
-completes for now. Load the scripts after Git's completion.
+`_git` completion bundled with zsh, and its `_git_local` serves Git's own
+`git-completion.zsh` (installed as `_git` by some Git distributions), so both
+forms complete with either. Load the scripts after Git's completion.

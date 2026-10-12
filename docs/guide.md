@@ -63,9 +63,9 @@ To complete both `git-local` and `git local`, load the script after Git's own
 completion: in bash, `eval "$(git-local completion bash)"` (with Git's
 `git-completion.bash` loaded first, the bash-completion package isn't needed);
 in zsh with compinit, `source <(git-local completion zsh)`. In zsh,
-`git local <TAB>` completes through the `_git` completion bundled with zsh;
-with Git's own `git-completion.zsh` (installed by some Git distributions), only
-`git-local <TAB>` completes for now.
+`git local <TAB>` completes both with the `_git` completion bundled with zsh
+and with Git's own `git-completion.zsh` (installed as `_git` by some Git
+distributions).
 
 ## Interrupted transactions
 

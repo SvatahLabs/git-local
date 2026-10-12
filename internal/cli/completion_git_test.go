@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -202,6 +203,90 @@ complete_words git-local hook ""
 		for _, w := range want {
 			if !strings.Contains(sections[line], "\n"+w) && !strings.HasPrefix(sections[line], w) {
 				t.Fatalf("zsh %q doesn't complete %q:\n%s", line, w, out)
+			}
+		}
+	}
+}
+
+// gitZshCompletion finds Git's own git-completion.zsh.
+func gitZshCompletion(t *testing.T) string {
+	t.Helper()
+	candidates := []string{"/opt/homebrew/share/zsh/site-functions/_git", "/usr/local/share/zsh/site-functions/_git", "/usr/share/doc/git/contrib/completion/git-completion.zsh", "/usr/share/git-core/contrib/completion/git-completion.zsh"}
+	if out, err := exec.Command("git", "--exec-path").Output(); err == nil {
+		execPath := strings.TrimSpace(string(out))
+		candidates = append([]string{filepath.Join(execPath, "..", "..", "share", "git-core", "git-completion.zsh"), filepath.Join(execPath, "..", "..", "share", "git-core", "contrib", "completion", "git-completion.zsh")}, candidates...)
+	}
+	for _, path := range candidates {
+		if data, err := os.ReadFile(path); err == nil && strings.Contains(string(data), "__git_zsh_bash_func") {
+			return path
+		}
+	}
+	t.Skip("Git's zsh completion script isn't installed")
+	return ""
+}
+
+// GL-114: Git's own git-completion.zsh (installed as _git by some
+// distributions) dispatches `git local ...` to a bash-style _git_local, under
+// ksh emulation; the zsh script defines it.
+func TestZshCompletionWithGitsScriptCompletesGitLocalForm(t *testing.T) {
+	zsh, err := exec.LookPath("zsh")
+	if err != nil || runtime.GOOS == "windows" {
+		t.Skip("zsh isn't installed")
+	}
+	gitZsh, gitBash := gitZshCompletion(t), gitBashCompletion(t)
+	bin := completionBinary(t)
+	code, script, _ := callCLI(t, t.TempDir(), "completion", "zsh")
+	if code != 0 {
+		t.Fatalf("completion zsh: exit %d", code)
+	}
+	scriptPath := filepath.Join(t.TempDir(), "git-local.zsh")
+	if err := os.WriteFile(scriptPath, []byte(script), 0600); err != nil {
+		t.Fatal(err)
+	}
+	// compsys isn't loaded: stub what the scripts call outside a completion
+	// widget, and print the candidates compadd would get. Sourcing Git's
+	// script runs its _git once; the stubs make that a no-op.
+	const driver = `
+compdef() { :; }
+compset() { :; }
+_arguments() { return 0; }
+_default() { return 0; }
+_files() { print -r -- "<files>"; }
+compadd() { local -a a; a=("$@"); print -rl -- "${(@)a[${a[(i)--]}+1,-1]}"; }
+service=git
+zstyle ':completion:*:*:git:*' script "$2"
+source "$1" || exit 3
+source "$3" || exit 3
+complete_words() {
+	local -a words orig_words; words=("$@"); orig_words=("$@")
+	local cword=$(( $# - 1 )) cur=${words[-1]} prev=${words[-2]} __git_cmd_idx=1 _ret=1
+	print -r -- "== ${words[*]}"
+	__git_zsh_bash_func local
+}
+complete_words git local ""
+complete_words git local hook ""
+`
+	cmd := exec.Command(zsh, "-f", "-c", driver, "driver", gitZsh, gitBash, scriptPath)
+	cmd.Env = shellEnv(t, bin)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("zsh: %v\n%s", err, out)
+	}
+	sections := map[string][]string{}
+	current := ""
+	for _, line := range strings.Split(string(out), "\n") {
+		if name, ok := strings.CutPrefix(line, "== "); ok {
+			current = name
+			continue
+		}
+		if line = strings.TrimSpace(line); line != "" {
+			sections[current] = append(sections[current], line)
+		}
+	}
+	for line, want := range map[string][]string{"git local ": {"commit", "track", "hook"}, "git local hook ": {"install", "uninstall"}} {
+		for _, w := range want {
+			if !slices.Contains(sections[line], w) {
+				t.Fatalf("zsh with Git's script: %q doesn't complete %q:\n%s", line, w, out)
 			}
 		}
 	}

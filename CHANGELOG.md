@@ -97,8 +97,8 @@ The first release meant for general use. It replaces the 0.1.4 test builds.
   `auto install --allow-shared-hooks-dir` install into a hooks directory
   outside the repository, such as a global `core.hooksPath`.
 - Shell completion completes `git local …` as well as `git-local …` in bash,
-  and in zsh with zsh's bundled `_git` completion; with Git's own
-  `git-completion.zsh`, only `git-local …` completes for now.
+  and in zsh with zsh's bundled `_git` completion or Git's own
+  `git-completion.zsh`.
 - `--version` shows the source commit of release builds.
 
 ### Fixed

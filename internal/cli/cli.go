@@ -1535,6 +1535,34 @@ _git_local()
 }
 `
 
+// zshGitForm lets Git's own git-completion.zsh (installed as _git by some
+// distributions, Homebrew's git among them) complete `git local ...`: it
+// dispatches subcommands to the bash-style _git_<command> functions, under
+// ksh emulation, with words holding the whole command line, cword the index of
+// the current word and __git_cmd_idx that of the command. zsh's own _git
+// completes through _git-local instead (above).
+const zshGitForm = `
+_git_local()
+{
+    emulate -L zsh
+    local -a args lines names
+    local directive suffix=" "
+    args=("${(@)words[__git_cmd_idx+2,cword+1]}")
+    lines=("${(@f)$(git-local __completeNoDesc "${args[@]}" 2>/dev/null)}")
+    [[ ${lines[-1]} == :* ]] || return
+    directive=${lines[-1]#:}
+    (( directive & 1 )) && return
+    names=("${(@)${(@)lines[1,-2]}%%$'\t'*}")
+    names=("${(@)names:#}")
+    (( directive & 2 )) && suffix=""
+    if (( ${#names} )); then
+        __gitcomp_nl "${(F)names}" "" "" "$suffix"
+    elif (( (directive & 4) == 0 )); then
+        _files
+    fi
+}
+`
+
 // zshGitRequest is the zsh script's completion request. zsh's _git completes
 // `git local ...` through _git-local with words[1] set to "local", so the
 // request must name git-local itself.
@@ -1579,7 +1607,7 @@ func gitFormCompletion(root *cobra.Command) {
 					return errors.New("unexpected zsh completion script")
 				}
 				program := "    local program=${words[1]}\n    [[ $program == local ]] && program=git-local\n"
-				_, err = io.WriteString(c.OutOrStdout(), strings.Replace(script.String(), request, program+strings.Replace(request, "${words[1]}", "${program}", 1), 1))
+				_, err = io.WriteString(c.OutOrStdout(), strings.Replace(script.String(), request, program+strings.Replace(request, "${words[1]}", "${program}", 1), 1)+zshGitForm)
 				return err
 			}
 		}
