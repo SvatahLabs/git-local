@@ -15,6 +15,7 @@ recovery, worktrees, guards and automatic snapshots, overlays, encryption at
 rest, encrypted backups, maintenance and removal are implemented and tested on
 macOS. The CI matrix for Linux and Windows is configured but hasn't run yet,
 and Windows hasn't been qualified on native hardware.
+See the [changelog](CHANGELOG.md) for what changed and the known limitations.
 
 ## Install
 
@@ -46,6 +47,7 @@ git local doctor
   and exit codes.
 - [Installing and removing git-local](docs/install.md).
 - [Limits](docs/limits.md): size limits and platform constraints.
+- [Changelog](CHANGELOG.md).
 
 ## Development
 
