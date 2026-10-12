@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"slices"
 	"strings"
 	"time"
@@ -40,13 +41,41 @@ func (e guardRepositoryError) Unwrap() error { return e.error }
 
 type guardViolation struct{ error }
 
-// Version is replaced by release builds; source builds identify themselves as dev.
-var Version = "dev"
+// Version and Commit are set by release builds (-ldflags -X, from the VERSION
+// file and the source commit); source builds identify themselves as dev.
+var (
+	Version = "dev"
+	Commit  = ""
+)
+
+// versionString is Version and the source commit: the one a release build
+// embeds, or for a source build the one Go's VCS stamping recorded, if any.
+func versionString() string {
+	commit := Commit
+	if info, ok := debug.ReadBuildInfo(); ok && commit == "" {
+		modified := false
+		for _, setting := range info.Settings {
+			switch setting.Key {
+			case "vcs.revision":
+				commit = setting.Value
+			case "vcs.modified":
+				modified = setting.Value == "true"
+			}
+		}
+		if commit != "" && modified {
+			commit += "+dirty"
+		}
+	}
+	if commit == "" {
+		return Version
+	}
+	return Version + " (commit " + commit + ")"
+}
 
 // New constructs an independent command tree. Restore execution is journaled and explicitly recoverable.
 func New(out, errOut io.Writer) *cobra.Command {
 	root := &cobra.Command{Use: "git-local", Short: "Independent local history for selected project files",
-		Version:       Version,
+		Version:       versionString(),
 		Long:          "Independent local history for selected project files.\nInitialize a workspace, select local files, check health, and recover transactions.\nCommit, inspect changes, and browse independent local snapshots. Preview or execute explicit-path restores with journaled recovery.",
 		SilenceErrors: true, SilenceUsage: true,
 		RunE: func(c *cobra.Command, args []string) error {

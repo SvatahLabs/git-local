@@ -1,4 +1,4 @@
-// Run with: go run ./scripts/release-binaries.go -version 0.1.4
+// Run with: go run ./scripts/release-binaries.go (the version comes from VERSION)
 // This prepares local artifacts; it does not publish a release.
 package main
 
@@ -18,6 +18,8 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+
+	"gitlocal/internal/gitexec"
 )
 
 type target struct{ OS, Arch string }
@@ -44,14 +46,13 @@ type manifest struct {
 }
 
 func main() {
-	version := flag.String("version", "", "release version in major.minor.patch form")
-	output := flag.String("out", "", "new artifact directory (default dist/binaries/v<version>)")
+	output := flag.String("out", "", "new artifact directory (default dist/binaries/v<VERSION>)")
 	hostOnly := flag.Bool("host-only", false, "build and smoke-test only the current OS and architecture")
 	smokeExisting := flag.String("smoke-existing", "", "smoke-test a previously built native artifact without a Go toolchain")
 	goBinary := flag.String("go", "go", "Go toolchain executable")
 	flag.Parse()
 	if *smokeExisting != "" {
-		if flag.NArg() != 0 || *version != "" || *output != "" || *hostOnly {
+		if flag.NArg() != 0 || *output != "" || *hostOnly {
 			fail(errors.New("-smoke-existing cannot be combined with build options"))
 		}
 		if err := smokeExistingArtifact(*smokeExisting); err != nil {
@@ -60,8 +61,8 @@ func main() {
 		fmt.Printf("Native artifact smoke test passed: %s\n", *smokeExisting)
 		return
 	}
-	if flag.NArg() != 0 || !regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`).MatchString(*version) {
-		fail(errors.New("usage: go run ./scripts/release-binaries.go -version major.minor.patch [-host-only] [-out new-directory]"))
+	if flag.NArg() != 0 {
+		fail(errors.New("usage: go run ./scripts/release-binaries.go [-host-only] [-out new-directory]"))
 	}
 	root, err := os.Getwd()
 	if err != nil {
@@ -70,8 +71,12 @@ func main() {
 	if _, err := os.Stat(filepath.Join(root, "go.mod")); err != nil {
 		fail(errors.New("run the release builder from the module root"))
 	}
+	version, err := readVersion(root)
+	if err != nil {
+		fail(err)
+	}
 	if *output == "" {
-		*output = filepath.Join(root, "dist", "binaries", "v"+*version)
+		*output = filepath.Join(root, "dist", "binaries", "v"+version)
 	}
 	final, err := filepath.Abs(*output)
 	if err != nil {
@@ -98,14 +103,14 @@ func main() {
 	if *hostOnly {
 		selected = []target{{runtime.GOOS, runtime.GOARCH}}
 	}
-	info := manifest{SchemaVersion: 1, Version: *version, MinimumGit: "2.50.1", GoVersion: goVersion}
-	if revision, err := gitRevision(root); err == nil {
-		info.SourceRevision = revision
+	info := manifest{SchemaVersion: 1, Version: version, MinimumGit: gitexec.MinimumGit, GoVersion: goVersion}
+	if info.SourceRevision, err = gitRevision(root); err != nil {
+		fail(fmt.Errorf("read the source commit: %w", err))
 	}
 	for _, platform := range selected {
-		name := artifactName(*version, platform)
+		name := artifactName(version, platform)
 		path := filepath.Join(stage, name)
-		cmd := exec.Command(*goBinary, "build", "-trimpath", "-buildvcs=false", "-ldflags=-buildid= -X gitlocal/internal/cli.Version="+*version, "-o", path, "./cmd/git-local")
+		cmd := exec.Command(*goBinary, "build", "-trimpath", "-buildvcs=false", "-ldflags=-buildid= -X gitlocal/internal/cli.Version="+version+" -X gitlocal/internal/cli.Commit="+info.SourceRevision, "-o", path, "./cmd/git-local")
 		cmd.Dir = root
 		cmd.Env = buildEnv(platform)
 		if output, err := cmd.CombinedOutput(); err != nil {
@@ -174,11 +179,40 @@ func goEnv(goBinary, root, key string) (string, error) {
 	return strings.TrimSpace(string(output)), nil
 }
 
+// readVersion reads the release version from the VERSION file, its only
+// source.
+func readVersion(root string) (string, error) {
+	data, err := os.ReadFile(filepath.Join(root, "VERSION"))
+	if err != nil {
+		return "", err
+	}
+	version := strings.TrimSpace(string(data))
+	if !regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`).MatchString(version) {
+		return "", fmt.Errorf("VERSION must hold major.minor.patch, not %q", version)
+	}
+	return version, nil
+}
+
+// gitRevision is the source commit, marked +dirty when tracked files have
+// uncommitted changes.
 func gitRevision(root string) (string, error) {
 	cmd := exec.Command("git", "rev-parse", "--verify", "HEAD")
 	cmd.Dir = root
 	output, err := cmd.Output()
-	return strings.TrimSpace(string(output)), err
+	if err != nil {
+		return "", err
+	}
+	revision := strings.TrimSpace(string(output))
+	cmd = exec.Command("git", "status", "--porcelain", "--untracked-files=no")
+	cmd.Dir = root
+	status, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	if len(bytes.TrimSpace(status)) != 0 {
+		revision += "+dirty"
+	}
+	return revision, nil
 }
 
 func fileSHA256(path string) (string, error) {
@@ -320,8 +354,8 @@ func smokeHost(stage string, info manifest) error {
 		if err != nil {
 			return err
 		}
-		if !strings.Contains(string(output), info.Version) {
-			return fmt.Errorf("native smoke test %v reported wrong version: %s", command, output)
+		if !strings.Contains(string(output), info.Version) || !strings.Contains(string(output), info.SourceRevision) {
+			return fmt.Errorf("native smoke test %v reported wrong version or commit: %s", command, output)
 		}
 	}
 	repo := filepath.Join(stage, "smoke-repo")

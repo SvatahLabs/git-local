@@ -82,7 +82,7 @@ func Run(ctx context.Context, r *gitexec.Runner, cwd string) (Report, error) {
 		if ctx.Err() != nil {
 			return result, ctx.Err()
 		}
-		result.add("git", "error", err.Error(), "Install Git 2.50.1 or later and rerun git local doctor.")
+		result.add("git", "error", err.Error(), "Install Git "+gitexec.MinimumGit+" or later and rerun git local doctor.")
 		return result, nil
 	}
 	result.add("git", "ok", "required local Git behavior is available", "")

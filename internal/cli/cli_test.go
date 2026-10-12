@@ -85,6 +85,17 @@ func TestVersionFlag(t *testing.T) {
 	}
 }
 
+// GL-060: --version names the source commit a release build embeds.
+func TestVersionFlagShowsCommit(t *testing.T) {
+	savedVersion, savedCommit := Version, Commit
+	defer func() { Version, Commit = savedVersion, savedCommit }()
+	Version, Commit = "1.2.3", "0123456789abcdef0123456789abcdef01234567"
+	var out, diagnostic bytes.Buffer
+	if code := Execute(context.Background(), []string{"--version"}, &out, &diagnostic); code != 0 || out.String() != "git-local version 1.2.3 (commit 0123456789abcdef0123456789abcdef01234567)\n" {
+		t.Fatalf("--version: exit %d %q %q", code, out.String(), diagnostic.String())
+	}
+}
+
 func TestJSONEnvelopeForHelpVersionCompletionAndErrors(t *testing.T) {
 	for _, args := range [][]string{{"--json", "--help"}, {"--json", "--version"}, {"completion", "bash", "--json"}, {"unknown", "--json"}, {"track", "--json"}, {"--json=1", "track"}} {
 		var out, diagnostic bytes.Buffer

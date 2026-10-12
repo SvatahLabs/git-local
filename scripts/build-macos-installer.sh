@@ -6,9 +6,14 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
   exit 1
 fi
 
-version="${1:-0.1.4}"
+if [[ $# -ne 0 ]]; then
+  echo "usage: $0 (the version comes from the VERSION file)" >&2
+  exit 2
+fi
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+version="$(tr -d '[:space:]' < "$repo_root/VERSION")"
 if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  echo "usage: $0 [major.minor.patch]" >&2
+  echo "VERSION must hold major.minor.patch, not '$version'" >&2
   exit 2
 fi
 
@@ -25,17 +30,30 @@ if ! command -v "$go_bin" >/dev/null 2>&1; then
   exit 1
 fi
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 output_dir="${GITLOCAL_DIST_DIR:-$repo_root/dist}"
 mkdir -p "$output_dir"
 output_dir="$(cd "$output_dir" && pwd -P)"
+package_name="GitLocal-${version}-macos-universal.pkg"
+package_path="$output_dir/$package_name"
+# A released version is never rebuilt: bump VERSION for a new package.
+for existing in "$package_path" "$package_path.sha256"; do
+  if [[ -e "$existing" || -L "$existing" ]]; then
+    echo "refusing to overwrite $existing; bump VERSION to build a new package" >&2
+    exit 1
+  fi
+done
+# The source commit, marked +dirty when the checkout has uncommitted changes.
+commit="$(git -C "$repo_root" rev-parse --verify HEAD)"
+if [[ -n "$(git -C "$repo_root" status --porcelain --untracked-files=no)" ]]; then
+  commit="$commit+dirty"
+fi
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/gitlocal-macos-pkg.XXXXXXXX")"
 trap 'rm -rf "$work_dir"' EXIT
 
 cd "$repo_root"
 for arch in arm64 amd64; do
   CGO_ENABLED=0 GOOS=darwin GOARCH="$arch" "$go_bin" build \
-    -trimpath -buildvcs=false -ldflags="-buildid= -X gitlocal/internal/cli.Version=$version" \
+    -trimpath -buildvcs=false -ldflags="-buildid= -X gitlocal/internal/cli.Version=$version -X gitlocal/internal/cli.Commit=$commit" \
     -o "$work_dir/git-local-$arch" ./cmd/git-local
 done
 
@@ -51,8 +69,8 @@ codesign --force --sign - "$install_dir/git-local"
 # Do not package Finder/resource-fork metadata as AppleDouble ._ files.
 xattr -cr "$payload"
 codesign --verify --strict "$install_dir/git-local"
-if [[ "$("$install_dir/git-local" --version)" != *"$version"* ]]; then
-  echo "built git-local has the wrong version" >&2
+if [[ "$("$install_dir/git-local" --version)" != *"$version"*"$commit"* ]]; then
+  echo "built git-local has the wrong version or commit" >&2
   exit 1
 fi
 
@@ -69,8 +87,6 @@ if ! /usr/bin/grep -q 'Available Commands:' "$work_dir/help.txt"; then
   exit 1
 fi
 
-package_name="GitLocal-${version}-macos-universal.pkg"
-package_path="$output_dir/$package_name"
 COPYFILE_DISABLE=1 pkgbuild --root "$payload" --install-location / \
   --identifier org.gitlocal.cli --version "$version" \
   --ownership recommended "$package_path"

@@ -22,14 +22,14 @@ jobs:
         env:
           CGO_ENABLED: '0'
       - name: Build and smoke-test native release binary without Go on PATH
-        run: go run ./scripts/release-binaries.go -version 0.1.4 -host-only -out dist/ci-host
+        run: go run ./scripts/release-binaries.go -host-only -out dist/ci-host
       - uses: actions/upload-artifact@v4
         with:
           name: gitlocal-${{ matrix.os }}-go${{ matrix.go }}
           path: dist/ci-host/*
       - name: Build and smoke-test macOS installer
         if: runner.os == 'macOS'
-        run: scripts/build-macos-installer.sh 0.1.4
+        run: scripts/build-macos-installer.sh
   git-versions:
     runs-on: ubuntu-latest
     strategy:
@@ -57,7 +57,7 @@ jobs:
       - run: git --version
       - run: go test -parallel 4 -timeout 20m ./...
       - name: Smoke-test release binary against selected Git
-        run: go run ./scripts/release-binaries.go -version 0.1.4 -host-only -out dist/ci-git-${{ matrix.gitVersion }}
+        run: go run ./scripts/release-binaries.go -host-only -out dist/ci-git-${{ matrix.gitVersion }}
   macos-current-git:
     runs-on: macos-latest
     steps:
@@ -76,4 +76,4 @@ jobs:
       - run: git --version
       - run: go test -race -parallel 4 -timeout 20m ./...
       - name: Smoke-test release binary against current Git
-        run: go run ./scripts/release-binaries.go -version 0.1.4 -host-only -out dist/ci-macos-current
+        run: go run ./scripts/release-binaries.go -host-only -out dist/ci-macos-current

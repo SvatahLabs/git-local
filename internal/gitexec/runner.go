@@ -20,6 +20,10 @@ import (
 	"time"
 )
 
+// MinimumGit is the oldest Git release git-local supports; the release
+// script, doctor and the docs take it from here.
+const MinimumGit = "2.50.1"
+
 // MaxOutput caps buffered Git output. It is a variable only so tests can
 // lower it.
 var MaxOutput = 16 << 20
@@ -778,8 +782,12 @@ func requireVersion(v []byte) error {
 	if e1 != nil || e2 != nil || e3 != nil {
 		return errors.New("unrecognized Git version")
 	}
-	if major < 2 || major == 2 && (minor < 50 || minor == 50 && patch < 1) {
-		return fmt.Errorf("Git 2.50.1 or later required; found %s", strings.TrimSpace(string(v)))
+	var floor [3]int
+	if _, err := fmt.Sscanf(MinimumGit, "%d.%d.%d", &floor[0], &floor[1], &floor[2]); err != nil {
+		return err
+	}
+	if major < floor[0] || major == floor[0] && (minor < floor[1] || minor == floor[1] && patch < floor[2]) {
+		return fmt.Errorf("Git %s or later required; found %s", MinimumGit, strings.TrimSpace(string(v)))
 	}
 
 	return nil
