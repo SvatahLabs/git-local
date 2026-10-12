@@ -65,6 +65,7 @@ git local recover --list
 git local recover <transaction-id> --abandon
 git local doctor
 git local doctor --json
+git local maintenance
 git local workspace list --json
 git local show latest:notes/my-file --json
 git local commit -m "Agent snapshot" --writer session-42 --json -- notes/my-file
@@ -495,6 +496,13 @@ See the [public command reference](project/specifications/proposal/COMMANDS.md)
 for every flag, machine-readable output, binary behavior, limits, and complete
 restore examples. `doctor` checks health without replaying or repairing anything;
 see the [T12 diagnostic contract](project/specifications/proposal/DOCTOR_STATUS.md).
+
+The private history store keeps every object it ever wrote until you run
+`git local maintenance`: it packs the store and deletes objects that no
+snapshot, retained workspace or restore recovery ref uses (leftovers of
+interrupted or conflicting snapshots). It refuses while a transaction is
+pending; history, `show` and `restore` are unchanged. `doctor` reports the
+store's size and loose-object count. Nothing runs it automatically.
 
 Native platform qualification is still pending. See the
 [foundation status](project/specifications/proposal/FOUNDATION_STATUS.md) for

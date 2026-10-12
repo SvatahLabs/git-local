@@ -657,6 +657,7 @@ func New(out, errOut io.Writer) *cobra.Command {
 		},
 	}
 	root.AddCommand(doctorCommand)
+	root.AddCommand(maintenanceCommand())
 
 	workspaceCommand := &cobra.Command{Use: "workspace", Short: "List local workspaces or retain a removed workspace's history"}
 	workspaceCommand.AddCommand(&cobra.Command{Use: "list", Short: "List workspace identities, registration and availability",

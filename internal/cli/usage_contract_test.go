@@ -45,6 +45,7 @@ var usageInvocations = map[string][][]string{
 	"git-local hook uninstall":         {{"extra"}},
 	"git-local init":                   {{"extra"}},
 	"git-local log":                    {{"extra"}},
+	"git-local maintenance":            {{"extra"}},
 	"git-local overlay add":            {{"name", "--", "file", "extra"}},
 	"git-local overlay filter-process": {{"extra"}},
 	"git-local overlay remove":         {{"name", "extra"}, {"name", "--workspace", "bad"}},

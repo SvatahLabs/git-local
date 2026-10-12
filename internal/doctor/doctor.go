@@ -62,6 +62,11 @@ func (r Report) Human() string {
 	return out.String()
 }
 func (r Report) JSON() ([]byte, error) { return json.MarshalIndent(r, "", "  ") }
+
+// maintenanceThreshold is the loose-object count at which doctor suggests
+// git local maintenance.
+const maintenanceThreshold = 10000
+
 func (r *Report) add(check, severity, message, action string) {
 	r.Findings = append(r.Findings, Finding{Check: check, Severity: severity, Message: message, Action: action})
 }
@@ -201,6 +206,16 @@ func Run(ctx context.Context, r *gitexec.Runner, cwd string) (Report, error) {
 				result.add("objects", "error", err.Error(), "Inspect the private store and a trusted backup; do not prune objects automatically.")
 			} else {
 				result.add("objects", "ok", "private object graph passes Git integrity checks", "")
+			}
+			if stats, err := r.StoreStats(ctx, d.Workspace.Store); err != nil {
+				result.add("store size", "error", err.Error(), "Inspect the private store.")
+			} else {
+				message := fmt.Sprintf("private store: %d loose objects (%d KiB), %d packed objects in %d packs (%d KiB)", stats.LooseObjects, stats.LooseBytes>>10, stats.PackedObjects, stats.Packs, stats.PackBytes>>10)
+				if stats.LooseObjects >= maintenanceThreshold {
+					result.add("store size", "warning", message, "Run git local maintenance to pack the store and delete objects no snapshot uses.")
+				} else {
+					result.add("store size", "ok", message, "")
+				}
 			}
 			total := 0
 			historyHealthy := true
