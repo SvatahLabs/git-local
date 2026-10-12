@@ -171,8 +171,8 @@ func abandonedAlready(meta *storage.Dir, id string) error {
 }
 
 func (s *session) abandonSeed(ctx context.Context, id string, result AbandonResult) (AbandonResult, error) {
-	var j seedJournal
-	if err := s.meta.ReadJSON(seedPath(id), &j); err != nil {
+	j, err := readSeed(s.meta, seedPath(id))
+	if err != nil {
 		return result, err
 	}
 	if j.ID != id {
@@ -335,7 +335,7 @@ func PendingJournals(ctx context.Context, r *gitexec.Runner, cwd string) ([]Pend
 	var out []PendingJournal
 	for _, entry := range entries {
 		name := entry.Name()
-		if name == "completed" && entry.IsDir() || storage.IsTempName(name) && entry.Type().IsRegular() {
+		if (name == "completed" || name == seedFilesDir) && entry.IsDir() || storage.IsTempName(name) && entry.Type().IsRegular() {
 			continue
 		}
 		data, readErr := common.ReadFile(filepath.Join("gitlocal/transactions", name), 16<<20)

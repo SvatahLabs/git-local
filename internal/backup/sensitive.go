@@ -91,11 +91,11 @@ func verifySensitiveBackup(ctx context.Context, r *gitexec.Runner, w workspace.C
 	for _, entry := range completed {
 		name := entry.Name()
 		if strings.HasPrefix(name, "seed-") && strings.HasSuffix(name, ".json") {
-			data, err := state.ReadFile(filepath.Join("transactions/completed", name), 1<<20)
+			data, err := state.ReadFile(filepath.Join("transactions/completed", name), configtx.JournalLimit)
 			if err != nil {
 				return err
 			}
-			if err := configtx.VerifyCompletedSeedForBackup(data, w.RepositoryID, name, policy, func(source, snapshot, path string) (string, string, string, error) {
+			if err := configtx.VerifyCompletedSeedForBackup(data, func(id string) ([]byte, error) { return configtx.ReadSeedFiles(state, id) }, w.RepositoryID, name, policy, func(source, snapshot, path string) (string, string, string, error) {
 				if !known[source] {
 					return "", "", "", errors.New("seed source workspace is absent from backup")
 				}

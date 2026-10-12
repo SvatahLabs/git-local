@@ -45,6 +45,9 @@ type recordUpdate struct {
 	Name      string `json:"name"`
 	OldDigest string `json:"oldDigest"`
 	NewDigest string `json:"newDigest"`
+	// FilesDigest is the digest of the file list a rewritten seed journal
+	// keeps beside it, staged as Name+".files" and written before the journal.
+	FilesDigest string `json:"filesDigest,omitempty"`
 }
 
 type migrationFault func(string) error
@@ -53,6 +56,25 @@ func stageName(id string) string   { return "history-encrypt-" + id + ".git" }
 func backupName(id string) string  { return "history-plain-" + id + ".git" }
 func recordsName(id string) string { return "history-records-" + id }
 func journalName(id string) string { return "transactions/encrypt-" + id + ".json" }
+
+// migrationJournalLimit is the size limit of a migration journal, for
+// writing and reading alike: it grows with the completed seed and restore
+// journals it converts.
+const migrationJournalLimit = 16 << 20
+
+// writeMigrationJournal refuses a journal that couldn't be read back before
+// writing it.
+func writeMigrationJournal(meta *storage.Dir, name string, j migrationJournal) error {
+	b, err := json.MarshalIndent(j, "", "  ")
+	if err != nil {
+		return err
+	}
+	b = append(b, '\n')
+	if len(b) > migrationJournalLimit {
+		return fmt.Errorf("encryption migration journal exceeds its %d MiB limit (%d completed journals to convert)", migrationJournalLimit>>20, len(j.SeedUpdates)+len(j.RestoreUpdates))
+	}
+	return meta.AtomicWrite(name, b, 0600)
+}
 
 // Migrate rewrites existing user histories into an encrypted store and swaps it
 // under an exclusive common lock. Interrupted publication is resumed or rolled
@@ -152,7 +174,7 @@ func migrate(ctx context.Context, r *gitexec.Runner, cwd, keyFile string, paths 
 		if oldPolicy != nil {
 			journal.SchemaVersion = 2
 		}
-		if err := meta.WriteJSON(journalName(id), journal); err != nil {
+		if err := writeMigrationJournal(meta, journalName(id), journal); err != nil {
 			return err
 		}
 		prepared = true
@@ -283,11 +305,11 @@ func prepareSeedUpdates(ctx context.Context, r *gitexec.Runner, w workspace.Cont
 	}
 	updates := make([]recordUpdate, 0, len(names))
 	for _, name := range names {
-		old, err := meta.ReadFile("transactions/completed/"+name, 1<<20)
+		old, err := meta.ReadFile("transactions/completed/"+name, configtx.JournalLimit)
 		if err != nil {
 			return nil, err
 		}
-		updated, err := configtx.RewriteCompletedSeedJournal(old, w.RepositoryID, policy.KeyFingerprint,
+		updated, files, err := configtx.RewriteCompletedSeedJournal(old, func(id string) ([]byte, error) { return configtx.ReadSeedFiles(meta, id) }, w.RepositoryID, policy.KeyFingerprint,
 			func(_, oldSnapshot string) (string, error) {
 				newSnapshot := rewritten.Snapshots[oldSnapshot]
 				if newSnapshot == "" {
@@ -315,10 +337,17 @@ func prepareSeedUpdates(ctx context.Context, r *gitexec.Runner, w workspace.Cont
 		if err != nil {
 			return nil, fmt.Errorf("completed seed journal %q: %w", name, err)
 		}
+		update := recordUpdate{Name: name, OldDigest: digestBytes(old), NewDigest: digestBytes(updated)}
+		if files != nil {
+			if err := meta.AtomicWrite(filepath.Join(recordsName(id), name+".files"), files, 0600); err != nil {
+				return nil, err
+			}
+			update.FilesDigest = digestBytes(files)
+		}
 		if err := meta.AtomicWrite(filepath.Join(recordsName(id), name), updated, 0600); err != nil {
 			return nil, err
 		}
-		updates = append(updates, recordUpdate{Name: name, OldDigest: digestBytes(old), NewDigest: digestBytes(updated)})
+		updates = append(updates, update)
 	}
 	return updates, nil
 }
@@ -355,6 +384,17 @@ func applyRecordUpdates(meta *storage.Dir, j migrationJournal, mismatch func(nam
 		prepared, err := meta.ReadFile(filepath.Join(recordsName(j.ID), update.Name), 16<<20)
 		if err != nil || digestBytes(prepared) != update.NewDigest {
 			return fmt.Errorf("prepared journal %q changed: %v", update.Name, err)
+		}
+		if update.FilesDigest != "" {
+			// The file list the rewritten journal names goes first.
+			files, err := meta.ReadFile(filepath.Join(recordsName(j.ID), update.Name+".files"), configtx.SeedFilesLimit())
+			if err != nil || digestBytes(files) != update.FilesDigest {
+				return fmt.Errorf("prepared seed file list %q changed: %v", update.Name, err)
+			}
+			id := strings.TrimSuffix(strings.TrimPrefix(update.Name, "seed-"), ".json")
+			if err := configtx.WriteSeedFiles(meta, id, files); err != nil {
+				return err
+			}
 		}
 		if err := meta.AtomicWrite("transactions/completed/"+update.Name, prepared, 0600); err != nil {
 			return err
@@ -578,7 +618,7 @@ func removeOwnedStore(path string) error {
 
 func readMigrationJournal(meta *storage.Dir, id, repositoryID string) (migrationJournal, error) {
 	var j migrationJournal
-	data, err := meta.ReadFile(journalName(id), 1<<20)
+	data, err := meta.ReadFile(journalName(id), migrationJournalLimit)
 	if err != nil {
 		return j, err
 	}
@@ -949,7 +989,7 @@ func AbandonMigration(ctx context.Context, r *gitexec.Runner, cwd, id string) (c
 		var done struct {
 			Outcome string `json:"outcome"`
 		}
-		data, e := meta.ReadFile(completedMigrationName(id), 1<<20)
+		data, e := meta.ReadFile(completedMigrationName(id), migrationJournalLimit)
 		if e == nil {
 			e = json.Unmarshal(data, &done)
 		}
@@ -1027,7 +1067,7 @@ func AbandonMigration(ctx context.Context, r *gitexec.Runner, cwd, id string) (c
 	if err := meta.MkdirAll("transactions/completed"); err != nil {
 		return result, err
 	}
-	if err := meta.WriteJSON(completedMigrationName(id), j); err != nil {
+	if err := writeMigrationJournal(meta, completedMigrationName(id), j); err != nil {
 		return result, err
 	}
 	return result, meta.Remove(journalName(id))

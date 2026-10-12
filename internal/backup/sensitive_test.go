@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -22,7 +23,17 @@ import (
 	"gitlocal/internal/workspace"
 )
 
+// A large seed keeps its file list beside the journal (GL-111); backups carry
+// and verify both forms.
 func TestAdoptEncryptedHistoryWithReboundFileKeyAndRecovery(t *testing.T) {
+	for _, beside := range []bool{false, true} {
+		t.Run(fmt.Sprintf("seed-files-beside=%v", beside), func(t *testing.T) {
+			adoptEncryptedHistoryWithReboundFileKeyAndRecovery(t, beside)
+		})
+	}
+}
+
+func adoptEncryptedHistoryWithReboundFileKeyAndRecovery(t *testing.T, beside bool) {
 	ctx := context.Background()
 	source := testutil.New(t)
 	source.Commit()
@@ -62,8 +73,12 @@ func TestAdoptEncryptedHistoryWithReboundFileKeyAndRecovery(t *testing.T) {
 	}
 	linked := filepath.Join(t.TempDir(), "linked")
 	source.Git("worktree", "add", "-q", "-b", "backup-seed", linked)
-	if seeded, err := seed.Run(ctx, r, linked, w.WorkspaceID, nil); err != nil || seeded.TransactionID == "" {
+	seeded, err := seed.Run(ctx, r, linked, w.WorkspaceID, nil)
+	if err != nil || seeded.TransactionID == "" {
 		t.Fatalf("completed encrypted seed: %+v %v", seeded, err)
+	}
+	if beside {
+		testutil.SeedFilesBeside(t, filepath.Join(w.Common, "gitlocal"), seeded.TransactionID, true)
 	}
 	backupKey, err := GenerateKey()
 	if err != nil {

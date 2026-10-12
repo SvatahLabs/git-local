@@ -3,8 +3,11 @@ package encryption
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -155,6 +158,7 @@ func seedJournalEvidence(t *testing.T, w workspace.Context, id string) (int, str
 		SchemaVersion  int    `json:"schemaVersion"`
 		Snapshot       string `json:"sourceSnapshot"`
 		KeyFingerprint string `json:"keyFingerprint"`
+		FilesDigest    string `json:"filesDigest"`
 		Files          []struct {
 			Path        string `json:"path"`
 			Blob        string `json:"blob"`
@@ -168,6 +172,19 @@ func seedJournalEvidence(t *testing.T, w workspace.Context, id string) (int, str
 	if err := json.Unmarshal(data, &journal); err != nil {
 		t.Fatal(err)
 	}
+	if journal.FilesDigest != "" {
+		// The file list kept beside the journal must match its digest.
+		list, err := common.ReadFile("gitlocal/transactions/seed-files/"+id+".json", 1<<20)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if sum := sha256.Sum256(list); hex.EncodeToString(sum[:]) != journal.FilesDigest || len(journal.Files) != 0 {
+			t.Fatal("seed file list beside the journal doesn't match it")
+		}
+		if err := json.Unmarshal(list, &journal); err != nil {
+			t.Fatal(err)
+		}
+	}
 	for _, file := range journal.Files {
 		if file.Path == ".env.local" {
 			return journal.SchemaVersion, journal.Snapshot, file.Blob, file.PlainDigest
@@ -177,8 +194,21 @@ func seedJournalEvidence(t *testing.T, w workspace.Context, id string) (int, str
 	return 0, "", "", ""
 }
 
+// A large seed keeps its file list beside the journal (GL-111); migration
+// converts both forms.
 func TestMigrationConvertsCompletedSeedJournal(t *testing.T) {
+	for _, beside := range []bool{false, true} {
+		t.Run(fmt.Sprintf("files-beside=%v", beside), func(t *testing.T) {
+			convertsCompletedSeedJournal(t, beside)
+		})
+	}
+}
+
+func convertsCompletedSeedJournal(t *testing.T, beside bool) {
 	r, w, root, key, linked, seedID := seededMigrationFixture(t)
+	if beside {
+		testutil.SeedFilesBeside(t, filepath.Join(w.Common, "gitlocal"), seedID, true)
+	}
 	ctx := context.Background()
 	oldSchema, oldSnapshot, oldBlob, oldDigest := seedJournalEvidence(t, w, seedID)
 	if oldSchema != 1 || oldDigest != "" {
@@ -198,12 +228,22 @@ func TestMigrationConvertsCompletedSeedJournal(t *testing.T) {
 	if _, err := configtx.RecoverSeed(ctx, r, linked, seedID, false); err != nil {
 		t.Fatalf("completed seed recovery no longer validates: %v", err)
 	}
+	if beside {
+		list, err := os.ReadFile(filepath.Join(w.Common, "gitlocal", "transactions", "seed-files", seedID+".json"))
+		if err != nil || bytes.Contains(list, []byte(oldBlob)) {
+			t.Fatalf("plaintext blob ID kept beside the converted journal: %v", err)
+		}
+	}
 }
 
 func TestMigrationSeedJournalPublicationRecovery(t *testing.T) {
-	for _, point := range []string{"policy-published", "record-updates"} {
+	for _, point := range []string{"policy-published", "record-updates", "record-updates/files-beside"} {
 		t.Run(point, func(t *testing.T) {
 			r, w, root, key, linked, seedID := seededMigrationFixture(t)
+			if strings.HasSuffix(point, "/files-beside") {
+				testutil.SeedFilesBeside(t, filepath.Join(w.Common, "gitlocal"), seedID, true)
+			}
+			point := strings.TrimSuffix(point, "/files-beside")
 			ctx := context.Background()
 			id, err := migrate(ctx, r, root, key, []string{".env.local"}, func(at string) error {
 				if at == point {

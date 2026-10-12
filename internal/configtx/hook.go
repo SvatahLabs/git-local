@@ -85,7 +85,7 @@ func LoadGuardSnapshot(ctx context.Context, r *gitexec.Runner, cwd string) (Guar
 		return result, err
 	}
 	for _, entry := range transactions {
-		if entry.Name() != "completed" && !storage.IsTempName(entry.Name()) {
+		if !(entry.Name() == "completed" || entry.Name() == seedFilesDir) && !storage.IsTempName(entry.Name()) {
 			return result, fmt.Errorf("unfinished configuration transaction %q", entry.Name())
 		}
 	}

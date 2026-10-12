@@ -68,14 +68,23 @@ func decode(data []byte, v any) error {
 	}
 	return nil
 }
+
+// JournalLimit is the size limit of configuration and seed journals, for
+// writing and reading alike: a journal that would exceed it is refused before
+// anything is written.
+const JournalLimit = 1 << 20
+
+// errJournalLimit is returned by encode for a journal over JournalLimit.
+var errJournalLimit = errors.New("configuration transaction exceeds metadata size limit (1 MiB)")
+
 func encode(v any) ([]byte, error) {
 	b, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return nil, err
 	}
 	b = append(b, '\n')
-	if len(b) > 1<<20 {
-		return nil, errors.New("configuration transaction exceeds metadata size limit")
+	if len(b) > JournalLimit {
+		return nil, errJournalLimit
 	}
 	return b, nil
 }
@@ -311,7 +320,7 @@ func (s *session) pending() ([]string, error) {
 	}
 	ids := []string{}
 	for _, entry := range entries {
-		if entry.Name() == "completed" && entry.IsDir() {
+		if (entry.Name() == "completed" || entry.Name() == seedFilesDir) && entry.IsDir() {
 			continue
 		}
 		if storage.IsTempName(entry.Name()) && entry.Type().IsRegular() {

@@ -120,7 +120,7 @@ func (s *session) inspectJournals() ([]JournalInfo, error) {
 		}
 		for _, entry := range entries {
 			name := entry.Name()
-			if directory.path == "transactions" && name == "completed" && entry.IsDir() {
+			if directory.path == "transactions" && (name == "completed" || name == seedFilesDir) && entry.IsDir() {
 				continue
 			}
 			if storage.IsTempName(name) && entry.Type().IsRegular() {
@@ -160,7 +160,7 @@ func (s *session) inspectJournals() ([]JournalInfo, error) {
 			}
 			if kind == "seed" {
 				var j seedJournal
-				item.Err = s.meta.ReadJSON(directory.path+"/"+name, &j)
+				j, item.Err = readSeed(s.meta, directory.path+"/"+name)
 				if item.Err == nil {
 					item.Err = validateSeed(j, s.w.RepositoryID, j.WorkspaceID)
 				}

@@ -113,7 +113,8 @@ func initialize(ctx context.Context, r *gitexec.Runner, cwd string, fault func(s
 			if entry.Type()&os.ModeSymlink != 0 || storage.IsTempName(entry.Name()) && !entry.Type().IsRegular() {
 				return nil, fmt.Errorf("%w: unsafe transaction entry %s", storage.ErrConflict, entry.Name())
 			}
-			if entry.Name() == "completed" && entry.IsDir() {
+			// seed-files holds the file lists of large seed journals.
+			if (entry.Name() == "completed" || entry.Name() == "seed-files") && entry.IsDir() {
 				continue
 			}
 			if entry.Name() != "init.json" && !storage.IsTempName(entry.Name()) {

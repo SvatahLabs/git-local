@@ -86,7 +86,8 @@ func ValidateStaged(ctx context.Context, r *gitexec.Runner, stage string) (Stage
 		return result, err
 	}
 	for _, entry := range transactions {
-		if entry.Name() != "completed" {
+		// seed-files holds the file lists of large completed seed journals.
+		if entry.Name() != "completed" && (entry.Name() != "seed-files" || !entry.IsDir()) {
 			return result, fmt.Errorf("backup contains pending transaction %q", entry.Name())
 		}
 	}

@@ -117,6 +117,11 @@ About a hundred defects found in pre-release reviews, among them:
   linear: each file's step re-checks that file and the cheap global state
   (main HEAD, branch and index file), and everything is re-checked at each
   phase boundary, at the end, and whenever that state changed.
+- Seeding a worktree from a selection of more than a few thousand files
+  failed ("configuration transaction exceeds metadata size limit"); a seed
+  journal now keeps a long file list beside it, and every journal kind is
+  written and read back with the same limit (encryption-migration journals
+  were written without one and read back with 1 MiB).
 - Backups: archives are bound to their ref, a backup made on another OS is no
   longer refused (tested only by simulation on POSIX), leftover private files
   no longer make backups unrestorable, HTTPS remotes authenticate, and remote
@@ -139,14 +144,13 @@ About a hundred defects found in pre-release reviews, among them:
   or backup keys.
 - **Restore** takes roughly half a second per restored file on a busy
   machine (it runs several Git processes per file).
+- **Seeding** a worktree takes about 40 ms per seeded file on a busy machine
+  (25,000 files in about 18 minutes).
 - **Maintenance** isn't automatic: run `git local maintenance` now and then.
-- **Seeding** a worktree (`init --from` or automatic seeding) records every
-  seeded file in a seed journal limited to 1 MiB, so a very large selection
-  can fail to seed; the threshold depends on path lengths, roughly a few
-  thousand files.
 - **Limits:** see [docs/limits.md](docs/limits.md); among them managed ignore
-  rules up to 256 KiB, restore journals up to 16 MiB and configuration and
-  seed journals up to 1 MiB, `show`/`diff` output up to 16 MiB, and `log` up
+  rules up to 256 KiB, restore and encryption-migration journals up to 16 MiB,
+  configuration and seed journals up to 1 MiB (a seed's file list up to
+  64 MiB beside its journal), `show`/`diff` output up to 16 MiB, and `log` up
   to 1,000 entries per call.
 - Mixed `core.ignorecase` across worktrees over-ignores (never leaks).
 - The macOS installer isn't signed or notarized yet.

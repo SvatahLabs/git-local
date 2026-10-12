@@ -6,6 +6,7 @@ import (
 	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"hash"
@@ -58,10 +59,129 @@ type seedJournal struct {
 	Files          []SeedFile         `json:"files"`
 	Directories    []string           `json:"createDirectories"`
 	Ownership      selection.Evidence `json:"ownership"`
+	// FilesDigest names a file list kept beside the journal (seedFilesPath)
+	// when the journal with its files would exceed JournalLimit; Files is then
+	// empty on disk. A journal that fits keeps its files inline, as earlier
+	// releases wrote and read them.
+	FilesDigest string `json:"filesDigest,omitempty"`
 }
+
+// seedFileList is the content of a seed's file list kept beside its journal.
+type seedFileList struct {
+	Files []SeedFile `json:"files"`
+}
+
+const seedFilesDir = "seed-files"
+
+// seedFilesLimit is the size limit of a seed's file list kept beside its
+// journal, for writing and reading alike; tests lower it.
+var seedFilesLimit = 64 << 20
 
 func seedPath(id string) string          { return "transactions/seed-" + id + ".json" }
 func seedCompletedPath(id string) string { return "transactions/completed/seed-" + id + ".json" }
+
+// seedFilesPath stays the same when the journal is archived.
+func seedFilesPath(id string) string { return "transactions/" + seedFilesDir + "/" + id + ".json" }
+
+// encodeSeed returns the journal and, for a journal whose files don't fit in
+// JournalLimit, the file list to write beside it first. A list that is already
+// beside the journal (FilesDigest) is never written again.
+func encodeSeed(j seedJournal) ([]byte, []byte, error) {
+	if j.FilesDigest != "" {
+		j.Files = []SeedFile{}
+		b, err := encode(j)
+		return b, nil, err
+	}
+	b, err := encode(j)
+	if !errors.Is(err, errJournalLimit) {
+		return b, nil, err
+	}
+	return encodeSeedBeside(j)
+}
+
+// encodeSeedBeside is encodeSeed for a file list kept beside the journal.
+func encodeSeedBeside(j seedJournal) ([]byte, []byte, error) {
+	files, err := json.MarshalIndent(seedFileList{j.Files}, "", "  ")
+	if err != nil {
+		return nil, nil, err
+	}
+	files = append(files, '\n')
+	if len(files) > seedFilesLimit {
+		return nil, nil, fmt.Errorf("seeding %d files exceeds the %d MiB limit of a seed's file list; seed a subset with git local init --from <source> --paths <path>...", len(j.Files), seedFilesLimit>>20)
+	}
+	j.FilesDigest = digestOf(files)
+	j.Files = []SeedFile{}
+	b, err := encode(j)
+	if errors.Is(err, errJournalLimit) {
+		err = fmt.Errorf("seed journal exceeds its 1 MiB limit even without its file list (selection, ignore rules or created directories); seed a subset with git local init --from <source> --paths <path>...")
+	}
+	return b, files, err
+}
+
+func digestOf(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
+// decodeSeed decodes a seed journal, reading a file list kept beside it with
+// files and checking it against the journal's digest.
+func decodeSeed(data []byte, files func(id string) ([]byte, error)) (seedJournal, error) {
+	var j seedJournal
+	if err := decode(data, &j); err != nil {
+		return j, err
+	}
+	if j.FilesDigest == "" {
+		return j, nil
+	}
+	if len(j.Files) != 0 || !validSeedDigest(j.FilesDigest) || !storage.ValidUUID(j.ID) {
+		return j, errors.New("invalid seed journal")
+	}
+	list, err := files(j.ID)
+	if err != nil {
+		return j, err
+	}
+	if digestOf(list) != j.FilesDigest {
+		return j, fmt.Errorf("%w: seed file list %s doesn't match its journal", storage.ErrConflict, seedFilesPath(j.ID))
+	}
+	var decoded seedFileList
+	if err := decode(list, &decoded); err != nil {
+		return j, err
+	}
+	j.Files = decoded.Files
+	return j, nil
+}
+
+// readSeed reads a pending or completed seed journal from meta.
+func readSeed(meta *storage.Dir, name string) (seedJournal, error) {
+	data, err := meta.ReadFile(name, JournalLimit)
+	if err != nil {
+		return seedJournal{}, err
+	}
+	j, err := decodeSeed(data, func(id string) ([]byte, error) { return ReadSeedFiles(meta, id) })
+	if err != nil {
+		return j, fmt.Errorf("invalid metadata %s: %w", name, err)
+	}
+	return j, nil
+}
+
+// ReadSeedFiles reads the file list kept beside seed journal id in the
+// private state directory meta.
+func ReadSeedFiles(meta *storage.Dir, id string) ([]byte, error) {
+	return meta.ReadFile(seedFilesPath(id), SeedFilesLimit())
+}
+
+// SeedFilesLimit is the size limit of a seed's file list kept beside its
+// journal.
+func SeedFilesLimit() int64 { return int64(seedFilesLimit) }
+
+// WriteSeedFiles writes the file list of seed journal id beside it; the
+// journal that names it is written afterwards.
+func WriteSeedFiles(meta *storage.Dir, id string, files []byte) error {
+	if err := meta.MkdirAll("transactions/" + seedFilesDir); err != nil {
+		return err
+	}
+	return meta.AtomicWrite(seedFilesPath(id), files, 0600)
+}
 
 func oidValid(id string) bool {
 	if len(id) != 40 && len(id) != 64 {
@@ -224,9 +344,15 @@ func seed(ctx context.Context, r *gitexec.Runner, cwd string, planner SeedPlanne
 		return result, err
 	}
 	result.WorkspaceID, result.TransactionID = j.WorkspaceID, j.ID
-	encoded, err := encode(j)
+	encoded, list, err := encodeSeed(j)
 	if err != nil {
 		return result, err
+	}
+	if list != nil {
+		if err := WriteSeedFiles(s.meta, j.ID, list); err != nil {
+			return result, err
+		}
+		j.FilesDigest = digestOf(list)
 	}
 	if err := s.meta.AtomicWrite(seedPath(j.ID), encoded, 0600); err != nil {
 		return result, err
@@ -323,9 +449,14 @@ func validSeedDigest(value string) bool {
 }
 
 func (s *session) writeSeed(j seedJournal) error {
-	b, err := encode(j)
+	b, list, err := encodeSeed(j)
 	if err != nil {
 		return err
+	}
+	if list != nil {
+		if err := WriteSeedFiles(s.meta, j.ID, list); err != nil {
+			return err
+		}
 	}
 	return s.meta.AtomicWrite(seedPath(j.ID), b, 0600)
 }
@@ -687,11 +818,10 @@ func RecoverSeed(ctx context.Context, r *gitexec.Runner, cwd, id string, rollbac
 			return result, pendingError(other)
 		}
 	}
-	var j seedJournal
-	err = s.meta.ReadJSON(seedPath(id), &j)
+	j, err := readSeed(s.meta, seedPath(id))
 	completed := false
 	if os.IsNotExist(err) {
-		err = s.meta.ReadJSON(seedCompletedPath(id), &j)
+		j, err = readSeed(s.meta, seedCompletedPath(id))
 		completed = true
 	}
 	if err != nil {
