@@ -47,6 +47,29 @@ func TestVersionAndMinimumGitAreSingleSourced(t *testing.T) {
 	if !strings.Contains(string(readme), "Git "+gitexec.MinimumGit+" or later") {
 		t.Fatalf("README doesn't name the minimum Git version %s", gitexec.MinimumGit)
 	}
+	// The user docs repeat both for readers; every copy must be current.
+	docs, err := filepath.Glob("../docs/*.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	minimum := regexp.MustCompile(`Git (\d+\.\d+\.\d+) or later`)
+	artifacts := regexp.MustCompile(`git-local_v(\d+\.\d+\.\d+)_|GitLocal-(\d+\.\d+\.\d+)-`)
+	for _, name := range append(docs, "../README.md") {
+		data, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, match := range minimum.FindAllStringSubmatch(string(data), -1) {
+			if match[1] != gitexec.MinimumGit {
+				t.Errorf("%s names Git %s as the minimum; it's %s", name, match[1], gitexec.MinimumGit)
+			}
+		}
+		for _, match := range artifacts.FindAllStringSubmatch(string(data), -1) {
+			if found := match[1] + match[2]; found != version {
+				t.Errorf("%s names %s artifacts; VERSION is %s", name, found, version)
+			}
+		}
+	}
 	for _, dir := range []string{"../internal", "../cmd"} {
 		err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 			if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") || strings.HasSuffix(path, filepath.Join("gitexec", "runner.go")) {

@@ -128,6 +128,9 @@ About a hundred defects found in pre-release reviews, among them:
   host checks canonicalize addresses, and a failed push or fetch names its
   cause (certificate, authentication, connection or proxy, or the remote's
   refusal) instead of one generic message, without printing credentials.
+- Output limits: a Git command whose output passes its limit is stopped
+  instead of running to the end, and `check-ignore` keeps a long ignore rule
+  once rather than once per matching path.
 - Security: `golang.org/x/text` is updated to v0.39.0; earlier versions could
   loop forever normalizing an invalid path name (GO-2026-5970).
 - Platforms and layouts: relative and bare worktree layouts, shared and

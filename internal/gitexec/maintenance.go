@@ -63,7 +63,8 @@ func (r *Runner) StoreStats(ctx context.Context, store string) (StoreStats, erro
 // pack and deletes the rest. The caller must hold the repository's exclusive
 // lock, so no git-local process writes or reads the store meanwhile, and must
 // have checked that no transaction is pending: unreachable objects are deleted
-// at once, not after Git's usual grace period.
+// at once, not after Git's usual grace period. CheckStore then verifies the
+// result; it only reads, so the caller can run it under the shared lock.
 func (r *Runner) MaintainStore(ctx context.Context, store string) error {
 	if err := r.CheckCapabilities(ctx); err != nil {
 		return err
@@ -77,7 +78,16 @@ func (r *Runner) MaintainStore(ctx context.Context, store string) error {
 	if _, err := r.run(ctx, store, true, nil, prefix, nil, "repack", "-a", "-d", "-q", "-n"); err != nil {
 		return err
 	}
-	if _, err := r.run(ctx, store, true, nil, prefix, nil, "prune", "--expire=now"); err != nil {
+	_, err := r.run(ctx, store, true, nil, prefix, nil, "prune", "--expire=now")
+	return err
+}
+
+// CheckStore validates a private store's layout and every object in it.
+func (r *Runner) CheckStore(ctx context.Context, store string) error {
+	if err := r.CheckCapabilities(ctx); err != nil {
+		return err
+	}
+	if err := r.checkStore(store); err != nil {
 		return err
 	}
 	if err := ValidateStore(store); err != nil {

@@ -25,3 +25,21 @@ func WithStore(ctx context.Context, r *gitexec.Runner, cwd string, fn func(works
 	}
 	return fn(*s.w)
 }
+
+// ReadStore is WithStore under the shared lock, for reading the store while
+// guards and the overlay filter, which take the shared lock too, can run.
+func ReadStore(ctx context.Context, r *gitexec.Runner, cwd string, fn func(workspace.Context) error) error {
+	s, err := openMode(ctx, r, cwd, true)
+	if err != nil {
+		return err
+	}
+	defer s.close()
+	pending, err := s.pending()
+	if err != nil {
+		return err
+	}
+	if len(pending) > 0 {
+		return pendingError(pending[0])
+	}
+	return fn(*s.w)
+}

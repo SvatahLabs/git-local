@@ -13,11 +13,14 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
+	"syscall"
 
 	"gitlocal/internal/gitexec"
 )
@@ -46,6 +49,7 @@ type manifest struct {
 }
 
 func main() {
+	removeStagingOnInterrupt()
 	root, err := os.Getwd()
 	if err == nil {
 		err = run(root, os.Args[1:])
@@ -101,11 +105,11 @@ func run(root string, args []string) error {
 	if err := os.MkdirAll(filepath.Dir(final), 0755); err != nil {
 		return err
 	}
-	stage, err := os.MkdirTemp(filepath.Dir(final), ".gitlocal-release-")
+	stage, err := makeStaging(filepath.Dir(final), ".gitlocal-release-")
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(stage)
+	defer removeStaging(stage)
 	goVersion, err := goEnv(*goBinary, root, "GOVERSION")
 	if err != nil {
 		return err
@@ -161,6 +165,42 @@ func run(root string, args []string) error {
 }
 
 func fail(err error) { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
+
+// staging holds the staging directories that exist, for
+// removeStagingOnInterrupt.
+var staging sync.Map
+
+// makeStaging creates a staging directory that removeStaging, or an
+// interrupt, removes.
+func makeStaging(dir, pattern string) (string, error) {
+	stage, err := os.MkdirTemp(dir, pattern)
+	if err == nil {
+		staging.Store(stage, true)
+	}
+	return stage, err
+}
+
+func removeStaging(stage string) {
+	os.RemoveAll(stage)
+	staging.Delete(stage)
+}
+
+// removeStagingOnInterrupt removes the staging directories when the builder
+// is interrupted or terminated: Go's default signal handling exits without
+// running deferred calls.
+func removeStagingOnInterrupt() {
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		received := <-signals
+		staging.Range(func(stage, _ any) bool {
+			os.RemoveAll(stage.(string))
+			return true
+		})
+		fmt.Fprintf(os.Stderr, "release builder stopped (%v); staging removed\n", received)
+		os.Exit(130)
+	}()
+}
 
 func artifactName(version string, platform target) string {
 	name := fmt.Sprintf("git-local_v%s_%s_%s", version, platform.OS, platform.Arch)
@@ -302,11 +342,11 @@ func smokeExistingArtifact(dir string) error {
 	if gotHash != native.SHA256 {
 		return errors.New("native artifact does not match release manifest checksum")
 	}
-	stage, err := os.MkdirTemp("", "gitlocal-release-smoke-")
+	stage, err := makeStaging("", "gitlocal-release-smoke-")
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(stage)
+	defer removeStaging(stage)
 	image, err := os.ReadFile(source)
 	if err != nil {
 		return err

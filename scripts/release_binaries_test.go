@@ -3,10 +3,13 @@ package main
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 func TestSmokeExistingRejectsTamperedNativeArtifact(t *testing.T) {
@@ -61,5 +64,55 @@ func TestReleaseFailureRemovesStaging(t *testing.T) {
 	}
 	if entries, _ := os.ReadDir(parent); len(entries) != 1 {
 		t.Fatalf("refused release left %v", entries)
+	}
+}
+
+// TestReleaseInterruptHelper runs the builder as main does, with a Go
+// toolchain that hangs, for TestReleaseInterruptRemovesStaging.
+func TestReleaseInterruptHelper(t *testing.T) {
+	out := os.Getenv("GITLOCAL_TEST_RELEASE_OUT")
+	if out == "" {
+		t.Skip("subprocess helper")
+	}
+	removeStagingOnInterrupt()
+	err := run("..", []string{"-host-only", "-out", out, "-go", os.Getenv("GITLOCAL_TEST_RELEASE_GO")})
+	t.Fatalf("release builder wasn't interrupted: %v", err)
+}
+
+// GL-115: an interrupted release build removes its staging directory too.
+func TestReleaseInterruptRemovesStaging(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no SIGINT on Windows")
+	}
+	parent := t.TempDir()
+	hanging := filepath.Join(t.TempDir(), "go")
+	if err := os.WriteFile(hanging, []byte("#!/bin/sh\nexec sleep 60\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^TestReleaseInterruptHelper$", "-test.timeout=2m")
+	cmd.Env = append(os.Environ(), "GITLOCAL_TEST_RELEASE_OUT="+filepath.Join(parent, "v-test"), "GITLOCAL_TEST_RELEASE_GO="+hanging)
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(time.Minute)
+	for {
+		if entries, _ := os.ReadDir(parent); len(entries) == 1 && strings.HasPrefix(entries[0].Name(), ".gitlocal-release-") {
+			break
+		}
+		if time.Now().After(deadline) {
+			cmd.Process.Kill()
+			t.Fatal("the builder never staged")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err := cmd.Process.Signal(syscall.SIGINT); err != nil {
+		t.Fatal(err)
+	}
+	err := cmd.Wait()
+	if exit, ok := err.(*exec.ExitError); !ok || exit.ExitCode() != 130 {
+		t.Fatalf("interrupted builder: %v", err)
+	}
+	if entries, _ := os.ReadDir(parent); len(entries) != 0 {
+		t.Fatalf("interrupted release left %v", entries)
 	}
 }

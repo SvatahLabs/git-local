@@ -519,7 +519,9 @@ The private history store keeps every object it ever wrote until you run
 snapshot, retained workspace or restore recovery ref uses (leftovers of
 interrupted or conflicting snapshots). It refuses while a transaction is
 pending; history, `show` and `restore` are unchanged. `doctor` reports the
-store's size and loose-object count. Nothing runs it automatically.
+store's size and loose-object count. Commits, pushes and checkouts that run
+git-local's guards or overlay filter wait while it packs, but not while it
+checks the store afterwards. Nothing runs it automatically.
 
 ## Removing git-local
 

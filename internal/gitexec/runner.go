@@ -280,11 +280,15 @@ func (r *Runner) controls() []string {
 // boundedBuffer keeps at most limit bytes, or MaxOutput when limit is zero. It
 // holds its buffer in a field rather than embedding it: os/exec copies output
 // with io.Copy, which would use an embedded buffer's ReadFrom and bypass Write.
+// Past the limit it fails the write: os/exec then closes the pipe, so Git
+// stops at its next write instead of running to the end.
 type boundedBuffer struct {
 	buf      bytes.Buffer
 	limit    int
 	overflow bool
 }
+
+var errOutputLimit = errors.New("Git output exceeded safety limit")
 
 func (b *boundedBuffer) Write(p []byte) (int, error) {
 	n := len(p)
@@ -298,6 +302,7 @@ func (b *boundedBuffer) Write(p []byte) (int, error) {
 	}
 	if n > room {
 		b.overflow = true
+		return max(room, 0), errOutputLimit
 	}
 	return n, nil
 }
@@ -871,33 +876,71 @@ func (r *Runner) CheckIgnoreMatches(ctx context.Context, root, admin string, pat
 	if len(paths) == 0 {
 		return map[string]IgnoreMatch{}, nil
 	}
-	// One record per queried path: the output grows with the query, not with
-	// anything Git chooses, so it isn't capped.
-	var output bytes.Buffer
-	_, err := r.mainOutput(ctx, root, admin, &input, &output, "check-ignore", "--stdin", "-z", "--no-index", "--verbose", "--non-matching")
-	out := output.Bytes()
+	// One record per queried path, but each repeats the deciding rule's
+	// source and pattern, which the repository controls: records are parsed
+	// as they arrive and each distinct source and pattern is kept once.
+	records := &ignoreRecords{result: map[string]IgnoreMatch{}, strings: map[string]string{}}
+	_, err := r.mainOutput(ctx, root, admin, &input, records, "check-ignore", "--stdin", "-z", "--no-index", "--verbose", "--non-matching")
 	if err != nil {
 		var ge *Error
 		if !errors.As(err, &ge) || ge.Code != 1 {
 			return nil, err
 		}
 	}
-	fields := bytes.Split(out, []byte{0})
-	if len(fields) == 0 || len(fields[len(fields)-1]) != 0 || (len(fields)-1)%4 != 0 {
+	if records.err != nil || records.n != 0 || len(records.field) != 0 {
 		return nil, errors.New("malformed Git ignore output")
 	}
-	result := map[string]IgnoreMatch{}
-	for i := 0; i < len(fields)-1; i += 4 {
-		pattern := fields[i+2]
-		line, _ := strconv.Atoi(string(fields[i+1]))
-		result[strings.TrimPrefix(string(fields[i+3]), "./")] = IgnoreMatch{Ignored: len(pattern) > 0 && pattern[0] != '!', Source: string(fields[i]), Line: line, Pattern: string(pattern)}
-	}
+	result := records.result
 	for _, path := range paths {
 		if _, ok := result[path]; !ok {
 			return nil, errors.New("missing Git ignore result")
 		}
 	}
 	return result, nil
+}
+
+// ignoreRecords parses check-ignore -z --verbose output (source, line,
+// pattern, path) as Git writes it.
+type ignoreRecords struct {
+	field   []byte
+	fields  [4]string
+	n       int
+	result  map[string]IgnoreMatch
+	strings map[string]string
+	err     error
+}
+
+func (p *ignoreRecords) Write(b []byte) (int, error) {
+	written := len(b)
+	for len(b) > 0 {
+		end := bytes.IndexByte(b, 0)
+		if end < 0 {
+			p.field = append(p.field, b...)
+			break
+		}
+		p.field = append(p.field, b[:end]...)
+		b = b[end+1:]
+		if len(p.field) > MaxOutput {
+			p.err = errors.New("Git ignore record exceeds safety limit")
+			return 0, p.err
+		}
+		value, ok := p.strings[string(p.field)]
+		if !ok {
+			value = string(p.field)
+			if p.n != 3 {
+				p.strings[value] = value
+			}
+		}
+		p.fields[p.n] = value
+		p.field = p.field[:0]
+		if p.n++; p.n == 4 {
+			pattern := p.fields[2]
+			line, _ := strconv.Atoi(p.fields[1])
+			p.result[strings.TrimPrefix(p.fields[3], "./")] = IgnoreMatch{Ignored: len(pattern) > 0 && pattern[0] != '!', Source: p.fields[0], Line: line, Pattern: pattern}
+			p.n = 0
+		}
+	}
+	return written, nil
 }
 
 // IgnoreCase reports the effective core.ignorecase of the checkout at root.
