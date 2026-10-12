@@ -42,6 +42,9 @@ func prepareSensitiveBackup(ctx context.Context, r *gitexec.Runner, w workspace.
 			return err
 		}
 	} else if _, err := secureblob.LoadKey(policy, w.Root, w.Common); err != nil {
+		if path, ok := secureblob.UnavailableKeyPath(err); ok {
+			return fmt.Errorf("the backup's sensitive-file key %s doesn't exist here; pass --file-key with the matching external key", path)
+		}
 		return fmt.Errorf("sensitive-file key is unavailable; pass --file-key with the matching external key: %w", err)
 	}
 	return verifySensitiveBackup(ctx, r, w, statePath, state)

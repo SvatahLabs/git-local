@@ -8,8 +8,10 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+# A pull request's newer push cancels its older run; every push to main
+# keeps its own run (one group per run).
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   lint:
@@ -23,11 +25,19 @@ jobs:
         run: |
           unformatted="$(gofmt -l .)"
           if [ -n "$unformatted" ]; then echo "$unformatted"; exit 1; fi
-      - run: go vet ./...
-      - name: staticcheck
-        run: go run honnef.co/go/tools/cmd/staticcheck@2026.2.1 ./...
-      - name: govulncheck
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+      # The tools are built for the runner, then check the Linux, Windows and
+      # macOS files of every package.
+      - name: vet, staticcheck and govulncheck for each released OS
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@2026.2.1
+          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+          bin="$(go env GOPATH)/bin"
+          for goos in linux windows darwin; do
+            echo "GOOS=$goos"
+            GOOS=$goos go vet ./...
+            GOOS=$goos "$bin/staticcheck" ./...
+            GOOS=$goos "$bin/govulncheck" ./...
+          done
   test:
     strategy:
       fail-fast: false

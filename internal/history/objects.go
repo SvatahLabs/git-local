@@ -236,7 +236,8 @@ func readPrevious(ctx context.Context, r *gitexec.Runner, store, id, repo, works
 	if string(kind) != "commit\n" {
 		return "", m, errors.New("history head is not a commit")
 	}
-	out, err := r.HistoryListing(ctx, store, nil, "ls-tree", "-z", id)
+	// The wrapper tree has at most four entries, so this listing stays capped.
+	out, err := r.History(ctx, store, nil, "ls-tree", "-z", id)
 	if err != nil {
 		return "", m, err
 	}

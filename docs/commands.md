@@ -14,39 +14,46 @@ operation errors. It does not mix human diagnostics into the JSON stream.
 
 | Command | Arguments and flags | Result |
 | --- | --- | --- |
-| `init` | optional `--from main\|<workspace-uuid>` and `--paths <paths...>` | Initialize or resume; with `--from`, seed from the source's latest saved selection and files. Without `--from`, also repairs the shared overlay filter installation (absolute or missing include, missing filter config or direct required key) without a new overlay version; JSON `overlayMigration` lists the changes. |
+| `init` | optional `--from main\|<workspace-uuid>` and `--paths <paths...>` | Initialize or resume; with `--from`, seed from the source's latest saved selection and files. Without `--from`, also repairs the shared overlay filter installation (absolute or missing include, missing filter config or direct required key) without a new overlay version; JSON `overlayMigration` lists the changes. It also adds a missing managed ignore block or rewrites an outdated one (JSON `ignoreBlockRewritten`). |
 | `track` | `<paths...>`; optional `--from latest\|<hex-snapshot-id>` and `--workspace <uuid>` (requires `--from`) | Select local paths or reactivate historical path types. |
 | `untrack` | `<paths...>` | Stop selecting paths while preserving files and saved history. |
 | `commit` | `-m, --message <message>`; optional `--if-changed`, `--writer <id>`, `-- <paths...>` | Snapshot all selected paths or only explicit selected paths; `--writer` attributes changed files to a caller-supplied ID. |
-| `auto install` / `auto uninstall` / `auto status` | install: optional `--allow-shared-hooks-dir` | Manage post-commit, post-checkout, pre-rebase and post-rewrite snapshot hooks while preserving existing shell hooks; post-checkout seeds new linked worktrees from the primary checkout. |
+| `auto install` / `auto uninstall` / `auto status` | install: optional `--allow-shared-hooks-dir` | Manage post-commit, post-checkout, pre-rebase and post-rewrite snapshot hooks while preserving existing shell hooks; post-checkout seeds new linked worktrees from the primary checkout. `auto status --json` has the same fields as `hook status` except `previousDirectories`. |
 | `auto watch` | optional `--interval <1s..24h>` (default 5m) | Run a foreground timer for the current worktree; capture immediately and again when selected files change; stop with Ctrl-C, SIGTERM or SIGHUP (a second signal ends it at once). A conflicting capture is skipped with a warning and retried at the next check; five conflicts in a row exit 3. In JSON mode, return one summary when stopped, with skipped captures as warnings. |
 | `overlay add` | `<name> -- <tracked-file>` | Save a versioned local patch and install the required Git clean/smudge filter for that path. Refused while the effective `core.autocrlf` (system and global configuration included) is `true` or `input`, or a `text`, `eol`, `ident` or filter attribute (system attributes included) applies. Works from a working directory reached through a symlink. |
 | `overlay status` | none | Report active patch applicability, working-file presence, and conflicts with the branch upstream. An overlay whose hunks the upstream version already carries is reported as stale, with the remove, edit and add steps; JSON adds `adoptedHunks` and `hunks`. |
 | `overlay show` | `<name> [--version N]` | Print saved patch content without changing the checkout; 0 selects the latest version. |
-| `overlay remove` | `<name>`; optional `--workspace <uuid>` | Deactivate a patch, preserving the working file and all saved versions; restore owned Git attributes and config after the last active overlay. `--workspace` removes an overlay of a retained workspace (a removed linked worktree) from any checkout; an active workspace's overlay is removed only from its own worktree. |
-| `status` | no paths; optional paired `--porcelain -z` | Compare selected files and rules with the latest snapshot. |
+| `overlay remove` | `<name>`; optional `--workspace <uuid>` | Deactivate a patch, preserving the working file and all saved versions; restore owned Git attributes and config after the last active overlay. The file's times are renewed so Git reads it again and shows its local content as a change. `--workspace` removes an overlay of a retained workspace (a removed linked worktree) from any checkout; an active workspace's overlay is removed only from its own worktree. |
+| `status` | no paths; optional paired `--porcelain -z` (`-z` is `--null`) | Compare selected files and rules with the latest snapshot. |
 | `diff` | no arguments, or `<older-snapshot> <newer-snapshot>` with optional `--workspace <uuid>` | Show current selected-file changes, or compare two reachable saved snapshots without touching the worktree. |
 | `log` | no paths; `-n, --max-count <1..1000>` (default 20); optional `--workspace <uuid>`, `--branch <name>`, `--main-commit <full-id>`, `--stat`, `--writer <id>`, `--path <repository-relative-file>`, `--provenance` | List snapshots; filter by mainline context, attributed writer or exact changed file, and optionally show provenance. |
 | `show` | `<snapshot>:<repository-relative-path>`; optional `--workspace <uuid>` | Print raw bytes of one recorded historical file. |
-| `grep` | `<literal-pattern>`; optional `--workspace <uuid>`, `--snapshots <1..100>` (default 20), `--max-matches <1..1000>` (default 100) | Search text across reachable snapshots, reporting skipped binary/oversized files and truncation. |
+| `grep` | `<literal-pattern>`; optional `--workspace <uuid>`, `-n, --snapshots <1..100>` (default 20), `--max-matches <1..1000>` (default 100) | Search text across reachable snapshots, reporting skipped binary/oversized files and truncation. |
 | `restore` | `--source latest\|<hex-snapshot-id>` and `-- <paths...>` required; optional `--workspace <uuid>`, `--dry-run`, `--overwrite` | Preview or execute an explicit-path restore. |
+| `reset --hard` | `--hard` required; optional `[revision]` (default `HEAD`) | Snapshot selected files, then run `git reset --hard` on the current worktree. Refused before the snapshot when the target commit contains a selected path or a staging file, a target file uses a third-party checkout filter, or an active overlay's filter fails its audit; a failed snapshot cancels the reset. JSON returns `revision`, `commit`, `snapshotId`, `snapshotChanged` and `reset`. |
 | `workspace list` | none | Show registration and availability of workspaces. |
 | `workspace retire` | `<uuid>` | Retain a removed workspace's history and reconcile shared ignores. |
+| `workspace remove` | `<path>`; optional `--force` | Snapshot the selected files of an available linked worktree, ask Git to remove it (`--force` lets Git remove a dirty one), and retire its workspace. If the snapshot is refused, the worktree is kept, even with `--force`. JSON returns `workspaceId`, `snapshotChanged`, `removed`, `retired` and `transactionId`. |
 | `workspace prune` | optional `--dry-run` | Retire every active workspace that is both unregistered and unavailable; keep history. |
 | `guard staged` | none | Reject staged additions and changes to selected paths; allow deletions. |
 | `guard push` | `<remote>`; pre-push ref updates on stdin | Reject outgoing commits that add or change selected paths. |
 | `hook install` / `hook uninstall` | optional `--pre-commit`, `--pre-push`; default both; install also `--allow-shared-hooks-dir` | Add or remove managed guard blocks in Git's effective hook directory. Install refuses a directory inside a worktree, and one outside the repository unless `--allow-shared-hooks-dir` is given. In a shared directory, blocks another repository installed for the same binary are left as they are, with a warning; a different binary's block is refused. A hook file that no longer matches its record (moved away, block removed, interrupted install) is reinstalled with a fresh record; an unrecorded block in the repository's own hooks directory is adopted. Uninstall drops records whose directory, file or block is gone (with a warning), removes unrecorded blocks from the repository's own hooks directory, and warns when it removes blocks from a shared directory. Warnings go to stderr, or `warnings` in JSON. |
-| `hook status` | none | Show guard state in the current and previous hook directories, and whether the current directory is inside a worktree, shared, or holds tracked hook files. A guard counts as installed when its hook file holds a managed block, whoever wrote it; in a shared directory, a block this repository has no record of is reported as `installed by another repository` (JSON `installedByOtherRepository`). |
+| `hook status` | none | Show guard state in the current and previous hook directories, and whether the current directory is inside a worktree, shared, or holds tracked hook files. A guard counts as installed when its hook file holds a managed block, whoever wrote it; in a shared directory, a block this repository has no record of is reported as `installed by another repository` (JSON `installedByOtherRepository`). JSON also returns `currentDirectory`, `installed` (whether each hook holds a managed block), `disabled` (installed hooks without execute permission, which Git skips; not reported on Windows), `previousDirectories` (recorded hook files in earlier hook directories), `location` (`repository`, `worktree` or `shared`), `worktree` (when `location` is `worktree`, the worktree that holds the directory) and `tracked` (hook files the worktree tracks). |
+| `encrypt keygen` | `<absolute-path>` outside every checkout and the common Git directory | Create a new owner-private 32-byte sensitive-file key; never overwrite an existing file. |
+| `encrypt enable` | `--key-file <absolute-path> -- <selected-paths...>` | Turn on sensitive-file encryption for the given selected paths while the private store has no objects or refs; refused once history exists (use `encrypt migrate`). JSON returns `keyFile`, `keyFingerprint` and `sensitive`. |
+| `encrypt migrate` | `--key-file <absolute-path> -- <selected-paths...>` | Encrypt existing private history for the first time, or correct the policy in service with the same key file (the new rules must keep every existing rule). Rewrites every active and retained workspace's snapshots in a separate encrypted store, then publishes it with the policy; snapshot IDs change. JSON returns `transactionId`. |
+| `encrypt recover` | `<transaction-id>` and exactly one of `--resume` or `--rollback` | Finish or undo an interrupted encryption migration; `--rollback` works only before the new policy is published. |
+| `encrypt rebind-key` | `<absolute-path>` outside every checkout | Point the policy at its key in a new location; refused unless the file matches the stored key fingerprint. |
 | `backup keygen` | `<absolute-path>` outside the checkout | Create a new owner-private 32-byte backup key; never overwrite an existing file. |
 | `backup push` | `<remote> --key-file <absolute-path>` | Push a unique encrypted private-history archive ref to a named SSH or HTTPS remote on a different host from `origin`. |
-| `backup restore` | `<remote> <refs/gitlocal/backups/...> --key-file <absolute-path>` | Fetch and authenticate one archive, then adopt it into an uninitialized main checkout. |
+| `backup restore` | `<remote> <refs/gitlocal/backups/...> --key-file <absolute-path>`; optional `--file-key <absolute-path>` | Fetch and authenticate one archive, then adopt it into an uninitialized main checkout. For a backup with sensitive-file encryption, `--file-key` names the matching key when its recorded path isn't valid here. |
 | `backup recover` | none | Resume publication after an interrupted `backup restore` in the same checkout. |
 | `recover --list` | none | List every pending journal (configuration, seed, restore, encryption migration and initialization), even while one of them blocks other commands, with its kind, state and next command. JSON adds a `transactions` array of `{id, kind, workspaceId, root, state, next}` beside `transactionIds`. |
 | `recover` | `<transaction-id>` and exactly one of `--resume`, `--rollback` or `--abandon` | Explicitly complete, undo or give up an interrupted transaction. `--abandon` also accepts encryption migration IDs. It also accepts the ID of a restore recovery ref that has no journal (a restore killed before writing one), and deletes the ref; doctor lists such refs. A ref whose restore journal an encryption abandon quarantined keeps that restore's previous file versions, so deleting it also needs `--discard-recovery`. |
 | `doctor` | no paths | Read-only health and recovery diagnosis. Also reports recovery refs with no journal, stale overlays, `core.autocrlf` set under active overlays, and a missing managed ignore block. |
 | `maintenance` | none | Pack the private history store and delete objects no workspace ref, retained workspace or restore recovery ref reaches, under the exclusive repository lock; refused while any transaction is pending. Reports loose and packed object counts and sizes before and after (JSON `before`, `after`). Never automatic. |
-| `deinit` | optional `--remove-history` | Remove git-local from the repository and every worktree: overlays (files keep their local content), guard and snapshot hooks, the required filter and include, the managed `info/attributes` and `info/exclude` blocks, and worktree identity files. Refused while a transaction is pending, an overlay's working file differs from its saved version, or an overlay belongs to a missing or unavailable worktree. Keeps the private state as `<common-git-dir>/gitlocal-removed-<id>`; `--remove-history` deletes it, refused while a quarantine or `refs/gitlocal/recovery/` ref exists. Each step can be rerun; running it again finishes an interrupted deinit. |
-| `completion` | `bash`, `zsh`, `fish`, or `powershell` | Print the corresponding shell completion script. |
+| `deinit` | optional `--remove-history` | Remove git-local from the repository and every worktree: overlays (files keep their local content), guard and snapshot hooks, the required filter and include, the managed `info/attributes` and `info/exclude` blocks, and worktree identity files. Refused while a transaction is pending, an overlay's working file holds changes the overlay doesn't (or the overlay no longer applies), or an overlay belongs to a missing or unavailable worktree. Warns about sensitive paths that are no longer ignored. Keeps the private state as `<common-git-dir>/gitlocal-removed-<id>`; `--remove-history` deletes it, refused while a quarantine, a `refs/gitlocal/recovery/` ref or a retired workspace's history exists. Each step can be rerun; running it again finishes an interrupted deinit and names state an earlier run set aside. |
+| `completion` | `bash`, `zsh`, `fish`, or `powershell`; optional `--no-descriptions` | Print the corresponding shell completion script; `--no-descriptions` leaves out the description shown beside each completion. |
 
 `log --branch` accepts a short branch name or a `refs/heads/` ref. It matches
 the name recorded when the local snapshot was created, including after a rename
@@ -138,7 +145,7 @@ editing the tracked file in the new clone.
 {"schemaVersion":1,"command":"git local commit","ok":true,"data":{"snapshotId":"...","changed":true,"writer":"agent-a","scope":["notes/a"]}}
 ```
 
-An error sets `ok:false` and adds `error:{"code":"usage|conflict|guard_violation|canceled|operation","message":"..."}`. If an operation produced a partial transaction result, `data` accompanies the error. Optional `warnings` is an array of strings. Exit status remains `0` for success, `1` for operation, guard, or cancellation failure, `2` for usage, and `3` for conflicts. `doctor --json` and `restore --dry-run --json` place their existing versioned report or plan inside `data`. `restore --json` also works for execution and returns transaction/recovery IDs.
+An error sets `ok:false` and adds `error:{"code":"usage|conflict|guard_violation|canceled|operation","message":"..."}`. If an operation produced a partial transaction result, `data` accompanies the error. Optional `warnings` is an array of strings. Exit status remains `0` for success, `1` for operation failure, a guard violation (`guard_violation`) or cancellation, `2` for usage, and `3` for conflicts, including a guard that can't check the repository (`conflict`). `doctor --json` and `restore --dry-run --json` place their existing versioned report or plan inside `data`. `restore --json` also works for execution and returns transaction/recovery IDs.
 
 Result fields use lower camel case. `init` returns workspace/repository IDs and
 the history-store path; `track`/`untrack` return workspace and transaction IDs,
@@ -167,13 +174,17 @@ Human `status`, `diff`, `log`, `restore`, and `doctor` output is for reading, no
 for parsing as a stable wire format.
 
 Exit `0` means success, including a no-change result or warnings without
-blocking findings. Exit `1` means operation failure or cancellation (Ctrl-C, SIGTERM or SIGHUP;
+blocking findings. Exit `1` means operation failure, a guard violation
+(`guard staged` or `guard push` found a selected path; JSON
+`error.code: "guard_violation"`), or cancellation (Ctrl-C, SIGTERM or SIGHUP;
 a second signal ends the process without waiting). Exit `2`
 means invalid command/flags/arguments, including an unknown subcommand of a
 command group (such as `hook instal`), extra arguments, and a malformed
 transaction or workspace UUID; JSON reports `error.code: "usage"`. Exit `3`
-means conflict or explicit recovery is required. Human `status` and `diff` can display conflict records
-before returning 3; human `doctor` prints its report before returning 3 for
+means conflict or explicit recovery is required. A guard that can't check the
+repository (for example damaged git-local state, or a `GIT_DIR` that names
+another repository) also exits `3`, with `error.code: "conflict"`. Human
+`status` and `diff` can display conflict records before returning 3; human `doctor` prints its report before returning 3 for
 error findings.
 An incomplete transaction blocks mutations until `recover` is explicitly run.
 `doctor` reports every pending journal, including encryption migration and
@@ -194,7 +205,8 @@ archived under `transactions/completed/` with `outcome: "abandoned"`; a restore
 keeps its recovery ref. Quarantines are kept until the user deletes them and
 are excluded from backups. JSON output: `transactionId`, `kind`, `abandoned`,
 `quarantine` (absolute path or empty), `quarantined` (`file`, `source`, `root`,
-`kind`, `reason`) and `removed`.
+`kind`, `reason`), `removed`, and `excludeRewritten` (whether abandon rewrote the
+managed `info/exclude` block).
 An initialization journal is named by the workspace ID it was creating. It can
 be abandoned only when that checkout's Git administrative directory no longer
 exists and no administrative directory of the repository (main or
@@ -213,15 +225,18 @@ journaled retirement operation.
 Selections from all workspaces in one repository contribute to the shared
 `<git-common-dir>/info/exclude`. Selecting a path in one worktree can hide it
 from ordinary Git status in another worktree. `git add -f` can override an
-ignore rule. On macOS and Linux, `hook install` adds opt-in pre-commit and
-pre-push checks for active and retained workspace selections. It uses Git's
+ignore rule. `hook install` adds opt-in pre-commit and pre-push checks for
+active and retained workspace selections on macOS and Linux. On Windows it
+writes them for Git for Windows' POSIX shell, but running them under Git for
+Windows hasn't been qualified natively. It uses Git's
 effective `core.hooksPath`, creating the directory when needed.
 The default hook directory is shared by linked worktrees. `hook install` and `auto install` refuse a hooks directory inside any
 worktree (for example `core.hooksPath=.githooks` or husky's `.husky`), where the
 scripts can be committed and would carry this machine's binary path, and leave
 it unchanged. They also refuse a directory outside the repository, such as a
 global `core.hooksPath` shared by other repositories, unless
-`--allow-shared-hooks-dir` is given. With an existing hook manager, call
+`--allow-shared-hooks-dir` is given, and refuse to modify hook files that Git
+tracks. With an existing hook manager, call
 `git local guard staged` from its pre-commit hook and `git local guard push
 "$1"` (passing the hook's standard input) from its pre-push hook instead.
 `hook status` and `auto status` report a worktree or shared hooks directory
@@ -271,6 +286,8 @@ cannot be recovered from it.
 
 Generate completion with `git local completion bash` (or `zsh`, `fish`,
 `powershell`) and install the printed script using that shell's normal setup.
-The bash and zsh scripts complete both `git-local` and `git local`: the bash
-script defines `_git_local` for Git's bash completion, and the zsh script's
-`_git-local` serves zsh's `_git` dispatch. Load them after Git's completion.
+The bash script completes both `git-local` and `git local`: it defines
+`_git_local` for Git's bash completion. The zsh script's `_git-local` serves the
+`_git` completion bundled with zsh, so both forms complete there; with Git's own
+`git-completion.zsh` (installed by some Git distributions), only `git-local`
+completes for now. Load the scripts after Git's completion.

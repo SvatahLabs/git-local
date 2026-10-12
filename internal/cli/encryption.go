@@ -88,7 +88,7 @@ func encryptionCommand() *cobra.Command {
 				direction = "rollback"
 			}
 			if err := encryption.RecoverMigration(c.Context(), r, cwd, args[0], direction); err != nil {
-				return err
+				return recoveryKeyError(err, args[0], "before the policy is published, git local encrypt recover "+args[0]+" --rollback works without the key")
 			}
 			if setJSON(c, map[string]any{"transactionId": args[0], "direction": direction}) {
 				return nil

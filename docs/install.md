@@ -7,12 +7,16 @@ git-local is a single executable, `git-local`. Git finds it on `PATH`, so
 ## Install a release binary
 
 Each release has six CGO-free binaries (macOS, Linux and Windows on amd64 and
-arm64) with a `release.json` manifest and a `SHA256SUMS` file. Check the
+arm64) with a `release.json` manifest and a `SHA256SUMS` file. The Intel macOS
+build has only run under Rosetta, and the Windows builds have never run
+natively, so neither is qualified yet; see the
+[changelog](../CHANGELOG.md#known-limitations). Check the
 download, then put it on `PATH` under the name `git-local` (`git-local.exe` on
-Windows) with execute permission:
+Windows) with execute permission. `SHA256SUMS` lists every artifact, so
+`--ignore-missing` skips the ones you didn't download:
 
 ```sh
-shasum -a 256 -c SHA256SUMS      # macOS; sha256sum -c SHA256SUMS on Linux
+shasum -a 256 -c --ignore-missing SHA256SUMS   # macOS; sha256sum -c --ignore-missing SHA256SUMS on Linux
 install -m 755 git-local_v1.0.0_darwin_arm64 /usr/local/bin/git-local
 git local --version
 ```

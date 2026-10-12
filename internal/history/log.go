@@ -38,6 +38,9 @@ func LogWorkspace(ctx context.Context, r *gitexec.Runner, cwd, source string, li
 	return LogFiltered(ctx, r, cwd, source, limit, LogFilter{})
 }
 
+// ErrInvalidLogFilter marks a malformed --branch or --main-commit value.
+var ErrInvalidLogFilter = errors.New("invalid log filter")
+
 // LogFiltered matches the branch and mainline commit recorded when each local
 // snapshot was created. Branch names are historical, not current ref targets.
 func LogFiltered(ctx context.Context, r *gitexec.Runner, cwd, source string, limit int, filter LogFilter) ([]LogEntry, error) {
@@ -46,7 +49,7 @@ func LogFiltered(ctx context.Context, r *gitexec.Runner, cwd, source string, lim
 	}
 	filter.MainCommit = strings.ToLower(filter.MainCommit)
 	if filter.MainCommit != "" && !validOID(filter.MainCommit) {
-		return nil, errors.New("mainline commit must be a full 40- or 64-character hexadecimal object ID")
+		return nil, fmt.Errorf("%w: mainline commit must be a full 40- or 64-character hexadecimal object ID", ErrInvalidLogFilter)
 	}
 	if err := ValidateWriter(filter.Writer); err != nil {
 		return nil, err
@@ -64,6 +67,10 @@ func LogFiltered(ctx context.Context, r *gitexec.Runner, cwd, source string, lim
 	err := configtx.ReadSelection(ctx, r, cwd, func(w workspace.Context, _ selection.State, _ []string, recheck func() error) error {
 		if filter.Branch != "" {
 			if _, err := r.Main(ctx, w.Root, w.Admin, "check-ref-format", filter.Branch); err != nil {
+				var ge *gitexec.Error
+				if errors.As(err, &ge) && ge.Code == 1 {
+					return fmt.Errorf("%w: invalid branch name %q", ErrInvalidLogFilter, strings.TrimPrefix(filter.Branch, "refs/heads/"))
+				}
 				return fmt.Errorf("invalid branch name: %w", err)
 			}
 		}

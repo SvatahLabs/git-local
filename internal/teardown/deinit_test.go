@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"gitlocal/internal/testutil"
 )
@@ -170,9 +171,25 @@ func TestDeinitLeavesAPlainRepository(t *testing.T) {
 		t.Fatalf("refused deinit changed the private state: %v", err)
 	}
 	write(t, filepath.Join(root, "config.txt"), "mode=local\n")
+	// Staging the file while the filter runs caches its size and time next
+	// to the upstream blob; without the filter Git would trust that cache and
+	// miss the local value, so deinit must make Git read the file again. The
+	// file is dated back first so Git doesn't treat the entry as racily clean
+	// (written in the same second as the index), which would hide the problem.
+	past := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(filepath.Join(root, "config.txt"), past, past); err != nil {
+		t.Fatal(err)
+	}
+	f.git(f.withTool, root, "add", "config.txt")
+	if out := f.git(f.withTool, root, "status", "--porcelain", "--", "config.txt"); out != "" {
+		t.Fatalf("overlay file shows as changed while active:\n%s", out)
+	}
 	out := f.gl(root, "deinit")
 	if !strings.Contains(out, "gitlocal-removed-") {
 		t.Fatalf("deinit output doesn't name the kept history:\n%s", out)
+	}
+	if !strings.Contains(out, "sensitive paths .env.local are no longer ignored") {
+		t.Fatalf("deinit doesn't warn that the sensitive file is no longer ignored:\n%s", out)
 	}
 	common := filepath.Join(root, ".git")
 	if _, err := os.Stat(filepath.Join(common, "gitlocal")); !os.IsNotExist(err) {
@@ -226,8 +243,10 @@ func TestDeinitLeavesAPlainRepository(t *testing.T) {
 	if out := f.git(f.plain, linked, "status", "--porcelain"); out != "?? .env.local\n?? notes.local\n" {
 		t.Fatalf("linked status after deinit:\n%s", out)
 	}
-	// Running it again finds nothing left to do.
-	f.gl(root, "deinit")
+	// Running it again finds nothing left to do, and names the kept state.
+	if out := f.gl(root, "deinit"); !strings.Contains(out, "an earlier git local deinit set aside") {
+		t.Fatalf("rerun doesn't name the kept state:\n%s", out)
+	}
 }
 
 // --remove-history deletes the private state only when no restore recovery
@@ -273,5 +292,62 @@ func TestDeinitRemoveHistoryRefusesRecoveryRefs(t *testing.T) {
 	}
 	if status := g.git(g.plain, root, "status", "--porcelain"); status != "?? notes.local\n" {
 		t.Fatalf("status after deinit --remove-history:\n%s", status)
+	}
+
+	// A retired worktree's history is the only copy of its files.
+	h := newFixture(t)
+	root = h.repo.Root
+	write(t, filepath.Join(root, "app.txt"), "application\n")
+	h.git(h.plain, root, "add", "app.txt")
+	h.git(h.plain, root, "commit", "-qm", "initial")
+	h.gl(root, "init")
+	linked := filepath.Join(filepath.Dir(root), filepath.Base(root)+"-retired")
+	h.git(h.withTool, root, "worktree", "add", "-q", linked, "-b", "retired")
+	t.Cleanup(func() { os.RemoveAll(linked) })
+	h.gl(linked, "init")
+	write(t, filepath.Join(linked, "notes.local"), "only here\n")
+	h.gl(linked, "track", "notes.local")
+	h.gl(linked, "commit", "-m", "linked notes")
+	h.gl(root, "workspace", "remove", "--force", linked)
+	if out, err := h.run(h.withTool, root, h.bin, "deinit", "--remove-history"); err == nil || !strings.Contains(out, "retired workspace") || !strings.Contains(out, "without --remove-history") {
+		t.Fatalf("deinit --remove-history with a retired workspace: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".git", "gitlocal")); err != nil {
+		t.Fatalf("refused deinit changed the private state: %v", err)
+	}
+}
+
+// The filter writes the saved patch applied to the file's current upstream
+// version, so after upstream changed other lines the working file differs
+// from the saved local version without holding unsaved changes; deinit
+// accepts it and keeps that content.
+func TestDeinitAcceptsOverlayFileAfterUpstreamChange(t *testing.T) {
+	f := newFixture(t)
+	root := f.repo.Root
+	write(t, filepath.Join(root, "config.txt"), "a=1\nb=2\nc=3\nd=4\nmode=shared\n")
+	f.git(f.plain, root, "add", "config.txt")
+	f.git(f.plain, root, "commit", "-qm", "initial")
+	f.gl(root, "init")
+	write(t, filepath.Join(root, "config.txt"), "a=1\nb=2\nc=3\nd=4\nmode=local\n")
+	f.gl(root, "overlay", "add", "local-mode", "--", "config.txt")
+	// Upstream changes another line; checking it out runs the filter.
+	f.git(f.withTool, root, "checkout", "-q", "-b", "upstream")
+	write(t, filepath.Join(root, "config.txt"), "a=10\nb=2\nc=3\nd=4\nmode=local\n")
+	f.git(f.withTool, root, "commit", "-qam", "upstream change")
+	f.git(f.withTool, root, "checkout", "-q", "main")
+	f.git(f.withTool, root, "merge", "-q", "--ff-only", "upstream")
+	const merged = "a=10\nb=2\nc=3\nd=4\nmode=local\n"
+	if data, err := os.ReadFile(filepath.Join(root, "config.txt")); err != nil || string(data) != merged {
+		t.Fatalf("overlay file after the upstream change: %q %v", data, err)
+	}
+	f.gl(root, "deinit")
+	if data, err := os.ReadFile(filepath.Join(root, "config.txt")); err != nil || string(data) != merged {
+		t.Fatalf("overlay file after deinit: %q %v", data, err)
+	}
+	if got := f.git(f.plain, root, "show", "HEAD:config.txt"); got != "a=10\nb=2\nc=3\nd=4\nmode=shared\n" {
+		t.Fatalf("upstream version: %q", got)
+	}
+	if status := f.git(f.plain, root, "status", "--porcelain"); status != " M config.txt\n" {
+		t.Fatalf("status after deinit:\n%s", status)
 	}
 }

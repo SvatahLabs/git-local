@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"gitlocal/internal/gitexec"
 	"gitlocal/internal/storage"
@@ -197,9 +198,41 @@ func RemoveFor(ctx context.Context, r *gitexec.Runner, cwd, owner, name string) 
 			}
 		}
 	}
+	// While the filter ran, Git may have cached the working file's size and
+	// time next to the upstream blob (after git add, or a status when the
+	// patch kept the size). Without the filter it would trust that cache,
+	// show the local content as unchanged and let a checkout overwrite it, so
+	// the file's times are renewed for Git to read it again.
+	if owner == p.WorkspaceID {
+		if err := renewTimes(p.Root, m.Path); err != nil {
+			return empty, err
+		}
+	}
 	m.State = "removed"
 	if err := d.WriteJSON(manifestPath, m); err != nil {
 		return empty, err
 	}
 	return m, nil
+}
+
+// renewTimes sets a working file's access and modification times to now,
+// which also changes its inode change time.
+func renewTimes(root, path string) error {
+	files, err := storage.OpenDir(root)
+	if err != nil {
+		return err
+	}
+	defer files.Close()
+	info, err := files.Lstat(filepath.FromSlash(path))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return nil
+	}
+	now := time.Now()
+	return os.Chtimes(filepath.Join(root, filepath.FromSlash(path)), now, now)
 }

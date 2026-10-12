@@ -54,8 +54,11 @@ func TestPolicyCorrectionRollsBackWithoutKeyDirectory(t *testing.T) {
 	}
 	_, err = history.Commit(ctx, f.r, f.root, "needs the key")
 	rebind("snapshot", err)
+	// The key named on the command line is missing: rebinding is no remedy.
 	_, err = Migrate(ctx, f.r, f.root, f.key, []string{".env.local", "config/secrets"})
-	rebind("correction", err)
+	if err == nil || !strings.Contains(err.Error(), f.key+" doesn't exist; check the path, or reconnect") || strings.Contains(err.Error(), "rebind-key") {
+		t.Fatalf("correction without the key's directory: %v", err)
+	}
 	if err := os.Rename(ejected, drive); err != nil {
 		t.Fatal(err)
 	}

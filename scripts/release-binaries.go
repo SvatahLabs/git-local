@@ -115,7 +115,7 @@ func run(root string, args []string) error {
 		selected = []target{{runtime.GOOS, runtime.GOARCH}}
 	}
 	info := manifest{SchemaVersion: 1, Version: version, MinimumGit: gitexec.MinimumGit, GoVersion: goVersion}
-	if info.SourceRevision, err = gitRevision(root); err != nil {
+	if info.SourceRevision, err = gitRevision(root, stage); err != nil {
 		return fmt.Errorf("read the source commit: %w", err)
 	}
 	for _, platform := range selected {
@@ -174,11 +174,12 @@ func buildEnv(platform target) []string {
 	var env []string
 	for _, item := range os.Environ() {
 		key, _, _ := strings.Cut(item, "=")
-		if key != "GOOS" && key != "GOARCH" && key != "CGO_ENABLED" {
+		if key != "GOOS" && key != "GOARCH" && key != "CGO_ENABLED" && key != "GOWORK" {
 			env = append(env, item)
 		}
 	}
-	return append(env, "GOOS="+platform.OS, "GOARCH="+platform.Arch, "CGO_ENABLED=0")
+	// An ignored go.work could change what is built without marking it dirty.
+	return append(env, "GOOS="+platform.OS, "GOARCH="+platform.Arch, "CGO_ENABLED=0", "GOWORK=off")
 }
 
 func goEnv(goBinary, root, key string) (string, error) {
@@ -205,17 +206,40 @@ func readVersion(root string) (string, error) {
 	return version, nil
 }
 
-// gitRevision is the source commit, marked +dirty when tracked files have
-// uncommitted changes.
-func gitRevision(root string) (string, error) {
-	cmd := exec.Command("git", "rev-parse", "--verify", "HEAD")
+// gitRevision is the source commit, marked +dirty when the checkout has
+// uncommitted changes or untracked files (Go compiles every file in a package
+// directory) other than the staging directory. root must be the checkout
+// itself, not a copy inside another repository, whose commit would be
+// recorded instead.
+func gitRevision(root, stage string) (string, error) {
+	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
 	cmd.Dir = root
 	output, err := cmd.Output()
 	if err != nil {
+		return "", fmt.Errorf("%s isn't a Git checkout: %w", root, err)
+	}
+	top, err := filepath.EvalSymlinks(strings.TrimSpace(string(output)))
+	if err != nil {
+		return "", err
+	}
+	if resolved, err := filepath.EvalSymlinks(root); err != nil {
+		return "", err
+	} else if top != resolved {
+		return "", fmt.Errorf("%s isn't a Git checkout (it's inside %s)", root, top)
+	}
+	cmd = exec.Command("git", "rev-parse", "--verify", "HEAD")
+	cmd.Dir = root
+	if output, err = cmd.Output(); err != nil {
 		return "", err
 	}
 	revision := strings.TrimSpace(string(output))
-	cmd = exec.Command("git", "status", "--porcelain", "--untracked-files=no")
+	args := []string{"status", "--porcelain", "--", "."}
+	if resolved, err := filepath.EvalSymlinks(stage); err == nil {
+		if rel, err := filepath.Rel(top, resolved); err == nil && filepath.IsLocal(rel) {
+			args = append(args, ":(exclude)"+filepath.ToSlash(rel))
+		}
+	}
+	cmd = exec.Command("git", args...)
 	cmd.Dir = root
 	status, err := cmd.Output()
 	if err != nil {

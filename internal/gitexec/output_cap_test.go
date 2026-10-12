@@ -105,7 +105,7 @@ func TestListingsAreNotCapped(t *testing.T) {
 	}
 	// Content reads and patches stay capped, and other commands can't use the
 	// uncapped calls.
-	for _, args := range [][]string{{"cat-file", "blob", tree}, {"diff-tree", "-p", tree, tree}, {"fsck"}} {
+	for _, args := range [][]string{{"cat-file", "blob", tree}, {"diff-tree", "-p", tree, tree}, {"diff-tree", "-r", "-u", tree, tree}, {"diff-tree", "-U1", tree, tree}, {"diff-tree", "--unified=2", tree, tree}, {"diff-tree", "--cc", tree, tree}, {"diff-tree", "--patch-with-stat", tree, tree}, {"diff-tree", "--binary", tree, tree}, {"fsck"}} {
 		if _, err := r.HistoryListing(ctx, store, nil, args...); err == nil {
 			t.Fatalf("HistoryListing accepted %v", args)
 		}

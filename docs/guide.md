@@ -60,9 +60,12 @@ git local completion bash
 ```
 
 To complete both `git-local` and `git local`, load the script after Git's own
-completion: in bash, `eval "$(git-local completion bash)"` (it needs the
-bash-completion package, as Git's does); in zsh with compinit,
-`source <(git-local completion zsh)`.
+completion: in bash, `eval "$(git-local completion bash)"` (with Git's
+`git-completion.bash` loaded first, the bash-completion package isn't needed);
+in zsh with compinit, `source <(git-local completion zsh)`. In zsh,
+`git local <TAB>` completes through the `_git` completion bundled with zsh;
+with Git's own `git-completion.zsh` (installed by some Git distributions), only
+`git-local <TAB>` completes for now.
 
 ## Interrupted transactions
 
@@ -162,15 +165,22 @@ helpers in your global or system Git config (`credential.helper`, or
 `credential.<url>.helper` for that URL); repository config is ignored and Git
 never prompts, so store the credential with your helper first, for example by
 fetching from that URL once. From the same global and system config, backup
-transport also uses `credential.useHttpPath`, `credential.<url>.username`,
-`http.sslCAInfo`, `http.sslCAPath` and `http.proxy` (each also as
-`http.<url>.*`), for example to trust a self-hosted server's private CA. No
-other HTTP setting is used, redirects aren't followed, and these settings are
-passed to Git as `-c` options, so a credential helper written inline with a
-secret in it is visible in the process list; use a helper program instead.
-SSH never prompts either (`SSH_ASKPASS_REQUIRE=never`). Backup hosts are
+transport also uses `credential.useHttpPath` and `credential.username` (each
+also as `credential.<url>.*`), and `http.sslCAInfo`, `http.sslCAPath` and
+`http.proxy` (each also as `http.<url>.*`), for example to trust a self-hosted
+server's private CA. Conditional includes (`includeIf`) in that config are
+evaluated outside your repository, so settings they include only for it (for
+example with `gitdir:`) aren't used. No other HTTP setting is used and
+redirects aren't followed. Credential helpers are passed to Git as `-c`
+options, so a helper written inline with a secret in it is visible in the
+process list; use a helper program instead.
+Over SSH, askpass programs are disabled too (`SSH_ASKPASS_REQUIRE=never`), but
+ssh itself can still ask on the terminal to accept an unknown host key or for a
+key's passphrase. For unattended backups, use an ssh-agent and accept the host
+key beforehand, for example by connecting once with ssh. Backup hosts are
 compared after canonicalizing addresses, including forms such as `127.1` or
-`2130706433` that resolvers read as IPv4. The printed `refs/gitlocal/backups/...` ref identifies that
+`2130706433` that resolvers read as IPv4 and full-width spellings, and
+`localhost` and its subdomains are refused. The printed `refs/gitlocal/backups/...` ref identifies that
 backup; the archive is bound to it, so restore refuses an archive the backup
 host serves under another ref (an older backup or another repository's).
 Archives from earlier releases aren't bound and are refused; restore them with
@@ -279,8 +289,9 @@ fails with "managed ignore rules exceed the size limit".
 ## Commit and push guards
 
 `git add -f` can bypass that ignore rule. Run `git local hook install` to add
-pre-commit and pre-push guards on macOS, Linux or Git for Windows. Native Windows
-hook execution still awaits CI qualification. The guards reject additions or
+pre-commit and pre-push guards on macOS and Linux. On Windows it writes them for
+Git for Windows' POSIX shell, but running them under Git for Windows hasn't been
+qualified natively. The guards reject additions or
 changes to paths selected by any active or retired workspace, and to
 `.gitlocal-tmp-*` staging files, and detect saved
 overlay patches that entered the index or a pushed commit without the filter,
@@ -334,10 +345,12 @@ other repositories lose those hooks too.
 Install keeps an existing hook's file mode, so a hook you disabled by removing
 its execute bits stays disabled; install warns that Git won't run it, and
 `hook status` and `doctor` report it. Install adds its block
-only to `sh`, `bash`, `dash`, `ksh`, `zsh`, `ash` or `mksh` hooks (directly,
-through `busybox`, or through `env`, also with `-u NAME` or `NAME=value`
-arguments); for any other interpreter it refuses and explains how to call the
-guards from that hook.
+only to `sh`, `bash`, `dash`, `ksh`, `zsh`, `ash` or `mksh` hooks, run directly,
+through `busybox`, or through `env`. `env` may carry options such as `-u NAME`
+and `NAME=value` assignments, but on Linux, where the kernel passes everything
+after the interpreter as one argument, those need `env -S`. For any other
+interpreter, or a hook with no `#!` line, install refuses and explains how to
+call the guards from that hook.
 On a new branch, the pre-push guard excludes commits reachable from known
 remote-tracking branches; without those refs it scans the branch's full ancestry.
 It does the same when the remote's old commit isn't in this repository, as in
@@ -373,8 +386,9 @@ Run `git local auto install` to add managed post-commit, post-checkout,
 pre-rebase and post-rewrite hooks. They snapshot selected files only when their
 content or selection changed. The hooks preserve existing shell hooks and seed
 new worktrees from the primary checkout on their first post-checkout event.
-On Windows, these commands use Git for Windows' POSIX shell and a quoted `.exe`
-path; native Windows hook execution still awaits CI qualification.
+On Windows, these commands write hooks for Git for Windows' POSIX shell with a
+quoted `.exe` path, but running them under Git for Windows hasn't been qualified
+natively.
 When Git removes a worktree directly, the next installed post-event hook
 retires eligible missing records while keeping their history. Ambiguous or
 unidentified registrations require `git local workspace prune` after repair. Use
@@ -485,10 +499,11 @@ example because a teammate committed the same change, `overlay status` and
 
 ## Exit codes
 
-Exit codes: `0` success, `1` operation failure/cancellation, `2` invalid usage
-(including a mistyped subcommand, extra arguments or a malformed ID), `3`
-conflict or recovery required. Alternate-index/object/configuration injection
-contexts, including `git -c ... local`, are rejected.
+Exit codes: `0` success, `1` operation failure, guard violation or
+cancellation, `2` invalid usage (including a mistyped subcommand, extra
+arguments or a malformed ID), `3` conflict or recovery required, including a
+guard that can't check the repository. Alternate-index/object/configuration
+injection contexts, including `git -c ... local`, are rejected.
 
 See the [command reference](commands.md) for every flag, machine-readable
 output and binary behavior, and [limits](limits.md) for size limits. `doctor`
@@ -507,15 +522,21 @@ store's size and loose-object count. Nothing runs it automatically.
 
 `git local deinit` removes git-local from the repository and all its
 worktrees: it removes every overlay (each file keeps its local content, now an
-ordinary change), the guard and snapshot hooks, the required filter and the
-managed `info/attributes` and `info/exclude` blocks (selected files then show as
-untracked), and each worktree's identity. It refuses while a transaction is
-pending, while an overlay's file holds changes the overlay doesn't, and for an
-overlay of a worktree that is missing (prune it first). The private history
-and state are kept as `.git/gitlocal-removed-<id>`; delete that directory when
-you no longer need it, or pass `--remove-history`, which refuses while a
-quarantine or a restore recovery ref would be lost. Encryption keys outside the
-repository are never touched. An interrupted `deinit` finishes when run again.
+ordinary change that `git status` shows), the guard and snapshot hooks, the
+required filter and the managed `info/attributes` and `info/exclude` blocks,
+and each worktree's identity. Selected files then show as untracked: nothing
+keeps them out of `git add -A` any more, and `git clean -fd` would delete them,
+so add any you want Git to keep ignoring to `.git/info/exclude` (deinit names
+the sensitive paths among them). It refuses while a transaction is pending,
+while an overlay's file holds changes the overlay doesn't or the overlay no
+longer applies to the file, and for an overlay of a worktree that is missing
+(prune it first). The private history and state are kept as
+`.git/gitlocal-removed-<id>`; delete that directory when you no longer need
+it. `--remove-history` deletes it at once, but refuses while it would lose data
+kept nowhere else: a quarantine, a restore recovery ref (the previous file
+versions of an earlier restore) or a retired worktree's history. Encryption
+keys outside the repository are never touched. An interrupted `deinit`
+finishes when run again, and a rerun names any state an earlier run set aside.
 To remove the program itself, delete `git-local` from your `PATH`; for the
 macOS package, `sudo rm /usr/local/bin/git-local && sudo pkgutil --forget
 org.gitlocal.cli`.

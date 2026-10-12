@@ -43,12 +43,38 @@ var ErrKeyUnavailable = errors.New("sensitive-file key is unavailable")
 type keyUnavailableError struct {
 	path string
 	err  error
+	// supplied marks a key path given on the command line (--key-file,
+	// rebind-key, --file-key), for which rebinding is no remedy.
+	supplied bool
 }
 
 func (e keyUnavailableError) Error() string {
+	if e.supplied {
+		return fmt.Sprintf("sensitive-file key %s doesn't exist; check the path, or reconnect the drive or directory that holds it", e.path)
+	}
 	return fmt.Sprintf("sensitive-file key %s doesn't exist; reconnect the drive or directory that holds it, or if the key moved, run git local encrypt rebind-key <new-absolute-path>", e.path)
 }
 func (e keyUnavailableError) Unwrap() []error { return []error{ErrKeyUnavailable, e.err} }
+
+// UnavailableKeyPath returns the key path of an error matching
+// ErrKeyUnavailable.
+func UnavailableKeyPath(err error) (string, bool) {
+	var e keyUnavailableError
+	if errors.As(err, &e) {
+		return e.path, true
+	}
+	return "", false
+}
+
+// suppliedKey drops the rebind advice from a missing key the user named.
+func suppliedKey(err error) error {
+	var e keyUnavailableError
+	if errors.As(err, &e) {
+		e.supplied = true
+		return e
+	}
+	return err
+}
 
 func keyUnavailable(path string, err error) error {
 	if errors.Is(err, fs.ErrNotExist) {
@@ -178,7 +204,7 @@ func PolicyForKey(keyFile, repoRoot, commonGitDir string, rules []PathRule) (Pol
 	}
 	key, err := keymaterial.Load(keyFile, repoRoot)
 	if err != nil {
-		return Policy{}, keyUnavailable(keyFile, err)
+		return Policy{}, suppliedKey(keyUnavailable(keyFile, err))
 	}
 	fingerprint, err := keymaterial.Fingerprint(key)
 	if err != nil {
@@ -192,7 +218,7 @@ func PolicyForKey(keyFile, repoRoot, commonGitDir string, rules []PathRule) (Pol
 func RebindKeyPath(policy Policy, keyFile, repoRoot, commonGitDir string) (Policy, error) {
 	policy.KeyFile = keyFile
 	if _, err := LoadKey(policy, repoRoot, commonGitDir); err != nil {
-		return Policy{}, err
+		return Policy{}, suppliedKey(err)
 	}
 	return Canonical(policy, repoRoot, commonGitDir)
 }

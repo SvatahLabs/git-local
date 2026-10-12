@@ -51,6 +51,20 @@ func TestLargeIndexAndTreeListingsExceedOutputCap(t *testing.T) {
 		t.Fatalf("show: %q", out)
 	}
 	doctorReportsNoErrors(t, repo.Root)
+	// reset --hard asks Git for the filter attribute of every path in the
+	// target tree; the response repeats each path, so it exceeds the cap too.
+	first := filepath.Join(repo.Root, "src", "module-000", "file-with-a-long-name-0000.txt")
+	if err := os.WriteFile(first, []byte("changed\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	repo.Git("commit", "-qam", "change a tracked file")
+	successful(t, repo.Root, "reset", "--hard", "HEAD~1")
+	if data, err := os.ReadFile(first); err != nil || string(data) != "tracked\n" {
+		t.Fatalf("tracked file after reset --hard: %q %v", data, err)
+	}
+	if data, err := os.ReadFile(filepath.Join(repo.Root, "notes.local")); err != nil || string(data) != "local v2\n" {
+		t.Fatalf("selected file after reset --hard: %q %v", data, err)
+	}
 }
 
 // A snapshot tree and its file listing can each exceed the buffered output

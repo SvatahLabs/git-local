@@ -101,6 +101,10 @@ complete_line "git local "
 complete_line "git local ho"
 complete_line "git local hook "
 complete_line "git-local hook "
+COMP_LINE="git local ho"; COMP_POINT=${#COMP_LINE}; COMP_WORDS=(git local ho); COMP_CWORD=2; COMPREPLY=()
+__git_wrap__git_main
+echo "== raw"
+printf 'raw <%s>\n' "${COMPREPLY[@]}"
 `
 	cmd := exec.Command(bash, "--noprofile", "--norc", "-c", driver, "driver", gitScript, scriptPath)
 	cmd.Env = shellEnv(t, bin)
@@ -136,6 +140,11 @@ complete_line "git-local hook "
 	has("git local ", "commit", "track", "hook", "restore")
 	has("git local ho", "hook")
 	has("git local hook ", "install", "uninstall")
+	// Like Git's own completions, a completed name ends in a space (Git
+	// registers its completion with -o nospace).
+	if !strings.Contains(string(out), "raw <hook >") {
+		t.Fatalf("completed name has no trailing space:\n%s", out)
+	}
 	// The git-local form is unchanged; it uses its own complete registration.
 	if len(sections["git-local hook "]) != 0 {
 		t.Logf("git-local form under Git's wrapper: %q", sections["git-local hook "])

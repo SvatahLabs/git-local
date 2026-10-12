@@ -1,9 +1,12 @@
 package guard
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -111,5 +114,37 @@ func TestKnownCommitsRecognizesAnnotatedTags(t *testing.T) {
 	}
 	if !known[tag] || !known[commit] || known[missing] || len(known) != 2 {
 		t.Fatalf("known commits: %v (tag %s, commit %s)", known, tag, commit)
+	}
+}
+
+// An earlier committed version too large to be overlay text is left out of
+// the adopted versions rather than read, so a version over Git's output cap
+// doesn't make the commit and push guards fail.
+func TestCommittedBlobsSkipsVersionsLargerThanOverlayText(t *testing.T) {
+	repo := testutil.New(t)
+	repo.Commit()
+	big := bytes.Repeat([]byte("x"), gitexec.MaxOutput+1)
+	if err := os.WriteFile(filepath.Join(repo.Root, "app.json"), big, 0600); err != nil {
+		t.Fatal(err)
+	}
+	repo.Git("add", "app.json")
+	repo.Git("commit", "-qm", "large version")
+	if err := os.WriteFile(filepath.Join(repo.Root, "small.json"), []byte("{}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	repo.Git("add", "small.json")
+	repo.Git("commit", "-qm", "small file")
+	r, err := gitexec.New(repo.RunnerEnv())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	blobs, err := committedBlobs(context.Background(), r, repo.Root, "app.json", "HEAD", "HEAD~1")
+	if err != nil || len(blobs) != 0 {
+		t.Fatalf("large versions: %d blobs, %v", len(blobs), err)
+	}
+	blobs, err = committedBlobs(context.Background(), r, repo.Root, "small.json", "HEAD")
+	if err != nil || len(blobs) != 1 || string(blobs[0]) != "{}\n" {
+		t.Fatalf("small version: %q %v", blobs, err)
 	}
 }

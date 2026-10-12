@@ -274,17 +274,22 @@ func (r *Runner) controls() []string {
 	return args
 }
 
-// boundedBuffer keeps at most MaxOutput bytes. It holds its buffer in a field
-// rather than embedding it: os/exec copies output with io.Copy, which would use
-// an embedded buffer's ReadFrom and bypass Write.
+// boundedBuffer keeps at most limit bytes, or MaxOutput when limit is zero. It
+// holds its buffer in a field rather than embedding it: os/exec copies output
+// with io.Copy, which would use an embedded buffer's ReadFrom and bypass Write.
 type boundedBuffer struct {
 	buf      bytes.Buffer
+	limit    int
 	overflow bool
 }
 
 func (b *boundedBuffer) Write(p []byte) (int, error) {
 	n := len(p)
-	room := MaxOutput - b.buf.Len()
+	limit := b.limit
+	if limit == 0 {
+		limit = MaxOutput
+	}
+	room := limit - b.buf.Len()
 	if room > 0 {
 		b.buf.Write(p[:min(room, n)])
 	}
@@ -421,10 +426,18 @@ func (r *Runner) ResetFilters(ctx context.Context, cwd, admin, commit string, pa
 	if err := r.CheckCapabilities(ctx); err != nil {
 		return nil, err
 	}
-	output, err := r.run(ctx, cwd, false, nil, []string{"--git-dir=" + admin, "--work-tree=" + cwd}, &input, "check-attr", "--source="+commit, "-z", "--stdin", "filter")
-	if err != nil {
+	// Each response record repeats its path with the attribute and its value,
+	// so the response grows with the target tree and may exceed MaxOutput; it
+	// is bounded by the query instead, with a generous allowance per value.
+	const maxValue = 1 << 10
+	response := &boundedBuffer{limit: input.Len() + len(paths)*(len("filter")+maxValue+2)}
+	if _, err := r.runOutput(ctx, cwd, false, nil, []string{"--git-dir=" + admin, "--work-tree=" + cwd}, &input, response, "check-attr", "--source="+commit, "-z", "--stdin", "filter"); err != nil {
 		return nil, err
 	}
+	if response.overflow {
+		return nil, errors.New("Git output exceeded safety limit")
+	}
+	output := response.Bytes()
 	if len(output) == 0 || output[len(output)-1] != 0 {
 		return nil, errors.New("malformed reset attribute response")
 	}
@@ -526,7 +539,7 @@ func (r *Runner) History(ctx context.Context, store string, input io.Reader, arg
 // numstat tree diffs, and batch object checks. Blob contents and patches stay
 // capped.
 func (r *Runner) HistoryListing(ctx context.Context, store string, input io.Reader, args ...string) ([]byte, error) {
-	if len(args) == 0 || !(args[0] == "rev-list" || args[0] == "ls-tree" || args[0] == "show-ref" || args[0] == "diff-tree" && !slices.Contains(args, "-p") && !slices.Contains(args, "--patch") || args[0] == "cat-file" && len(args) > 1 && strings.HasPrefix(args[1], "--batch-check")) {
+	if len(args) == 0 || !(args[0] == "rev-list" || args[0] == "ls-tree" || args[0] == "show-ref" || args[0] == "diff-tree" && !producesPatch(args[1:]) || args[0] == "cat-file" && len(args) > 1 && strings.HasPrefix(args[1], "--batch-check")) {
 		return nil, errors.New("only history listings may exceed the output limit")
 	}
 	var out bytes.Buffer
@@ -534,6 +547,22 @@ func (r *Runner) HistoryListing(ctx context.Context, store string, input io.Read
 		return nil, err
 	}
 	return out.Bytes(), nil
+}
+
+// producesPatch reports whether diff-tree arguments ask for patch output,
+// which is content and stays capped.
+func producesPatch(args []string) bool {
+	for _, arg := range args {
+		if arg == "--" {
+			return false
+		}
+		switch {
+		case arg == "-p", arg == "-u", arg == "-c", arg == "-W", arg == "--cc", arg == "--binary", arg == "--function-context",
+			strings.HasPrefix(arg, "--patch"), strings.HasPrefix(arg, "-U"), strings.HasPrefix(arg, "--unified"):
+			return true
+		}
+	}
+	return false
 }
 
 func (r *Runner) historyOutput(ctx context.Context, store string, input io.Reader, output io.Writer, args ...string) ([]byte, error) {
@@ -591,12 +620,15 @@ func backupArgs(verb, remoteURL, refspec string) []string {
 const backupSettings = `^(credential\.(.+\.)?(helper|usehttppath|username)|http\.(.+\.)?(sslcainfo|sslcapath|proxy))$`
 
 // backupTransport allows SSH and HTTPS for one backup command. For an HTTPS
-// URL it also passes the user's backupSettings on, as -c options after the
-// runner's own resets and in Git's order, so Git applies its own URL matching
-// to them. (Like any -c option, an inline credential helper is visible in the
-// process list; a helper program keeps secrets out of it.) Repository config
-// stays ignored, redirects aren't followed, and terminal and askpass prompts,
-// Git's and ssh's, stay disabled.
+// URL it also passes the user's backupSettings on, in Git's order, so Git
+// applies its own URL matching to them. Credential helpers go as -c options,
+// after the runner's own credential.helper reset (which would clear helpers
+// given earlier); like any -c option an inline helper is visible in the
+// process list, while a helper program keeps secrets out of it. The other
+// settings, which may hold a proxy password, go in the environment
+// (GIT_CONFIG_COUNT), which only the user can read. Repository config stays
+// ignored, redirects aren't followed, and Git's terminal and askpass prompts
+// and ssh's askpass stay disabled.
 func (r *Runner) backupTransport(ctx context.Context, store, remoteURL string) ([]string, []string, error) {
 	// A redirect could send the push, with the user's credentials for the new
 	// host, to a host the backup destination checks never saw (origin).
@@ -608,6 +640,7 @@ func (r *Runner) backupTransport(ctx context.Context, store, remoteURL string) (
 	if !strings.HasPrefix(strings.ToLower(remoteURL), "https://") {
 		return prefix, env, nil
 	}
+	var forwarded []string
 	for _, scope := range []string{"--system", "--global"} {
 		out, err := r.run(ctx, store, false, nil, nil, nil, "config", "--includes", "--null", scope, "--get-regexp", backupSettings)
 		var ge *Error
@@ -625,8 +658,15 @@ func (r *Runner) backupTransport(ctx context.Context, store, remoteURL string) (
 			if strings.Contains(key, "=") {
 				return nil, nil, fmt.Errorf("unsupported setting %q for the backup remote", key)
 			}
-			prefix = append(prefix, "-c", key+"="+value)
+			if strings.HasPrefix(key, "credential.") && strings.HasSuffix(key, ".helper") {
+				prefix = append(prefix, "-c", key+"="+value)
+				continue
+			}
+			forwarded = append(forwarded, "GIT_CONFIG_KEY_"+strconv.Itoa(len(forwarded)/2)+"="+key, "GIT_CONFIG_VALUE_"+strconv.Itoa(len(forwarded)/2)+"="+value)
 		}
+	}
+	if len(forwarded) > 0 {
+		env = append(append(env, "GIT_CONFIG_COUNT="+strconv.Itoa(len(forwarded)/2)), forwarded...)
 	}
 	return prefix, env, nil
 }

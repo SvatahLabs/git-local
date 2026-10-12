@@ -113,4 +113,17 @@ func TestRemoteHostCanonicalizesResolverIPv4Forms(t *testing.T) {
 	if err := ValidateDestination("backup", []string{"https://16909060/y"}, []string{"https://1.2.3.4/x"}); err == nil {
 		t.Fatal("a decimal spelling of the origin address passed the same-host check")
 	}
+	// Full-width digits, letters and dots map to ASCII the way
+	// internationalized-name handling does; localhost subdomains are this host.
+	if _, err := RemoteHost("https://\uff11\uff12\uff17\u3002\uff10\u3002\uff10\u3002\uff11/r"); err == nil || !strings.Contains(err.Error(), "loopback") {
+		t.Fatalf("full-width loopback address: %v", err)
+	}
+	for _, raw := range []string{"https://x.localhost/r", "ssh://git@backup.LOCALHOST./r.git", "https://\uff4c\uff4f\uff43\uff41\uff4c\uff48\uff4f\uff53\uff54/r"} {
+		if _, err := RemoteHost(raw); err == nil || !strings.Contains(err.Error(), "this host") {
+			t.Fatalf("%q: %v", raw, err)
+		}
+	}
+	if err := ValidateDestination("backup", []string{"https://\uff42\uff41\uff43\uff4b\uff55\uff50.example/y"}, []string{"https://backup.example/x"}); err == nil {
+		t.Fatal("a full-width spelling of the origin host passed the same-host check")
+	}
 }

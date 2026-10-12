@@ -29,6 +29,7 @@ import (
 	"gitlocal/internal/hook"
 	"gitlocal/internal/overlay"
 	"gitlocal/internal/restore"
+	"gitlocal/internal/secureblob"
 	"gitlocal/internal/seed"
 	"gitlocal/internal/storage"
 	"gitlocal/internal/workspace"
@@ -618,6 +619,9 @@ func New(out, errOut io.Writer) *cobra.Command {
 		RunE: func(c *cobra.Command, _ []string) error {
 			return inspectCommand(c, func(r *gitexec.Runner, cwd string) error {
 				entries, err := history.LogFiltered(c.Context(), r, cwd, logWorkspace, limit, history.LogFilter{Branch: logBranch, MainCommit: logMainCommit, WithStat: logStat, Writer: logWriter, Path: logPath, WithProvenance: logProvenance})
+				if errors.Is(err, history.ErrInvalidLogFilter) {
+					return usageError{err}
+				}
 				if err != nil {
 					return err
 				}
@@ -924,8 +928,10 @@ func New(out, errOut io.Writer) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			abandonHint := "if it can't be reconnected, git local recover " + args[0] + " --abandon gives the transaction up (see git local doctor)"
 			if kind == "seed" {
 				result, err := seed.Recover(c.Context(), r, cwd, args[0], rollback)
+				err = recoveryKeyError(err, args[0], abandonHint)
 				if setJSON(c, map[string]any{"transactionId": args[0], "kind": kind, "rolledBack": rollback, "workspaceId": result.WorkspaceID}, result.Warnings...) {
 					return err
 				}
@@ -944,6 +950,7 @@ func New(out, errOut io.Writer) *cobra.Command {
 			}
 			if kind == "restore" {
 				result, err := restore.Recover(c.Context(), r, cwd, args[0], rollback)
+				err = recoveryKeyError(err, args[0], abandonHint)
 				if setJSON(c, map[string]any{"transactionId": args[0], "kind": kind, "rolledBack": rollback, "recoverySnapshot": result.RecoverySnapshot}) {
 					return err
 				}
@@ -958,6 +965,7 @@ func New(out, errOut io.Writer) *cobra.Command {
 				return err
 			}
 			result, err := configtx.Recover(c.Context(), r, cwd, args[0], rollback)
+			err = recoveryKeyError(err, args[0], abandonHint)
 			if setJSON(c, map[string]any{"transactionId": args[0], "kind": kind, "rolledBack": rollback, "workspaceId": result.WorkspaceID}, result.Warnings...) {
 				return err
 			}
@@ -1473,6 +1481,27 @@ func overlayCommand() *cobra.Command {
 	}})
 	return command
 }
+
+// recoveryKeyError replaces the rebind advice of a missing sensitive-file key
+// while transaction id is pending: encrypt rebind-key refuses until the
+// transaction is resolved, so the key must come back at its recorded path,
+// or the transaction be resolved another way (other).
+func recoveryKeyError(err error, id, other string) error {
+	path, ok := secureblob.UnavailableKeyPath(err)
+	if !ok {
+		return err
+	}
+	return keyForRecoveryError{err, fmt.Sprintf("sensitive-file key %s doesn't exist; reconnect the drive or directory that holds it at that path to finish transaction %s (git local encrypt rebind-key can't run while it is pending); %s", path, id, other)}
+}
+
+type keyForRecoveryError struct {
+	err     error
+	message string
+}
+
+func (e keyForRecoveryError) Error() string { return e.message }
+func (e keyForRecoveryError) Unwrap() error { return e.err }
+
 func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'" }
 
 // resaveSteps tells how to save an overlay again against the current file.
@@ -1493,6 +1522,16 @@ _git_local()
     local out directive
     __git-local_get_completion_results
     __git-local_process_completion_results
+    # Git registers its completion with -o nospace and adds the space after
+    # each command or flag name itself; do the same, except for names that
+    # continue (a value after "=") or when Cobra asked for no space or may
+    # have completed file names.
+    if (( (directive & 2) == 0 && (directive & 4) != 0 )); then
+        local i
+        for i in "${!COMPREPLY[@]}"; do
+            [[ ${COMPREPLY[i]} == *= ]] || COMPREPLY[i]+=" "
+        done
+    fi
 }
 `
 

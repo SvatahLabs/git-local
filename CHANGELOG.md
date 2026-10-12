@@ -9,11 +9,15 @@ The first release meant for general use. It replaces the 0.1.4 test builds.
 
 ### Supported platforms
 
-- macOS (Apple silicon and Intel), Linux and Windows (amd64 and arm64), with
-  Git 2.50.1 or later. Building from source needs Go 1.26 or later.
-- The test suite runs on macOS. The CI matrix covers Linux and Windows but
-  hasn't run yet, and Windows hasn't been qualified on native hardware; see
-  Known limitations.
+- Release builds for macOS (Apple silicon and Intel), Linux and Windows
+  (amd64 and arm64); each needs Git 2.50.1 or later. Building from source
+  needs Go 1.26 or later.
+- The test suite runs on macOS on Apple silicon. CI for Linux, macOS and
+  Windows is configured but hasn't run yet.
+- The Intel macOS build has only run under Rosetta on Apple silicon; the test
+  suite hasn't run on an Intel Mac.
+- Windows isn't qualified: it has never run natively, and whether it stays in
+  1.0 is still to be decided. See Known limitations.
 
 ### Upgrading from 0.1.4
 
@@ -26,14 +30,22 @@ The first release meant for general use. It replaces the 0.1.4 test builds.
 - Run `git local hook install` and `git local auto install` again after
   upgrading the binary, so the hooks call it and their managed blocks are
   current.
+- `hook install` and `auto install` now refuse some hook setups that 0.1.4
+  accepted (see Behavior changes). For a hooks directory inside a worktree
+  (husky's `.husky`, `core.hooksPath=.githooks`), tracked hook files, or a
+  hook that isn't a POSIX shell script, call `git local guard staged` and
+  `git local guard push "$1"` (for snapshots, `git local commit --if-changed`)
+  from your hooks instead; for a shared or global `core.hooksPath`, pass
+  `--allow-shared-hooks-dir`.
 - Backups made by 0.1.4 (archive format 1) are refused: they aren't bound to
   their ref. Make a new backup with `git local backup push` after upgrading.
 - Snapshots whose metadata exceeds 1 MiB are written in a form 0.1.4 can't
   read.
 - If a sensitive-file policy from 0.1.4 recorded a directory as a file rule,
-  snapshots that would save the files below it are refused until you correct
-  the policy with `git local encrypt migrate`; `git local doctor` prints the
-  command.
+  or a sensitive path spelled differently from the file on disk (letter case
+  or Unicode normalization), snapshots that would save the files it should
+  cover are refused until you correct the policy with
+  `git local encrypt migrate`; `git local doctor` prints the command.
 
 ### Behavior changes
 
@@ -43,17 +55,30 @@ The first release meant for general use. It replaces the 0.1.4 test builds.
   `git config core.autocrlf false` in the repository.
 - On Windows, 8.3-style short names (`PROGRA~1`) are refused in selections and
   restore paths.
-- Exit codes follow the documented contract: 0 success, 1 failure or
-  cancellation, 2 invalid usage (including a mistyped subcommand or extra
-  arguments), 3 conflict or recovery required; `auto watch` exits 3 after five
-  snapshot conflicts in a row. SIGTERM and SIGHUP stop `auto watch` cleanly
+- Exit codes follow the documented contract: 0 success, 1 failure, guard
+  violation or cancellation, 2 invalid usage (including a mistyped subcommand
+  or extra arguments), 3 conflict or recovery required, including a guard that
+  can't check the repository; `auto watch` exits 3 after five snapshot
+  conflicts in a row. SIGTERM and SIGHUP stop `auto watch` cleanly
   (exit 0); other commands exit 1 `canceled`.
 - `show` and `diff` print at most 16 MiB; larger Git output that isn't a
   listing is refused with "Git output exceeded safety limit".
-- HTTPS backup remotes use the credential helpers, `credential.useHttpPath`,
-  `credential.<url>.username`, `http.sslCAInfo`, `http.sslCAPath` and
-  `http.proxy` (and their `http.<url>.*` forms) from your global and system
-  Git config; repository config is ignored and redirects aren't followed.
+- HTTPS backup remotes use the credential helpers, `credential.useHttpPath`
+  and `credential.username` (and their `credential.<url>.*` forms), and
+  `http.sslCAInfo`, `http.sslCAPath` and `http.proxy` (and their
+  `http.<url>.*` forms) from your global and system Git config; repository
+  config is ignored, conditional includes (`includeIf`) are evaluated outside
+  the repository, and redirects aren't followed.
+- `hook install` and `auto install` refuse a hooks directory inside a worktree
+  (for example husky's `.husky` or `core.hooksPath=.githooks`) and hook files
+  Git tracks, and refuse a directory outside the repository, such as a shared
+  or global `core.hooksPath`, unless `--allow-shared-hooks-dir` is given.
+- They add their block to an existing hook only when its first line runs a
+  POSIX shell (`sh`, `bash`, `dash`, `ksh`, `zsh`, `ash` or `mksh`, directly,
+  through `busybox` or through `env`); any other hook, including one with no
+  `#!` line, is refused. On Linux, `env` options or `NAME=value` assignments
+  in that line need `env -S`. A hook disabled by removing its execute bits
+  stays disabled, with a warning.
 
 ### Added
 
@@ -68,8 +93,12 @@ The first release meant for general use. It replaces the 0.1.4 test builds.
 - `git local recover <id> --abandon` gives up a transaction that can neither
   resume nor roll back, quarantining what it held.
 - `overlay remove --workspace <uuid>` for overlays of retired worktrees.
-- Shell completion completes `git local …` as well as `git-local …` in bash
-  and zsh.
+- `hook install --allow-shared-hooks-dir` and
+  `auto install --allow-shared-hooks-dir` install into a hooks directory
+  outside the repository, such as a global `core.hooksPath`.
+- Shell completion completes `git local …` as well as `git-local …` in bash,
+  and in zsh with zsh's bundled `_git` completion; with Git's own
+  `git-completion.zsh`, only `git-local …` completes for now.
 - `--version` shows the source commit of release builds.
 
 ### Fixed
@@ -83,11 +112,14 @@ About a hundred defects found in pre-release reviews, among them:
   encryption migration, initialization) can be resumed, rolled back or
   abandoned without editing internal files.
 - Scale: large index and tree listings, large snapshot metadata, long exclude
-  patterns, per-commit process spawning in guards and doctor, and quadratic
-  restore re-verification.
-- Backups: archives are bound to their ref, cross-OS restore works, leftover
-  private files no longer make backups unrestorable, HTTPS remotes
-  authenticate, and remote host checks canonicalize addresses.
+  patterns, per-commit process spawning in guards and doctor, and the
+  quadratic number of Git processes in restore re-verification, now linear
+  (restore time still grows with the square of the file count; see Known
+  limitations).
+- Backups: archives are bound to their ref, a backup made on another OS is no
+  longer refused (tested only by simulation on POSIX), leftover private files
+  no longer make backups unrestorable, HTTPS remotes authenticate, and remote
+  host checks canonicalize addresses.
 - Security: `golang.org/x/text` is updated to v0.39.0; earlier versions could
   loop forever normalizing an invalid path name (GO-2026-5970).
 - Platforms and layouts: relative and bare worktree layouts, shared and
@@ -96,13 +128,24 @@ About a hundred defects found in pre-release reviews, among them:
 
 ### Known limitations
 
-- **Windows** has never run on native hardware or CI. Read-only targets,
-  8.3 short names and key-file ACLs are implemented but unverified.
+- **Windows** isn't qualified: it has never run on native hardware or CI.
+  Read-only targets and 8.3 short names are implemented but unverified.
+  Key-file protection has known defects: a new key file is restricted only
+  after it is created, so another user can open it in between; loading doesn't
+  refuse a key that other users can write or whose access list they can
+  change; and keys created by earlier releases are refused on load with no fix
+  offered. Until these are fixed, Windows isn't supported for sensitive-file
+  or backup keys.
 - **Restore** time grows with the square of the number of restored files:
   restoring a directory of a few hundred files takes minutes.
 - **Maintenance** isn't automatic: run `git local maintenance` now and then.
+- **Seeding** a worktree (`init --from` or automatic seeding) records every
+  seeded file in a seed journal limited to 1 MiB, so a very large selection
+  can fail to seed; the threshold depends on path lengths, roughly a few
+  thousand files.
 - **Limits:** see [docs/limits.md](docs/limits.md); among them managed ignore
-  rules up to 256 KiB, journals up to 16 MiB, `show`/`diff` output up to
-  16 MiB, and `log` up to 1,000 entries per call.
+  rules up to 256 KiB, restore journals up to 16 MiB and configuration and
+  seed journals up to 1 MiB, `show`/`diff` output up to 16 MiB, and `log` up
+  to 1,000 entries per call.
 - Mixed `core.ignorecase` across worktrees over-ignores (never leaks).
 - The macOS installer isn't signed or notarized yet.

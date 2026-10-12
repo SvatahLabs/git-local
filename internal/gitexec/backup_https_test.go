@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -259,19 +260,36 @@ func TestBackupTransportForwardsUserHTTPSSettings(t *testing.T) {
 	if err := r.BackupFetch(ctx, fetched, url, ref); err != nil {
 		t.Fatalf("HTTPS fetch with the user's http.<url>.sslCAInfo: %v", err)
 	}
-	prefix, _, err := r.backupTransport(ctx, store, url)
+	prefix, env, err := r.backupTransport(ctx, store, url)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Helpers go as -c options after the runner's reset; everything else,
+	// including a proxy URL that may hold a password, in the environment,
+	// out of the process list.
 	args := strings.Join(prefix, "\x00") + "\x00"
-	for _, key := range []string{"credential.helper", "credential." + host + ".helper", "credential." + host + ".usehttppath", "credential." + host + ".username", "http." + host + ".sslcainfo", "http." + host + ".proxy"} {
+	for _, key := range []string{"credential.helper", "credential." + host + ".helper"} {
 		if !strings.Contains(args, "\x00"+key+"=") {
-			t.Fatalf("%s not forwarded: %q", key, prefix)
+			t.Fatalf("%s not forwarded as an option: %q", key, prefix)
 		}
 	}
+	keys := map[string]bool{}
+	for _, entry := range env {
+		if name, value, ok := strings.Cut(entry, "="); ok && strings.HasPrefix(name, "GIT_CONFIG_KEY_") {
+			keys[value] = true
+		}
+	}
+	for _, key := range []string{"credential." + host + ".usehttppath", "credential." + host + ".username", "http." + host + ".sslcainfo", "http." + host + ".proxy"} {
+		if !keys[key] || strings.Contains(args, "\x00"+key+"=") {
+			t.Fatalf("%s not forwarded in the environment only: %q %q", key, env, prefix)
+		}
+	}
+	if !slices.Contains(env, "GIT_CONFIG_COUNT="+strconv.Itoa(len(keys))) {
+		t.Fatalf("GIT_CONFIG_COUNT doesn't match the forwarded keys: %q", env)
+	}
 	for _, key := range []string{"http.sslverify", "http.extraheader"} {
-		if strings.Contains(args, "\x00"+key+"=") {
-			t.Fatalf("%s forwarded: %q", key, prefix)
+		if keys[key] || strings.Contains(args, "\x00"+key+"=") {
+			t.Fatalf("%s forwarded: %q %q", key, env, prefix)
 		}
 	}
 	for _, target := range []string{url, "ssh://git@backup.example/r.git"} {

@@ -110,7 +110,52 @@ func TestMacOSInstallerRefusesToOverwrite(t *testing.T) {
 	if extra, _ := filepath.Glob(filepath.Join(dist, "*")); len(extra) != 1 {
 		t.Fatalf("installer wrote %q", extra)
 	}
-	if out, err := exec.Command("bash", "build-macos-installer.sh", version).CombinedOutput(); err == nil || !strings.Contains(string(out), "VERSION") {
+	// Even if the argument check regressed, nothing is built or written.
+	withArgument := exec.Command("bash", "build-macos-installer.sh", version)
+	withArgument.Env = append(os.Environ(), "GITLOCAL_DIST_DIR="+t.TempDir(), "GITLOCAL_GO_BIN=false")
+	if out, err := withArgument.CombinedOutput(); err == nil || !strings.Contains(string(out), "VERSION") {
 		t.Fatalf("installer accepted a version argument: %v\n%s", err, out)
 	}
+}
+
+// A check that fails after the package is built leaves nothing in the output
+// directory, so it doesn't block the next run. It builds a real package, so
+// it runs only on macOS, in a Git checkout of the source, and not in -short.
+func TestMacOSInstallerFailureLeavesNoPackage(t *testing.T) {
+	if runtime.GOOS != "darwin" || testing.Short() {
+		t.Skip("builds a macOS package")
+	}
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if top, err := exec.Command("git", "-C", root, "rev-parse", "--show-toplevel").Output(); err != nil || filepath.Clean(strings.TrimSpace(string(top))) != filepath.Clean(mustEvalSymlinks(t, root)) {
+		t.Skip("not a Git checkout of the source")
+	}
+	// cmp compares the built and the packaged binary, after pkgbuild.
+	fake := t.TempDir()
+	if err := os.WriteFile(filepath.Join(fake, "cmp"), []byte("#!/bin/sh\necho 'injected cmp failure' >&2\nexit 1\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	dist := t.TempDir()
+	cmd := exec.Command("bash", "build-macos-installer.sh")
+	cmd.Env = append(os.Environ(), "GITLOCAL_DIST_DIR="+dist, "PATH="+fake+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if out, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(out), "injected cmp failure") {
+		t.Fatalf("installer didn't fail at the check after pkgbuild: %v\n%s", err, out)
+	}
+	if left, _ := filepath.Glob(filepath.Join(dist, "*")); len(left) != 0 {
+		t.Fatalf("failed installer left %q", left)
+	}
+	if left, _ := filepath.Glob(filepath.Join(dist, ".*")); len(left) != 0 {
+		t.Fatalf("failed installer left %q", left)
+	}
+}
+
+func mustEvalSymlinks(t *testing.T, path string) string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resolved
 }

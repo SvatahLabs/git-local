@@ -42,17 +42,28 @@ for existing in "$package_path" "$package_path.sha256"; do
     exit 1
   fi
 done
-# The source commit, marked +dirty when the checkout has uncommitted changes.
+# The source commit, marked +dirty when the checkout has uncommitted changes
+# or untracked files (Go compiles every file in a package directory). The
+# source must be the checkout itself, not a copy inside another repository.
+if [[ "$(git -C "$repo_root" rev-parse --show-toplevel 2>/dev/null)" != "$repo_root" ]]; then
+  echo "build from a Git checkout of the source: $repo_root isn't one" >&2
+  exit 1
+fi
 commit="$(git -C "$repo_root" rev-parse --verify HEAD)"
-if [[ -n "$(git -C "$repo_root" status --porcelain --untracked-files=no)" ]]; then
+if [[ -n "$(git -C "$repo_root" status --porcelain)" ]]; then
   commit="$commit+dirty"
 fi
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/gitlocal-macos-pkg.XXXXXXXX")"
-trap 'rm -rf "$work_dir"' EXIT
+# The package is built and checked here, beside its destination, and only a
+# package that passed every check is published, so a failed or interrupted
+# run leaves nothing that blocks the next one.
+stage_dir="$(mktemp -d "$output_dir/.gitlocal-pkg.XXXXXXXX")"
+trap 'rm -rf "$work_dir" "$stage_dir"' EXIT
+staged_package="$stage_dir/$package_name"
 
 cd "$repo_root"
 for arch in arm64 amd64; do
-  CGO_ENABLED=0 GOOS=darwin GOARCH="$arch" "$go_bin" build \
+  GOWORK=off CGO_ENABLED=0 GOOS=darwin GOARCH="$arch" "$go_bin" build \
     -trimpath -buildvcs=false -ldflags="-buildid= -X gitlocal/internal/cli.Version=$version -X gitlocal/internal/cli.Commit=$commit" \
     -o "$work_dir/git-local-$arch" ./cmd/git-local
 done
@@ -89,9 +100,9 @@ fi
 
 COPYFILE_DISABLE=1 pkgbuild --root "$payload" --install-location / \
   --identifier org.gitlocal.cli --version "$version" \
-  --ownership recommended "$package_path"
+  --ownership recommended "$staged_package"
 
-pkgutil --payload-files "$package_path" > "$work_dir/payload-files.txt"
+pkgutil --payload-files "$staged_package" > "$work_dir/payload-files.txt"
 found_binary=0
 while IFS= read -r entry; do
   case "$entry" in
@@ -107,7 +118,7 @@ if [[ "$found_binary" != 1 ]]; then
   echo "package payload is missing git-local" >&2
   exit 1
 fi
-pkgutil --expand "$package_path" "$work_dir/expanded"
+pkgutil --expand "$staged_package" "$work_dir/expanded"
 if [[ -e "$work_dir/expanded/Scripts" ]]; then
   echo "package unexpectedly contains installer scripts" >&2
   exit 1
@@ -143,7 +154,11 @@ if arch -x86_64 /usr/bin/true >/dev/null 2>&1; then
   fi
 fi
 
-(cd "$output_dir" && shasum -a 256 "$package_name" > "$package_name.sha256")
+(cd "$stage_dir" && shasum -a 256 "$package_name" > "$package_name.sha256")
+# ln refuses an existing destination, so a package that appeared meanwhile
+# isn't replaced.
+ln "$staged_package" "$package_path"
+ln "$staged_package.sha256" "$package_path.sha256"
 echo "Built $package_path"
 echo "SHA-256: $package_path.sha256"
 echo "Unsigned installer; release distribution requires Developer ID signing and notarization."

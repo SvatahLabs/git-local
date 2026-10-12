@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"gitlocal/internal/configtx"
@@ -179,6 +180,17 @@ func committedBlobs(ctx context.Context, r *gitexec.Runner, root, path string, r
 			return nil, err
 		}
 		if strings.TrimSpace(string(kind)) != "blob" {
+			continue
+		}
+		// overlay.ContainsPatch ignores a version too large to be overlay
+		// text, so it isn't read (it may exceed Git's output cap).
+		size, err := r.Guard(ctx, root, "", "cat-file", "-s", object)
+		if err != nil {
+			return nil, err
+		}
+		if n, err := strconv.ParseInt(strings.TrimSpace(string(size)), 10, 64); err != nil || n < 0 {
+			return nil, fmt.Errorf("invalid object size for %s", object)
+		} else if n > overlay.MaxText {
 			continue
 		}
 		data, err := r.Guard(ctx, root, "", "cat-file", "blob", object)

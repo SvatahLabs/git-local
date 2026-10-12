@@ -201,6 +201,12 @@ func TestLogFiltersSnapshotTimeBranchAndMainlineCommit(t *testing.T) {
 	if out := successful(t, repo.Root, "log", "--branch", "unrelated"); out != "No matching local snapshots.\n" {
 		t.Fatalf("empty branch query: %s", out)
 	}
+	// Malformed filter values are usage errors.
+	for _, args := range [][]string{{"log", "--main-commit", "abc123"}, {"log", "--branch", "bad..name"}} {
+		if code, _, diagnostic := callCLI(t, repo.Root, args...); code != 2 || !strings.Contains(diagnostic, "invalid") && !strings.Contains(diagnostic, "must be") {
+			t.Fatalf("%v: exit %d %s", args, code, diagnostic)
+		}
+	}
 	if first == second {
 		t.Fatal("fixture did not create two snapshots")
 	}

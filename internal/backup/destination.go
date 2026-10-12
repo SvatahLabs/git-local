@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // RemoteHost accepts only SSH and HTTPS Git transports. The caller must pass
@@ -49,13 +51,20 @@ func RemoteHost(raw string) (string, error) {
 	}
 	// One spelling per address, so the same-host rule can't be bypassed
 	// with another IPv6 form, an IPv4-mapped address, or a form the OS
-	// resolver reads as IPv4 (127.1, 0x7f.0.0.1, 2130706433).
+	// resolver reads as IPv4 (127.1, 0x7f.0.0.1, 2130706433), also spelled
+	// with full-width digits and dots that internationalized-name handling
+	// maps to ASCII.
 	if ip := net.ParseIP(host); ip != nil {
 		host = ip.String()
 	} else if ip, ok := resolverIPv4(host); ok {
 		host = ip.String()
+	} else if ip, ok := resolverIPv4(asciiForm(host)); ok {
+		host = ip.String()
+	} else {
+		host = asciiForm(host)
 	}
-	if host == "localhost" {
+	// localhost and its subdomains resolve to this host (RFC 6761).
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
 		return "", errors.New("backup remote must not be on this host")
 	}
 	if ip := net.ParseIP(host); ip != nil && (ip.IsLoopback() || ip.IsUnspecified()) {
@@ -91,6 +100,13 @@ func ValidateDestination(name string, destinationURLs, originURLs []string) erro
 		}
 	}
 	return nil
+}
+
+// asciiForm maps compatibility characters (full-width digits and letters)
+// and the dots IDNA treats as label separators to their ASCII form.
+func asciiForm(host string) string {
+	host = strings.NewReplacer("\u3002", ".", "\uff0e", ".", "\uff61", ".").Replace(host)
+	return strings.ToLower(norm.NFKC.String(host))
 }
 
 // resolverIPv4 parses the IPv4 forms inet_aton accepts and resolvers use for

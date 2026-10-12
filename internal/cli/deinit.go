@@ -31,7 +31,7 @@ func deinitCommand() *cobra.Command {
 					fmt.Fprintf(out, "Removed git-local from hook %s.\n", path)
 				}
 				if result.Exclude {
-					fmt.Fprintln(out, "Removed the managed block from .git/info/exclude; selected files now show as untracked.")
+					fmt.Fprintln(out, "Removed the managed block from .git/info/exclude; selected files now show as untracked, so git add -A would stage them and git clean -fd would delete them.")
 				}
 				for _, path := range result.Identities {
 					fmt.Fprintf(out, "Removed workspace identity %s.\n", path)

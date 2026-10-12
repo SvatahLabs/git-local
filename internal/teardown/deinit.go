@@ -14,6 +14,7 @@ import (
 	"gitlocal/internal/gitexec"
 	"gitlocal/internal/hook"
 	"gitlocal/internal/overlay"
+	"gitlocal/internal/secureblob"
 	"gitlocal/internal/storage"
 	"gitlocal/internal/workspace"
 )
@@ -68,8 +69,19 @@ func Deinit(ctx context.Context, r *gitexec.Runner, cwd string, removeHistory bo
 				return result, err
 			}
 		}
+		var policy secureblob.Policy
+		if err := common.ReadJSON(secureblob.PolicyFile, &policy); err != nil && !os.IsNotExist(err) {
+			return result, err
+		}
 		if result.Exclude, err = configtx.RemoveExcludeBlock(ctx, r, cwd); err != nil {
 			return result, err
+		}
+		if result.Exclude && len(policy.Sensitive) > 0 {
+			var paths []string
+			for _, rule := range policy.Sensitive {
+				paths = append(paths, rule.Path)
+			}
+			result.Warnings = append(result.Warnings, "sensitive paths "+strings.Join(paths, ", ")+" are no longer ignored or guarded: git add -A would stage them and git clean -fd would delete them; add them to .git/info/exclude if Git should keep ignoring them")
 		}
 		id, err := storage.UUID()
 		if err != nil {
@@ -89,6 +101,16 @@ func Deinit(ctx context.Context, r *gitexec.Runner, cwd string, removeHistory bo
 		}
 	} else if !os.IsNotExist(err) {
 		return result, err
+	} else {
+		// A rerun after the state was set aside (or a deinit interrupted
+		// while deleting it) names what an earlier run kept.
+		kept, err := filepath.Glob(filepath.Join(w.Common, "gitlocal-removed-*"))
+		if err != nil {
+			return result, err
+		}
+		for _, dir := range kept {
+			result.Warnings = append(result.Warnings, "the private state an earlier git local deinit set aside is in "+dir+"; delete it when you no longer need it")
+		}
 	}
 	result.Identities, err = removeIdentities(common, w.Common)
 	return result, err
@@ -125,8 +147,18 @@ func checkRemovable(ctx context.Context, r *gitexec.Runner, w *workspace.Context
 			kept = append(kept, ref)
 		}
 	}
+	// A retired worktree's history is the only copy of its private files.
+	workspaces, err := configtx.ListWorkspaces(ctx, r, w.Root)
+	if err != nil {
+		return err
+	}
+	for _, info := range workspaces {
+		if info.State == "retained" {
+			kept = append(kept, "the history of retired workspace "+info.ID)
+		}
+	}
 	if len(kept) > 0 {
-		return fmt.Errorf("%w: --remove-history would delete %s; check and delete them, or run git local deinit without --remove-history to keep the history", storage.ErrConflict, strings.Join(kept, ", "))
+		return fmt.Errorf("%w: --remove-history would delete %s, which hold data kept nowhere else (previous file versions of earlier restores, quarantined data, or a retired worktree's files). Run git local deinit without --remove-history: it keeps the private state in the common Git directory as gitlocal-removed-<id>, which you can delete once you no longer need it", storage.ErrConflict, strings.Join(kept, ", "))
 	}
 	return nil
 }
@@ -159,8 +191,22 @@ func removeOverlays(ctx context.Context, r *gitexec.Runner, w *workspace.Context
 			if err != nil && !os.IsNotExist(err) {
 				return nil, err
 			}
-			if err == nil && !bytes.Equal(working, v.Local) {
-				problems = append(problems, fmt.Sprintf("%s in %s has changes the overlay %s doesn't hold (save them with git local overlay add, or put back the saved version: git local overlay show %s)", v.Manifest.Path, info.Root, v.Manifest.Name, v.Manifest.Name))
+			if err != nil {
+				continue
+			}
+			// The filter writes the saved patch applied to the file's
+			// current index version, which upstream may have changed since
+			// the overlay was saved.
+			expected, err := workingImage(ctx, r, info.Root, v)
+			if errors.Is(err, overlay.ErrConflict) {
+				problems = append(problems, fmt.Sprintf("the overlay %s no longer applies to %s in %s; resolve it first (git local overlay status)", v.Manifest.Name, v.Manifest.Path, info.Root))
+				continue
+			}
+			if err != nil {
+				return nil, err
+			}
+			if !bytes.Equal(working, expected) {
+				problems = append(problems, fmt.Sprintf("%s in %s has changes the overlay %s doesn't hold; save them with git local overlay add %s -- %s, or undo them", v.Manifest.Path, info.Root, v.Manifest.Name, v.Manifest.Name, v.Manifest.Path))
 			}
 		default:
 			problems = append(problems, fmt.Sprintf("overlay %s belongs to workspace %s, whose worktree is %s; reconnect it, or prune it with git local workspace prune", v.Manifest.Name, v.Manifest.WorkspaceID, info.State))
@@ -184,6 +230,16 @@ func removeOverlays(ctx context.Context, r *gitexec.Runner, w *workspace.Context
 		removed = append(removed, v.Manifest.Name)
 	}
 	return removed, nil
+}
+
+// workingImage is the working file the overlay filter writes for v: its
+// saved patch applied to the file's version in the worktree's index.
+func workingImage(ctx context.Context, r *gitexec.Runner, root string, v overlay.Version) ([]byte, error) {
+	index, err := r.IndexBlob(ctx, root, "", v.Manifest.Path)
+	if err != nil {
+		return nil, err
+	}
+	return overlay.Apply(ctx, r.Executable(), v.Base, v.Local, index)
 }
 
 // removeIdentities deletes the workspace identity file of the main worktree

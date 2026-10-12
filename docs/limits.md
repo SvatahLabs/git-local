@@ -8,7 +8,8 @@ clear error rather than truncating or guessing.
 | Buffered Git output (blob contents, patches, config) | 16 MiB | "Git output exceeded safety limit". `show` and `diff` print at most 16 MiB; use `restore` for a larger file. Listings that grow with the repository or history (index, tree, ref and ancestry listings, staged and pushed path names) and file contents that restore writes aren't capped. |
 | Managed ignore rules in `.git/info/exclude` | 256 KiB | `track`/`untrack` fail with "managed ignore rules exceed the size limit". A path untracked inside a tracked directory costs about L×L+21×L bytes for a name of length L, so roughly fifty sixty-character names can be untracked in one directory. |
 | Snapshot metadata kept inline | 1 MiB | Larger changed-path lists and digest maps are stored in their own blobs (up to 256 MiB each); git-local 0.1.4 can't read such snapshots. |
-| Transaction journals | 16 MiB | The transaction is refused. |
+| Transaction journals | Restore: 16 MiB. Configuration and seed: 1 MiB. Encryption migration: read back with a 1 MiB limit. | Restore, configuration and seed transactions are refused. A larger encryption-migration journal can't be read back by `encrypt recover` or `recover --abandon`. |
+| Seeding a worktree (`init --from` or automatic seeding) | Every seeded file is recorded in one seed journal of at most 1 MiB | A very large selection can fail to seed; the threshold depends on path lengths, roughly a few thousand files. |
 | `log` | 1,000 entries per call | `-n` above 1,000 is refused. |
 | `grep` | 1–100 snapshots, 1–1,000 matches, 1 MiB per file, 64 MiB per search | Files and snapshots beyond the budget are reported as not searched. |
 | Overlay files | UTF-8 text, at most 1 MiB | `overlay add` refuses. |
@@ -24,20 +25,32 @@ clear error rather than truncating or guessing.
   content filter on the file.
 - `git archive` applies active overlays; see the
   [user guide](guide.md#overlays) for the command that exports without them.
-- Windows hasn't been qualified on native hardware or CI. 8.3-style short
-  names (`PROGRA~1`) can't be selected there.
-- Network filesystems aren't qualified.
+- Windows isn't qualified: it hasn't run on native hardware or CI. 8.3-style
+  short names (`PROGRA~1`) can't be selected there. Its key-file protection has
+  known defects, so sensitive-file and backup keys aren't supported on Windows
+  until they are fixed.
+- The Intel macOS build has only run under Rosetta on Apple silicon; the test
+  suite hasn't run on an Intel Mac.
+- Only APFS and a Linux container's overlay filesystem have been tested. Other
+  local filesystems are untested, and network filesystems aren't qualified.
 - The private store isn't packed or pruned automatically; run
   `git local maintenance` (`doctor` reports the store's size).
 - Mixed `core.ignorecase` settings across worktrees can over-ignore paths
   (never leak them).
 
-## Backups over HTTPS
+## Backup remotes
 
-Backup push and fetch use only these settings from your global and system Git
-config: credential helpers, `credential.useHttpPath`,
-`credential.<url>.username`, `http.sslCAInfo`, `http.sslCAPath` and
-`http.proxy` (each also as `http.<url>.*`). Redirects aren't followed, and
-neither Git nor ssh prompts. These settings reach Git as `-c` options, so a
-credential helper written inline with a secret in it shows in the process list;
-use a helper program instead.
+Over HTTPS, backup push and fetch use only these settings from your global and
+system Git config: credential helpers, `credential.useHttpPath` and
+`credential.username` (each also as `credential.<url>.*`), and
+`http.sslCAInfo`, `http.sslCAPath` and `http.proxy` (each also as
+`http.<url>.*`). Repository config is ignored, and conditional includes
+(`includeIf`) are evaluated outside the repository, so settings they include
+only for it aren't used. Redirects aren't followed, and Git doesn't prompt.
+Credential helpers reach Git as `-c` options, so a helper written inline with a
+secret in it shows in the process list; use a helper program instead.
+
+Over SSH, askpass programs are disabled (`SSH_ASKPASS_REQUIRE=never`), but ssh
+can still ask on the terminal to accept an unknown host key or for a key's
+passphrase. For unattended backups, use an ssh-agent and accept the host key
+beforehand.
