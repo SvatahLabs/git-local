@@ -271,7 +271,7 @@ func seed(ctx context.Context, r *gitexec.Runner, cwd string, planner SeedPlanne
 	defer files.Close()
 	created := map[string]bool{}
 	last := ""
-	stages := make([]string, 0, len(plan.Files))
+	names := make([]string, 0, len(plan.Files))
 	for i := range plan.Files {
 		file := &plan.Files[i]
 		if runtime.GOOS == "windows" && (file.Mode == "100755" || file.Mode == "120000") {
@@ -281,16 +281,24 @@ func seed(ctx context.Context, r *gitexec.Runner, cwd string, planner SeedPlanne
 			return result, errors.New("invalid or unordered seed file")
 		}
 		last = file.Path
-		if err := engine.CheckRestorePath(file.Path); err != nil {
-			return result, err
-		}
+		names = append(names, file.Path)
+	}
+	// One pass reads each directory once (see CheckRestorePaths).
+	if err := engine.CheckRestorePaths(names); err != nil {
+		return result, err
+	}
+	parents := map[string]bool{}
+	stages := make([]string, 0, len(plan.Files))
+	for i := range plan.Files {
+		file := &plan.Files[i]
 		if _, err := files.Lstat(file.Path); !os.IsNotExist(err) {
 			if err == nil {
 				err = fmt.Errorf("%w: destination exists at %q", storage.ErrConflict, file.Path)
 			}
 			return result, err
 		}
-		for parent := path.Dir(file.Path); parent != "."; parent = path.Dir(parent) {
+		for parent := path.Dir(file.Path); parent != "." && !parents[parent]; parent = path.Dir(parent) {
+			parents[parent] = true
 			info, e := files.Lstat(parent)
 			if os.IsNotExist(e) {
 				created[parent] = true
@@ -308,20 +316,22 @@ func seed(ctx context.Context, r *gitexec.Runner, cwd string, planner SeedPlanne
 			return result, e
 		}
 		file.Stage = path.Join(path.Dir(file.Path), ".gitlocal-tmp-"+token)
-		if err := engine.CheckRestorePath(file.Stage); err != nil {
-			return result, err
-		}
 		stages = append(stages, file.Stage)
-		if _, e = files.Lstat(file.Stage); !os.IsNotExist(e) {
+	}
+	if err := engine.CheckRestorePaths(stages); err != nil {
+		return result, err
+	}
+	// One pass folds each main-owned path once (see CheckPaths).
+	if err := validated.Ownership.CheckPaths(stages); err != nil {
+		return result, err
+	}
+	for _, stage := range stages {
+		if _, e := files.Lstat(stage); !os.IsNotExist(e) {
 			if e == nil {
 				e = errors.New("seed staging path already exists")
 			}
 			return result, e
 		}
-	}
-	// One pass folds each main-owned path once (see CheckPaths).
-	if err := validated.Ownership.CheckPaths(stages); err != nil {
-		return result, err
 	}
 	dirs := []string{}
 	for name := range created {
@@ -578,7 +588,34 @@ func (s *session) runSeed(ctx context.Context, files *storage.Dir, j *seedJourna
 	if err := s.recognize(j.Config); err != nil {
 		return nil, err
 	}
-	if err := (selection.Ownership{Evidence: j.Ownership}).Revalidate(ctx, s.r, s.w.Root, s.w.Admin); err != nil {
+	index, err := selection.IndexFile(ctx, s.r, s.w.Root, s.w.Admin)
+	if err != nil {
+		return nil, err
+	}
+	// revalidate checks main ownership against the journal's evidence. Listing
+	// the whole main index before each file made seeding cost the seeded files
+	// times the index size, so before each file only the cheap main state is
+	// read, and ownership is listed again when it changed (GL-117); always
+	// before the first file and at the end.
+	var checked *selection.MainState
+	revalidate := func(always bool) error {
+		state, err := selection.ReadMainState(s.w.Admin, s.w.Common, index)
+		if err != nil {
+			return err
+		}
+		if !always && checked != nil && state.Same(*checked) {
+			return nil
+		}
+		checked = nil
+		if err := (selection.Ownership{Evidence: j.Ownership}).Revalidate(ctx, s.r, s.w.Root, s.w.Admin); err != nil {
+			return err
+		}
+		if state.Settled() {
+			checked = &state
+		}
+		return nil
+	}
+	if err := revalidate(true); err != nil {
 		return nil, err
 	}
 	if j.Outcome != "" {
@@ -619,6 +656,13 @@ func (s *session) runSeed(ctx context.Context, files *storage.Dir, j *seedJourna
 			return warnings, e
 		}
 	}
+	// One cat-file process streams every plain file's blob (GL-117).
+	var blobs *gitexec.BlobReader
+	defer func() {
+		if blobs != nil {
+			blobs.Close()
+		}
+	}()
 	for index, file := range j.Files {
 		identity := secureblob.Identity{RepositoryID: s.w.RepositoryID, WorkspaceID: j.Source, Path: file.Path, Mode: file.Mode}
 		if err := ctx.Err(); err != nil {
@@ -627,7 +671,7 @@ func (s *session) runSeed(ctx context.Context, files *storage.Dir, j *seedJourna
 		if err := s.recognize(j.Config); err != nil {
 			return warnings, err
 		}
-		if err := (selection.Ownership{Evidence: j.Ownership}).Revalidate(ctx, s.r, s.w.Root, s.w.Admin); err != nil {
+		if err := revalidate(false); err != nil {
 			return warnings, err
 		}
 		exists, match, e := fileMatches(files, file, file.Path, key, identity)
@@ -682,7 +726,13 @@ func (s *session) runSeed(ctx context.Context, files *storage.Dir, j *seedJourna
 					if file.PlainDigest != "" {
 						return secureblob.DecryptGitBlob(ctx, s.r, s.w.Store, file.Blob, writer, key, identity)
 					}
-					return s.r.HistoryBlob(ctx, s.w.Store, file.Blob, writer)
+					if blobs == nil {
+						var err error
+						if blobs, err = s.r.HistoryBlobs(ctx, s.w.Store); err != nil {
+							return err
+						}
+					}
+					return blobs.Blob(file.Blob, writer)
 				})
 				if e != nil {
 					return warnings, e
@@ -725,6 +775,9 @@ func (s *session) runSeed(ctx context.Context, files *storage.Dir, j *seedJourna
 		if err := point(ctx, f, fmt.Sprintf("seed-file-%d", index)); err != nil {
 			return warnings, err
 		}
+	}
+	if err := revalidate(true); err != nil {
+		return warnings, err
 	}
 	if err := s.install(ctx, j.Config, j.Config.ExcludeAfter, false, f, "seed-final-exclude"); err != nil {
 		return warnings, err

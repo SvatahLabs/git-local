@@ -9,7 +9,6 @@ import (
 	"io/fs"
 	"os"
 	"path"
-	"path/filepath"
 	"reflect"
 	"runtime"
 	"strings"
@@ -280,20 +279,14 @@ type guard struct {
 }
 
 // globalState is what can change the plan's preconditions outside the
-// restored paths and is cheap to read: the main HEAD and branch, and the index
-// file's identity, size and time (Git replaces the index file to change it).
+// restored paths and is cheap to read: the main HEAD and index file
+// (selection.MainState) and the branch.
 type globalState struct {
-	head, branch string
-	index        fs.FileInfo
-	at           time.Time
+	main   selection.MainState
+	branch string
 }
 
-func (s globalState) same(o globalState) bool {
-	if s.head != o.head || s.branch != o.branch || (s.index == nil) != (o.index == nil) {
-		return false
-	}
-	return s.index == nil || sameFile(s.index, o.index) && s.index.Size() == o.index.Size() && s.index.ModTime().Equal(o.index.ModTime()) && s.index.Mode() == o.index.Mode()
-}
+func (s globalState) same(o globalState) bool { return s.branch == o.branch && s.main.Same(o.main) }
 
 type cachedImage struct {
 	info   fs.FileInfo // nil when the path didn't exist
@@ -315,14 +308,9 @@ func newGuard(ctx context.Context, r *gitexec.Runner, w workspace.Context, files
 	for _, dir := range j.Manifest.Plan.CreateDirectories {
 		g.created[dir] = true
 	}
-	index, err := r.Main(ctx, w.Root, w.Admin, "rev-parse", "--git-path", "index")
-	if err != nil {
+	if g.index, err = selection.IndexFile(ctx, r, w.Root, w.Admin); err != nil {
 		e.Close()
 		return nil, err
-	}
-	g.index = strings.TrimSpace(string(index))
-	if !filepath.IsAbs(g.index) {
-		g.index = filepath.Join(w.Root, g.index)
 	}
 	if j.SchemaVersion == 2 {
 		policy, key, e := loadRestoreKey(w)
@@ -410,7 +398,7 @@ func (g *guard) inspect(ctx context.Context, path string, image Fingerprint, wor
 	if err != nil {
 		return Fingerprint{}, err
 	}
-	if info == nil || !racy(info, hashed) {
+	if info == nil || !selection.Racy(info, hashed) {
 		if g.images[path] == nil {
 			g.images[path] = map[string]cachedImage{}
 		}
@@ -419,33 +407,12 @@ func (g *guard) inspect(ctx context.Context, path string, image Fingerprint, wor
 	return actual, nil
 }
 
-// racy reports whether a file's timestamps are too close to when it was hashed
-// for a later Lstat to show a change, as Git's racy-clean rule: a same-size
-// rewrite within the same timestamp tick would leave every field equal. A
-// timestamp with no sub-second part may come from a filesystem with up to
-// two-second granularity (HFS+, FAT).
-func racy(info fs.FileInfo, hashed time.Time) bool {
-	for _, t := range []time.Time{info.ModTime(), changeTime(info)} {
-		if t.IsZero() {
-			continue
-		}
-		limit := hashed
-		if t.Nanosecond() == 0 {
-			limit = hashed.Add(-2 * time.Second)
-		}
-		if !t.Before(limit) {
-			return true
-		}
-	}
-	return false
-}
-
 // forget drops cached images of path, so the next check hashes it again.
 func (g *guard) forget(path string) { delete(g.images, path) }
 
-// sameIdentity is sameFile; tests replace it to model a filesystem whose
-// change time is too coarse to show a rewrite.
-var sameIdentity = sameFile
+// sameIdentity is selection.SameFile; tests replace it to model a filesystem
+// whose change time is too coarse to show a rewrite.
+var sameIdentity = selection.SameFile
 
 func sameStat(a, b fs.FileInfo) bool {
 	if a == nil || b == nil {
@@ -579,7 +546,7 @@ func (g *guard) recognizeScope(ctx context.Context, op int, dir string) error {
 	}
 	// A racy index could change again without its stat showing it, so its
 	// state isn't recorded and the next check reads ownership again.
-	if owned && (state.index == nil || !racy(state.index, state.at)) {
+	if owned && state.main.Settled() {
 		g.checked = &state
 	}
 	return nil
@@ -588,22 +555,12 @@ func (g *guard) recognizeScope(ctx context.Context, op int, dir string) error {
 // global reads the cheap global state. It is read before the checks it
 // stamps, so a change made during a full check shows at the next one.
 func (g *guard) global(ctx context.Context) (globalState, error) {
-	state := globalState{at: time.Now()}
-	head, err := g.r.Main(ctx, g.w.Root, g.w.Admin, "rev-parse", "--verify", "--quiet", "HEAD")
-	var ge *gitexec.Error
-	if err != nil && !(errors.As(err, &ge) && ge.Code == 1) {
-		return state, err
+	main, err := selection.ReadMainState(g.w.Admin, g.w.Common, g.index)
+	if err != nil {
+		return globalState{}, err
 	}
-	if err == nil {
-		state.head = strings.TrimSpace(string(head))
-	}
-	if state.branch, err = mainBranch(ctx, g.r, g.w); err != nil {
-		return state, err
-	}
-	state.index, err = indexStat(g.index)
-	if os.IsNotExist(err) {
-		state.index, err = nil, nil
-	}
+	state := globalState{main: main}
+	state.branch, err = mainBranch(ctx, g.r, g.w)
 	return state, err
 }
 

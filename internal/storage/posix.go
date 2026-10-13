@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 
 	"golang.org/x/sys/unix"
@@ -191,13 +192,21 @@ func (d *Dir) Rename(old, new string) error {
 	return syncDir(a)
 }
 
-// flushed records nothing: SyncStaged can always reopen a stage for writing.
-func (d *Dir) flushed(string) {}
+// flushedStages holds the stages StageNamed flushed in this process: their
+// bytes and mode are durable already, so SyncStaged only syncs their
+// directory. A stage a dead process left is synced in full.
+var flushedStages sync.Map
+
+func (d *Dir) flushed(name string) { flushedStages.Store(filepath.Join(d.name, name), true) }
 
 func (d *Dir) chmodStaged(name string, mode fs.FileMode) error {
 	f, err := d.open(name, os.O_WRONLY, 0)
 	if err != nil {
 		return err
+	}
+	// A changed mode isn't durable until SyncStaged flushes the file again.
+	if info, e := f.Stat(); e != nil || info.Mode().Perm() != mode.Perm() {
+		flushedStages.Delete(filepath.Join(d.name, name))
 	}
 	err = f.Chmod(mode)
 	closeErr := f.Close()
@@ -225,6 +234,12 @@ func (d *Dir) RenameNoReplace(old, new string) error {
 	}
 	if err = syncDir(b); err != nil {
 		return err
+	}
+	// A rename within one directory (a stage published over its sibling)
+	// needs that directory synced once.
+	var sa, sb unix.Stat_t
+	if unix.Fstat(a, &sa) == nil && unix.Fstat(b, &sb) == nil && sa.Dev == sb.Dev && sa.Ino == sb.Ino {
+		return nil
 	}
 	return syncDir(a)
 }
@@ -336,7 +351,8 @@ func (d *Dir) SyncStaged(name string) error {
 	if err != nil {
 		return err
 	}
-	if fi.Mode()&os.ModeSymlink == 0 {
+	_, flushed := flushedStages.Load(filepath.Join(d.name, name))
+	if fi.Mode()&os.ModeSymlink == 0 && !flushed {
 		f, e := d.open(name, os.O_RDONLY, 0)
 		if e != nil {
 			return e

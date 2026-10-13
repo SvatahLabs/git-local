@@ -1,6 +1,6 @@
 //go:build darwin || linux
 
-package restore
+package selection
 
 import (
 	"io/fs"
@@ -11,9 +11,9 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// sameFile compares file identity and change time. storage.Dir's Lstat
+// SameFile compares file identity and change time. storage.Dir's Lstat
 // returns its own FileInfo, which os.SameFile doesn't recognize.
-func sameFile(a, b fs.FileInfo) bool {
+func SameFile(a, b fs.FileInfo) bool {
 	sa, okA := a.Sys().(*unix.Stat_t)
 	sb, okB := b.Sys().(*unix.Stat_t)
 	if !okA || !okB {
@@ -22,23 +22,33 @@ func sameFile(a, b fs.FileInfo) bool {
 	return sa.Dev == sb.Dev && sa.Ino == sb.Ino && sa.Ctim == sb.Ctim
 }
 
-// changeTime returns the inode change time, or zero when it is unknown.
-func changeTime(info fs.FileInfo) time.Time {
+// ChangeTime returns the inode change time, or zero when it is unknown.
+func ChangeTime(info fs.FileInfo) time.Time {
 	if st, ok := info.Sys().(*unix.Stat_t); ok {
 		return time.Unix(int64(st.Ctim.Sec), int64(st.Ctim.Nsec))
 	}
 	return time.Time{}
 }
 
-// indexStat stats the index file the way Git replaces it: following a
+// StatIndex stats the index file the way Git replaces it: following a
 // symlink (Git locks and replaces the link's target), with a FileInfo whose
-// Sys is a *unix.Stat_t, so sameFile and racy compare its change time too.
-func indexStat(path string) (fs.FileInfo, error) {
+// Sys is a *unix.Stat_t, so SameFile and Racy compare its change time too.
+func StatIndex(path string) (fs.FileInfo, error) {
 	var st unix.Stat_t
 	if err := unix.Stat(path, &st); err != nil {
 		return nil, &os.PathError{Op: "stat", Path: path, Err: err}
 	}
 	return unixInfo{filepath.Base(path), st}, nil
+}
+
+// lstatRegular is StatIndex without following a symlink; it reports whether
+// the file is a regular file.
+func lstatRegular(path string) (fs.FileInfo, bool, error) {
+	var st unix.Stat_t
+	if err := unix.Lstat(path, &st); err != nil {
+		return nil, false, &os.PathError{Op: "lstat", Path: path, Err: err}
+	}
+	return unixInfo{filepath.Base(path), st}, st.Mode&unix.S_IFMT == unix.S_IFREG, nil
 }
 
 type unixInfo struct {

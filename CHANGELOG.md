@@ -122,7 +122,8 @@ About a hundred defects found in pre-release reviews, among them:
   phase boundary and at the end, and main ownership whenever that state
   changed. Restore and seeding no longer check each file against every path
   in the main index, so their time per file doesn't grow with the size of
-  the mainline repository.
+  the mainline repository. Seeding no longer lists the main index and starts
+  Git processes for each file; it is about six times faster.
 - Seeding a worktree from a selection of more than a few thousand files
   failed ("configuration transaction exceeds metadata size limit"); a seed
   journal now keeps a long file list beside it, and every journal kind is
@@ -155,8 +156,8 @@ About a hundred defects found in pre-release reviews, among them:
   or backup keys.
 - **Restore** takes roughly half a second per restored file on a busy
   machine (it runs several Git processes per file).
-- **Seeding** a worktree takes about 40 ms per seeded file on a busy machine
-  (25,000 files in about 18 minutes).
+- **Seeding** a worktree takes about 16 ms per seeded file on a busy machine,
+  most of it spent making each file durable.
 - **Maintenance** isn't automatic: run `git local maintenance` now and then.
 - **Limits:** see [docs/limits.md](docs/limits.md); among them managed ignore
   rules up to 256 KiB, restore and encryption-migration journals up to 16 MiB,
