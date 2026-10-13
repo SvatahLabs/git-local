@@ -175,8 +175,12 @@ func (d *Dir) readStable(name string, limit int64) ([]byte, fs.FileInfo, error) 
 	}
 	return b, before, nil
 }
+
+// JSONLimit is the size limit of a file ReadJSON reads and WriteJSON writes.
+const JSONLimit = 1 << 20
+
 func (d *Dir) ReadJSON(name string, v any) error {
-	b, err := d.ReadFile(name, 1<<20)
+	b, err := d.ReadFile(name, JSONLimit)
 	if err != nil {
 		return err
 	}
@@ -190,10 +194,16 @@ func (d *Dir) ReadJSON(name string, v any) error {
 	}
 	return nil
 }
+
+// WriteJSON refuses, before writing, metadata that ReadJSON couldn't read
+// back.
 func (d *Dir) WriteJSON(name string, v any) error {
 	b, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return err
+	}
+	if len(b)+1 > JSONLimit {
+		return fmt.Errorf("metadata %s would exceed the %d MiB limit it is read back with; nothing was written", name, JSONLimit>>20)
 	}
 	return d.AtomicWrite(name, append(b, '\n'), 0600)
 }

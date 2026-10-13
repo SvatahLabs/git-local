@@ -9,6 +9,7 @@ clear error rather than truncating or guessing.
 | Managed ignore rules in `.git/info/exclude` | 256 KiB | `track`/`untrack` fail with "managed ignore rules exceed the size limit". A path untracked inside a tracked directory costs about L×L+21×L bytes for a name of length L, so roughly fifty sixty-character names can be untracked in one directory. |
 | Snapshot metadata kept inline | 1 MiB | Larger changed-path lists and digest maps are stored in their own blobs (up to 256 MiB each); git-local 0.1.4 can't read such snapshots. |
 | Transaction journals | Restore: 16 MiB. Configuration and seed: 1 MiB. Encryption migration: 16 MiB. Each is written and read back with the same limit. | The transaction is refused before anything is written, naming the cause. |
+| Other metadata files (workspace and overlay records, quarantine manifests, the sensitive-file policy) | 1 MiB, written and read back with the same limit | Writing is refused before anything changes, naming the file. |
 | Seeding a worktree (`init --from` or automatic seeding) | A seed journal whose file list doesn't fit in 1 MiB keeps the list beside it (`transactions/seed-files/<id>.json`, up to 64 MiB, about 250,000 files) | Beyond that the seed is refused before anything is written; seed a subset with `init --from <source> --paths <path>...`. |
 | `log` | 1,000 entries per call | `-n` above 1,000 is refused. |
 | `grep` | 1–100 snapshots, 1–1,000 matches, 1 MiB per file, 64 MiB per search | Files and snapshots beyond the budget are reported as not searched. |

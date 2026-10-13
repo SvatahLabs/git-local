@@ -67,10 +67,26 @@ func point(ctx context.Context, f fault, name string) error {
 	return nil
 }
 func stopped(id string, err error) error {
+	var edit *externalEdit
+	if errors.As(err, &edit) {
+		// Resume and rollback both refuse while the edit is there.
+		return fmt.Errorf("%w: restore transaction %s stopped (%v); move %s aside to keep the edit, then run git local recover %s --resume or --rollback; or run git local recover %s --abandon to leave every file as it is", storage.ErrConflict, id, err, edit.path, id, id)
+	}
 	return fmt.Errorf("%w: restore transaction %s stopped (%v); run git local recover %s --resume or --rollback", storage.ErrConflict, id, err, id)
 }
-func journalPath(id string) string   { return "transactions/restore-" + id + ".json" }
-func completedPath(id string) string { return "transactions/completed/restore-" + id + ".json" }
+
+// externalEdit is a pending path that changed outside the restore; the
+// restore stops and leaves it as it is.
+type externalEdit struct{ path string }
+
+func (e *externalEdit) Error() string {
+	return fmt.Sprintf("%v: new external edit at %q; preserved", storage.ErrConflict, e.path)
+}
+
+// Is makes the error a conflict (exit code 3).
+func (e *externalEdit) Is(target error) bool { return target == storage.ErrConflict }
+func journalPath(id string) string           { return "transactions/restore-" + id + ".json" }
+func completedPath(id string) string         { return "transactions/completed/restore-" + id + ".json" }
 func RecoveryRef(workspace, id string) string {
 	return "refs/gitlocal/recovery/" + workspace + "/" + id
 }

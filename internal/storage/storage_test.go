@@ -205,3 +205,28 @@ func TestOpeningSymlinkedAncestorRejected(t *testing.T) {
 		t.Fatal("followed symlinked ancestor")
 	}
 }
+
+// GL-119: WriteJSON refuses metadata ReadJSON couldn't read back, before
+// writing anything.
+func TestWriteJSONRefusesWhatReadJSONCantRead(t *testing.T) {
+	d, err := OpenDir(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	large := map[string]string{"data": strings.Repeat("a", 1<<20)}
+	if err := d.WriteJSON("large.json", large); err == nil || !strings.Contains(err.Error(), "limit") {
+		t.Fatalf("oversized metadata written: %v", err)
+	}
+	if _, err := d.Lstat("large.json"); !os.IsNotExist(err) {
+		t.Fatalf("refused metadata left a file: %v", err)
+	}
+	small := map[string]string{"data": strings.Repeat("a", 1<<19)}
+	if err := d.WriteJSON("small.json", small); err != nil {
+		t.Fatal(err)
+	}
+	var back map[string]string
+	if err := d.ReadJSON("small.json", &back); err != nil || back["data"] != small["data"] {
+		t.Fatalf("metadata under the limit: %v", err)
+	}
+}

@@ -139,10 +139,10 @@ func decodeSeed(data []byte, files func(id string) ([]byte, error)) (seedJournal
 	}
 	list, err := files(j.ID)
 	if err != nil {
-		return j, err
+		return j, &SeedListError{ID: j.ID, Err: err}
 	}
 	if digestOf(list) != j.FilesDigest {
-		return j, fmt.Errorf("%w: seed file list %s doesn't match its journal", storage.ErrConflict, seedFilesPath(j.ID))
+		return j, &SeedListError{ID: j.ID, Err: fmt.Errorf("%w: it doesn't match its journal", storage.ErrConflict)}
 	}
 	var decoded seedFileList
 	if err := decode(list, &decoded); err != nil {
@@ -159,6 +159,10 @@ func readSeed(meta *storage.Dir, name string) (seedJournal, error) {
 		return seedJournal{}, err
 	}
 	j, err := decodeSeed(data, func(id string) ([]byte, error) { return ReadSeedFiles(meta, id) })
+	var listErr *SeedListError
+	if errors.As(err, &listErr) {
+		return j, err
+	}
 	if err != nil {
 		return j, fmt.Errorf("invalid metadata %s: %w", name, err)
 	}
@@ -365,6 +369,11 @@ func seed(ctx context.Context, r *gitexec.Runner, cwd string, planner SeedPlanne
 			return result, err
 		}
 		j.FilesDigest = digestOf(list)
+		// A seed stopped here changed nothing but left its list (doctor
+		// reports it).
+		if err := point(ctx, f, "seed-files"); err != nil {
+			return result, err
+		}
 	}
 	if err := s.meta.AtomicWrite(seedPath(j.ID), encoded, 0600); err != nil {
 		return result, err
@@ -431,15 +440,17 @@ func validateSeed(j seedJournal, repo, workspaceID string) error {
 			return errors.New("seed stage collides with destination")
 		}
 	}
+	// A created directory must be an ancestor of a seeded file. Collecting
+	// the ancestors once keeps this linear in the files and directories.
+	ancestors := map[string]bool{}
+	for _, file := range j.Files {
+		for dir := path.Dir(file.Path); dir != "." && !ancestors[dir]; dir = path.Dir(dir) {
+			ancestors[dir] = true
+		}
+	}
 	last = ""
 	for _, dir := range j.Directories {
-		allowed := false
-		for _, file := range j.Files {
-			if strings.HasPrefix(file.Path, dir+"/") {
-				allowed = true
-				break
-			}
-		}
+		allowed := ancestors[dir]
 		if storage.ValidateSelectionPath(dir) != nil || !allowed || last != "" && (strings.Count(dir, "/") < strings.Count(last, "/") || strings.Count(dir, "/") == strings.Count(last, "/") && dir <= last) {
 			return errors.New("invalid seed directory journal")
 		}

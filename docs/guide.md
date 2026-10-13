@@ -93,6 +93,19 @@ and doctor reports the recovery ref its restore leaves). The quarantine is never
 and isn't included in backups; delete it once you've checked its contents. The
 abandoned journal is archived with outcome `abandoned`, and a restore keeps its
 recovery ref. Run `git local doctor` afterwards to check the result.
+
+A restore that stopped at a file edited after it started keeps the edit; resume
+and rollback refuse while it is there, so move the file aside first, or
+abandon. A large seed keeps its file list beside its journal, in
+`.git/gitlocal/transactions/seed-files/<id>.json`. If that list is missing or
+damaged, the seed can be neither resumed nor rolled back (and a completed one
+blocks `encrypt migrate` and backups); `recover --list`, doctor and the refusal
+name the list. Put it back if you have a copy; otherwise
+`git local recover <id> --abandon` moves the journal (and a damaged list) into
+the quarantine and leaves the seeded files as they are; doctor then lists any
+staging file the seed left. A list that no journal names (a seed stopped before
+writing its journal, which changed nothing else) is reported by doctor with
+the command to delete it.
 A restore killed after publishing its recovery ref but before writing its
 journal changed no files and leaves only that ref, which would block a later
 encryption migration; doctor lists it, and `git local recover <id> --abandon`

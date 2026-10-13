@@ -111,3 +111,33 @@ func TestPushSkipsOrphanSeedFileListsAndRestoreRefusesThem(t *testing.T) {
 		t.Fatalf("restore of a backup with an orphan seed file list: %v", err)
 	}
 }
+
+// GL-119: a completed seed journal whose file list is lost would make the
+// backup unrestorable (restore reads the journal with its list); push refuses
+// it, naming the list and the way out.
+func TestPushRefusesCompletedSeedWithoutItsFileList(t *testing.T) {
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	source := newBoundSource(t, remote, "saved\n")
+	ctx := context.Background()
+	source.git(t, ctx, "init", "--bare", "-q", remote)
+	keyPath := filepath.Join(t.TempDir(), "backup.key")
+	if err := CreateKeyFile(keyPath, source.repo.Root); err != nil {
+		t.Fatal(err)
+	}
+	const id = "0b9e8a1c-7d3f-4c2a-9e5b-1f2d3c4b5a69"
+	completed := filepath.Join(source.w.Common, "gitlocal", "transactions", "completed")
+	if err := os.MkdirAll(completed, 0700); err != nil {
+		t.Fatal(err)
+	}
+	journal := `{"schemaVersion": 1, "kind": "seed", "id": "` + id + `", "files": [], "filesDigest": "` + strings.Repeat("a", 64) + `"}` + "\n"
+	if err := os.WriteFile(filepath.Join(completed, "seed-"+id+".json"), []byte(journal), 0600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := push(ctx, source.g, source.repo.Root, "backup", keyPath, func(context.Context, *gitexec.Runner, string, string, string, string) error {
+		t.Fatal("an archive with a seed journal missing its file list reached the transport")
+		return nil
+	})
+	if !errors.Is(err, storage.ErrConflict) || !strings.Contains(err.Error(), "seed-files/"+id+".json") || !strings.Contains(err.Error(), "recover "+id+" --abandon") {
+		t.Fatalf("push with a completed seed missing its file list: %v", err)
+	}
+}

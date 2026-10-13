@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"gitlocal/internal/configtx"
 	"gitlocal/internal/storage"
 )
 
@@ -101,6 +102,13 @@ func packDirectory(ctx context.Context, root *storage.Dir, dst *tar.Writer, rel,
 				} else if err != nil {
 					return err
 				}
+			}
+		}
+		// Restore reads a completed seed journal with its file list, so a
+		// lost list would make the backup unrestorable.
+		if filepath.ToSlash(rel) == "transactions/completed" && strings.HasPrefix(component, "seed-") && strings.HasSuffix(component, ".json") {
+			if err := configtx.CheckSeedList(root, child); err != nil {
+				return err
 			}
 		}
 		// Restore accepts only known state, so anything else would make the

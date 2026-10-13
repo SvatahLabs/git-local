@@ -592,7 +592,7 @@ func (g *guard) recognizeOperation(ctx context.Context, i int, full bool) error 
 		return e
 	}
 	if !beforeMatch && !postMatch {
-		return fmt.Errorf("%w: new external edit at %q; preserved", storage.ErrConflict, op.Path)
+		return &externalEdit{path: op.Path}
 	}
 	stages := m.Stages[i]
 	for _, entry := range []struct {

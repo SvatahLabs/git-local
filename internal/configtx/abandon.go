@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -53,6 +54,12 @@ func Abandon(ctx context.Context, r *gitexec.Runner, cwd, id string) (AbandonRes
 		return s.abandonSeed(ctx, id, result)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return result, err
+	}
+	// A completed seed whose file list is lost blocks encryption migration and
+	// makes encrypted backups unrestorable; abandoning it quarantines it.
+	var listErr *SeedListError
+	if _, err := readSeed(s.meta, seedCompletedPath(id)); errors.As(err, &listErr) {
+		return s.abandonSeedWithoutList(id, seedCompletedPath(id), listErr, result)
 	}
 	result.Kind = "config"
 	var j Journal
@@ -167,11 +174,21 @@ func abandonedAlready(meta *storage.Dir, id string) error {
 		}
 		return nil
 	}
+	// An abandon of a seed whose file list was lost quarantines the journal.
+	for _, name := range []string{seedPath(id), seedCompletedPath(id)} {
+		if _, err := meta.Lstat(path.Join(quarantinePath(id), "journals", path.Base(name))); err == nil {
+			return nil
+		}
+	}
 	return os.ErrNotExist
 }
 
 func (s *session) abandonSeed(ctx context.Context, id string, result AbandonResult) (AbandonResult, error) {
 	j, err := readSeed(s.meta, seedPath(id))
+	var listErr *SeedListError
+	if errors.As(err, &listErr) {
+		return s.abandonSeedWithoutList(id, seedPath(id), listErr, result)
+	}
 	if err != nil {
 		return result, err
 	}
@@ -266,7 +283,10 @@ func (p PendingJournal) Next() (string, string) {
 		from = " from " + p.Root
 	}
 	abandon := "git local recover " + p.ID + " --abandon" + from
+	var listErr *SeedListError
 	switch {
+	case errors.As(p.Err, &listErr):
+		return "Put the file list back if you have a copy; otherwise run " + abandon + ".", listErr.Error()
 	case p.Err != nil:
 		return "Inspect the transactions directory; don't delete journals blindly.", "journal can't be read: " + p.Err.Error()
 	case p.IdentityErr != nil:
@@ -311,6 +331,11 @@ func PendingJournals(ctx context.Context, r *gitexec.Runner, cwd string) ([]Pend
 		return nil, err
 	}
 	defer lock.Close()
+	meta, err := storage.OpenDir(filepath.Join(w.Common, "gitlocal"))
+	if err != nil {
+		return nil, err
+	}
+	defer meta.Close()
 	entries, err := common.ReadDir("gitlocal/transactions")
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
@@ -356,8 +381,9 @@ func PendingJournals(ctx context.Context, r *gitexec.Runner, cwd string) ([]Pend
 					Destination string `json:"destinationWorkspaceId"`
 				} `json:"plan"`
 			} `json:"manifest"`
-			Policy    secureblob.Policy  `json:"policy"`
-			OldPolicy *secureblob.Policy `json:"oldPolicy"`
+			Policy      secureblob.Policy  `json:"policy"`
+			OldPolicy   *secureblob.Policy `json:"oldPolicy"`
+			FilesDigest string             `json:"filesDigest"`
 		}
 		if readErr == nil {
 			readErr = json.NewDecoder(bytes.NewReader(data)).Decode(&record)
@@ -391,6 +417,16 @@ func PendingJournals(ctx context.Context, r *gitexec.Runner, cwd string) ([]Pend
 		item := PendingJournal{ID: id, Kind: kind, WorkspaceID: record.WorkspaceID, Direction: record.Direction, Outcome: record.Outcome, Err: readErr}
 		if kind == "restore" {
 			item.WorkspaceID = record.Manifest.Plan.Destination
+		}
+		if kind == "seed" && readErr == nil && record.FilesDigest != "" {
+			// Resume, rollback and abandon all read the list first.
+			list, err := ReadSeedFiles(meta, id)
+			if err == nil && digestOf(list) != record.FilesDigest {
+				err = fmt.Errorf("%w: it doesn't match its journal", storage.ErrConflict)
+			}
+			if err != nil {
+				item.Err = &SeedListError{ID: id, Err: err}
+			}
 		}
 		if kind == "encrypt" && readErr == nil {
 			// A correction replaces a policy that is already in service.

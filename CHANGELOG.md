@@ -113,7 +113,8 @@ About a hundred defects found in pre-release reviews, among them:
   guarded; guard misses of partially staged overlay patches.
 - Recovery: every interrupted transaction (configuration, seed, restore,
   encryption migration, initialization) can be resumed, rolled back or
-  abandoned without editing internal files.
+  abandoned without editing internal files, also a seed whose file list was
+  lost; the messages name what blocks recovery and the way out.
 - Scale: large index and tree listings, large snapshot metadata, long exclude
   patterns, per-commit process spawning in guards and doctor, and restore
   time, which grew with the square of the restored file count and is now

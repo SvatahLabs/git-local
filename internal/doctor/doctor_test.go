@@ -583,3 +583,39 @@ func TestDoctorGivesNextCommandForEveryPendingJournal(t *testing.T) {
 		}
 	}
 }
+
+// GL-119: doctor names a completed seed whose file list is lost, with the
+// command that clears it, and a seed file list no journal names, with the
+// command that deletes it.
+func TestDoctorReportsLostAndOrphanSeedLists(t *testing.T) {
+	repo, r, w := fixture(t)
+	meta, err := storage.OpenDir(filepath.Join(w.Common, "gitlocal"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer meta.Close()
+	const lost, orphan = "0b9e8a1c-7d3f-4c2a-9e5b-1f2d3c4b5a69", "1c9e8a1c-7d3f-4c2a-9e5b-1f2d3c4b5a69"
+	for _, dir := range []string{"transactions/completed", "transactions/seed-files"} {
+		if err := meta.MkdirAll(dir); err != nil {
+			t.Fatal(err)
+		}
+	}
+	journal := `{"schemaVersion": 1, "kind": "seed", "id": "` + lost + `", "files": [], "filesDigest": "` + strings.Repeat("a", 64) + `"}` + "\n"
+	if err := meta.AtomicWrite("transactions/completed/seed-"+lost+".json", []byte(journal), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := meta.AtomicWrite("transactions/seed-files/"+orphan+".json", []byte("{\"files\": []}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	result, err := Run(ctx, r, repo.Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	human := result.Human()
+	if !has(result, "journal "+lost, "error") || !strings.Contains(human, "git local recover "+lost+" --abandon") {
+		t.Fatalf("lost seed list not reported with its remedy:\n%s", human)
+	}
+	if !has(result, "seed file lists", "warning") || !strings.Contains(human, "rm '"+filepath.Join(w.Common, "gitlocal", "transactions", "seed-files", orphan+".json")+"'") {
+		t.Fatalf("orphan seed list not reported with its command:\n%s", human)
+	}
+}

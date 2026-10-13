@@ -137,10 +137,20 @@ func Run(ctx context.Context, r *gitexec.Runner, cwd string) (Report, error) {
 			if problem == nil && j.Kind == "restore" {
 				problem = restore.InspectJournal(ctx, r, d.Workspace, d.Selection, d.ConfigDigest, j.ID, j.Completed, d.Sources)
 			}
-			if problem != nil {
+			var listErr *configtx.SeedListError
+			if errors.As(problem, &listErr) {
+				journalsHealthy = false
+				result.add("journal "+j.ID, "error", problem.Error(), "Put the file list back if you have a copy; otherwise run git local recover "+j.ID+" --abandon.")
+			} else if problem != nil {
 				journalsHealthy = false
 				result.add("journal "+j.ID, "error", problem.Error(), "Inspect this journal and its recovery ref before attempting recovery.")
 			}
+		}
+		if d.OrphanErr != nil {
+			result.add("seed file lists", "error", d.OrphanErr.Error(), "Inspect the transactions/seed-files directory.")
+		}
+		for _, orphan := range d.OrphanSeedLists {
+			result.add("seed file lists", "warning", "seed file list "+orphan+" belongs to no seed journal (a seed stopped before writing its journal); it changed nothing", "Delete it: rm "+shellQuote(orphan))
 		}
 		if journalsHealthy {
 			result.add("journals", "ok", fmt.Sprintf("%d transaction journals inspected", len(d.Journals)), "")

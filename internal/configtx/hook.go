@@ -86,7 +86,15 @@ func LoadGuardSnapshot(ctx context.Context, r *gitexec.Runner, cwd string) (Guar
 	}
 	for _, entry := range transactions {
 		if !(entry.Name() == "completed" || entry.Name() == seedFilesDir) && !storage.IsTempName(entry.Name()) {
-			return result, fmt.Errorf("unfinished configuration transaction %q", entry.Name())
+			kind, id, ok := journalName(entry.Name())
+			if !ok {
+				return result, fmt.Errorf("unfinished or unknown transaction %q; run git local recover --list", entry.Name())
+			}
+			name := map[string]string{"config": "configuration", "encrypt": "encryption migration"}[kind]
+			if name == "" {
+				name = kind
+			}
+			return result, fmt.Errorf("unfinished %s transaction %s; run git local recover --list", name, id)
 		}
 	}
 	entries, err := common.ReadDir("gitlocal/workspaces")

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -44,7 +45,12 @@ type DiagnosticState struct {
 	// current one: written before it covered restore and seed staging files,
 	// or compiled for the other core.ignorecase setting.
 	IgnoreOutdated bool
-	Recheck        func() error
+	// OrphanSeedLists are seed file lists (absolute paths) that no pending or
+	// completed seed journal names: a seed interrupted between writing its
+	// list and its journal leaves one.
+	OrphanSeedLists []string
+	OrphanErr       error
+	Recheck         func() error
 }
 
 // ReadDiagnostic holds an existing shared lock and never replays a pending
@@ -68,6 +74,7 @@ func ReadDiagnostic(ctx context.Context, r *gitexec.Runner, cwd string, fn func(
 	d.Pending, d.PendingErr = s.pending()
 	d.Workspaces, d.InventoryErr = s.inventory(ctx)
 	d.Journals, d.JournalErr = s.inspectJournals()
+	d.OrphanSeedLists, d.OrphanErr = s.orphanSeedLists()
 	d.ConfigDigest, d.ConfigErr = s.stateDigest()
 	if d.ConfigErr == nil {
 		d.IgnoreWarnings, d.IgnoreErr = s.verify(ctx, s.w.WorkspaceID, d.Selection, false)
@@ -274,4 +281,35 @@ func (s *session) ignoreOutdated() (bool, error) {
 		return false, err
 	}
 	return exclude.Outdated(before.Data, patterns, alternates...), nil
+}
+
+// orphanSeedLists lists the seed file lists no seed journal names.
+func (s *session) orphanSeedLists() ([]string, error) {
+	entries, err := s.meta.ReadDir("transactions/" + seedFilesDir)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var orphans []string
+	for _, entry := range entries {
+		id, ok := strings.CutSuffix(entry.Name(), ".json")
+		if storage.IsTempName(entry.Name()) || !ok || !storage.ValidUUID(id) {
+			continue
+		}
+		named := false
+		for _, name := range []string{seedPath(id), seedCompletedPath(id)} {
+			if _, err := s.meta.Lstat(name); err == nil {
+				named = true
+			} else if !os.IsNotExist(err) {
+				return nil, err
+			}
+		}
+		if !named {
+			orphans = append(orphans, filepath.Join(s.w.Common, "gitlocal", filepath.FromSlash(seedFilesPath(id))))
+		}
+	}
+	sort.Strings(orphans)
+	return orphans, nil
 }

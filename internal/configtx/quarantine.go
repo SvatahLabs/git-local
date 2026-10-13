@@ -148,11 +148,13 @@ func (q *Quarantine) QuarantineFile(meta, files *storage.Dir, name, root, reason
 	return entry, files.Remove(name)
 }
 
-// QuarantineJournal moves a completed journal into the quarantine, under
-// journals/. Both live in <common>/gitlocal, so the move is a rename.
+// QuarantineJournal moves a completed journal, or a pending seed journal
+// whose file list is lost, into the quarantine, under journals/. Both live in
+// <common>/gitlocal, so the move is a rename.
 func (q *Quarantine) QuarantineJournal(meta *storage.Dir, name, reason string) (QuarantineEntry, error) {
 	entry := QuarantineEntry{File: path.Join("journals", path.Base(name)), Source: name, Kind: "journal", Reason: reason}
-	if path.Dir(name) != "transactions/completed" || !strings.HasSuffix(name, ".json") {
+	pendingSeed := path.Dir(name) == "transactions" && strings.HasPrefix(path.Base(name), "seed-")
+	if path.Dir(name) != "transactions/completed" && !pendingSeed || !strings.HasSuffix(name, ".json") {
 		return entry, fmt.Errorf("refusing to quarantine %q", name)
 	}
 	if err := meta.MkdirAll(path.Join(quarantinePath(q.TransactionID), "journals")); err != nil {
