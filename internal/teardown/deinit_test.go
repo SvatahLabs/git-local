@@ -550,6 +550,79 @@ func TestDeinitStaleFilterKeepsUserLinesAndRenewsTimes(t *testing.T) {
 	}
 }
 
+// With no managed attributes block left, removing a stale filter doesn't
+// need the installation record (only the block's removal does), so a damaged
+// record doesn't stop deinit; a missing one never did.
+func TestDeinitStaleFilterWithoutBlockIgnoresDamagedRecord(t *testing.T) {
+	f := newFixture(t)
+	root := f.repo.Root
+	write(t, filepath.Join(root, "config.txt"), "mode=shared\n")
+	f.git(f.plain, root, "add", "config.txt")
+	f.git(f.plain, root, "commit", "-qm", "initial")
+	f.gl(root, "init")
+	write(t, filepath.Join(root, "config.txt"), "mode=local\n")
+	f.gl(root, "overlay", "add", "local-mode", "--", "config.txt")
+	// An overlay add interrupted before its manifest and attributes block.
+	for _, name := range []string{"gitlocal/overlays", "info/attributes"} {
+		if err := os.RemoveAll(filepath.Join(root, ".git", filepath.FromSlash(name))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(t, filepath.Join(root, ".git", "gitlocal", "overlay-install.json"), "damaged\n")
+	if out, err := f.run(f.withTool, root, f.bin, "deinit"); err != nil {
+		t.Fatalf("deinit with a stale filter and a damaged installation record: %v\n%s", err, out)
+	}
+	if data, _ := os.ReadFile(filepath.Join(root, ".git", "config")); bytes.Contains(data, []byte("gitlocal")) {
+		t.Fatalf("config still mentions git-local:\n%s", data)
+	}
+}
+
+// The warning about filter settings that existed before overlays were
+// installed names only those deinit removed.
+func TestDeinitNamesOnlyThePresetFilterSettingItRemoved(t *testing.T) {
+	f := newFixture(t)
+	root := f.repo.Root
+	write(t, filepath.Join(root, "config.txt"), "mode=shared\n")
+	f.git(f.plain, root, "add", "config.txt")
+	f.git(f.plain, root, "commit", "-qm", "initial")
+	f.git(f.plain, root, "config", "filter.gitlocal-overlay.required", "true")
+	f.gl(root, "init")
+	write(t, filepath.Join(root, "config.txt"), "mode=local\n")
+	f.gl(root, "overlay", "add", "local-mode", "--", "config.txt")
+	out, err := f.run(f.withTool, root, f.bin, "deinit")
+	if err != nil || !strings.Contains(out, "filter.gitlocal-overlay.required was set before overlays were installed; deinit removed it") || strings.Contains(out, "include.path gitlocal/overlay-filter.gitconfig and") {
+		t.Fatalf("deinit with a preset required key: %v\n%s", err, out)
+	}
+}
+
+// After git worktree move, deinit from a worktree where git local was never
+// initialized names where the initialized worktree is now: Git updates its
+// gitdir file, while its workspace record keeps the root it had at init.
+func TestDeinitNamesMovedWorktree(t *testing.T) {
+	f := newFixture(t)
+	root := f.repo.Root
+	write(t, filepath.Join(root, "app.txt"), "application\n")
+	f.git(f.plain, root, "add", "app.txt")
+	f.git(f.plain, root, "commit", "-qm", "initial")
+	f.gl(root, "init")
+	before := filepath.Join(filepath.Dir(root), filepath.Base(root)+"-before")
+	after := filepath.Join(filepath.Dir(root), filepath.Base(root)+"-after")
+	plain := filepath.Join(filepath.Dir(root), filepath.Base(root)+"-plain")
+	t.Cleanup(func() {
+		for _, dir := range []string{before, after, plain} {
+			os.RemoveAll(dir)
+		}
+	})
+	f.git(f.plain, root, "worktree", "add", "-q", before, "-b", "moved")
+	f.gl(before, "init")
+	f.git(f.plain, root, "worktree", "move", before, after)
+	f.git(f.plain, root, "worktree", "add", "-q", plain, "-b", "plain")
+	out, err := f.run(f.withTool, plain, f.bin, "deinit")
+	if err == nil || !strings.Contains(out, "run git local deinit from ") || !strings.Contains(out, after) || strings.Contains(out, before) {
+		t.Fatalf("deinit from an uninitialized worktree after a worktree move: %v\n%s", err, out)
+	}
+}
+
 // GL-118: from a worktree git local init never ran in, deinit names the
 // initialized worktree by its recorded root, also when the Git directory is
 // separate from the main worktree (--separate-git-dir).

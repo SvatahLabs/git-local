@@ -67,17 +67,30 @@ func point(ctx context.Context, f fault, name string) error {
 	return nil
 }
 func stopped(id string, err error) error {
+	// Resume and rollback both refuse while an edit or unknown staging bytes
+	// are there.
 	var edit *externalEdit
-	if errors.As(err, &edit) {
-		// Resume and rollback both refuse while the edit is there.
+	var stage *unknownStage
+	switch {
+	case errors.As(err, &edit) && edit.aside:
 		return fmt.Errorf("%w: restore transaction %s stopped (%v); move %s aside to keep the edit, then run git local recover %s --resume or --rollback; or run git local recover %s --abandon to leave every file as it is", storage.ErrConflict, id, err, edit.path, id, id)
+	case errors.As(err, &edit):
+		// The path exists both before and after the restore, so a file moved
+		// aside would be a change too.
+		return fmt.Errorf("%w: restore transaction %s stopped (%v); to keep the edit, run git local recover %s --abandon, which leaves every file as it is; or undo the edit, then run git local recover %s --resume or --rollback", storage.ErrConflict, id, err, id, id)
+	case errors.As(err, &stage):
+		return fmt.Errorf("%w: restore transaction %s stopped (%v); move %s aside (it is a staging file, which Git ignores), then run git local recover %s --resume or --rollback; or run git local recover %s --abandon, which moves it into the quarantine", storage.ErrConflict, id, err, stage.path, id, id)
 	}
 	return fmt.Errorf("%w: restore transaction %s stopped (%v); run git local recover %s --resume or --rollback", storage.ErrConflict, id, err, id)
 }
 
 // externalEdit is a pending path that changed outside the restore; the
-// restore stops and leaves it as it is.
-type externalEdit struct{ path string }
+// restore stops and leaves it as it is. aside is true when the operation's
+// image before or after is an absent file, which a file moved aside matches.
+type externalEdit struct {
+	path  string
+	aside bool
+}
 
 func (e *externalEdit) Error() string {
 	return fmt.Sprintf("%v: new external edit at %q; preserved", storage.ErrConflict, e.path)
@@ -85,6 +98,17 @@ func (e *externalEdit) Error() string {
 
 // Is makes the error a conflict (exit code 3).
 func (e *externalEdit) Is(target error) bool { return target == storage.ErrConflict }
+
+// unknownStage is a staging file whose bytes are neither image it may hold;
+// the restore stops and leaves it as it is.
+type unknownStage struct{ path string }
+
+func (e *unknownStage) Error() string {
+	return fmt.Sprintf("%v: unrecognized staging bytes at %q; preserved", storage.ErrConflict, e.path)
+}
+
+// Is makes the error a conflict (exit code 3).
+func (e *unknownStage) Is(target error) bool { return target == storage.ErrConflict }
 func journalPath(id string) string           { return "transactions/restore-" + id + ".json" }
 func completedPath(id string) string         { return "transactions/completed/restore-" + id + ".json" }
 func RecoveryRef(workspace, id string) string {

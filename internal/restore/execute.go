@@ -280,10 +280,12 @@ type guard struct {
 
 // globalState is what can change the plan's preconditions outside the
 // restored paths and is cheap to read: the main HEAD and index file
-// (selection.MainState) and the branch.
+// (selection.MainState) and the branch. settled is false when a later
+// reading might not show a change (see MainState.Settled).
 type globalState struct {
-	main   selection.MainState
-	branch string
+	main    selection.MainState
+	branch  string
+	settled bool
 }
 
 func (s globalState) same(o globalState) bool { return s.branch == o.branch && s.main.Same(o.main) }
@@ -475,7 +477,7 @@ func (g *guard) recognizeScope(ctx context.Context, op int, dir string) error {
 		return err
 	}
 	full := op < 0 && dir == "" || g.checked == nil
-	owned := full || !state.same(*g.checked)
+	owned := full || !g.checked.settled || !state.same(*g.checked)
 	if full {
 		g.checked = nil
 	}
@@ -544,9 +546,11 @@ func (g *guard) recognizeScope(ctx context.Context, op int, dir string) error {
 		}
 		return fmt.Errorf("%w: parent directory changed at %q", storage.ErrConflict, parent.Path)
 	}
-	// A racy index could change again without its stat showing it, so its
-	// state isn't recorded and the next check reads ownership again.
-	if owned && state.main.Settled() {
+	// A racy index (or a HEAD MainState can't follow) could change again
+	// without its stat showing it, so the next step reads ownership again;
+	// it still checks only its own operation, or restore turns quadratic.
+	if owned {
+		state.settled = state.main.Settled()
 		g.checked = &state
 	}
 	return nil
@@ -592,7 +596,7 @@ func (g *guard) recognizeOperation(ctx context.Context, i int, full bool) error 
 		return e
 	}
 	if !beforeMatch && !postMatch {
-		return &externalEdit{path: op.Path}
+		return &externalEdit{path: op.Path, aside: !op.Before.Exists || !m.Post[i].Exists}
 	}
 	stages := m.Stages[i]
 	for _, entry := range []struct {
@@ -616,7 +620,7 @@ func (g *guard) recognizeOperation(ctx context.Context, i int, full bool) error 
 			return e
 		}
 		if info != nil && !match {
-			return fmt.Errorf("%w: unrecognized staging bytes at %q; preserved", storage.ErrConflict, entry.path)
+			return &unknownStage{path: entry.path}
 		}
 	}
 	return nil
@@ -802,7 +806,7 @@ func install(ctx context.Context, r *gitexec.Runner, w workspace.Context, files 
 				return e
 			}
 			if !match {
-				return fmt.Errorf("%w: unrecognized staging bytes at %q; preserved", storage.ErrConflict, stage)
+				return &unknownStage{path: stage}
 			}
 			if created {
 				if err := files.ChmodStaged(stage, os.FileMode(desired.Permissions)); err != nil {
@@ -988,7 +992,7 @@ func cleanupStages(ctx context.Context, r *gitexec.Runner, w workspace.Context, 
 				return err
 			}
 			if !match {
-				return fmt.Errorf("%w: unrecognized staging bytes at %q; preserved", storage.ErrConflict, entry.path)
+				return &unknownStage{path: entry.path}
 			}
 			if err = point(ctx, f, fmt.Sprintf("before-stage-cleanup:%d", i)); err != nil {
 				return err

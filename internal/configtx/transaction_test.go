@@ -19,7 +19,12 @@ import (
 
 func fixture(t *testing.T) (*testutil.Repo, *gitexec.Runner, *workspace.Context) {
 	t.Helper()
-	r := testutil.New(t)
+	return fixtureFrom(t, testutil.New(t))
+}
+
+// fixtureFrom initializes git local in the main worktree of r.
+func fixtureFrom(t *testing.T, r *testutil.Repo) (*testutil.Repo, *gitexec.Runner, *workspace.Context) {
+	t.Helper()
 	g, err := gitexec.New(r.RunnerEnv())
 	if err != nil {
 		t.Fatal(err)

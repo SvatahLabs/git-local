@@ -156,8 +156,9 @@ About a hundred defects found in pre-release reviews, among them:
   change; and keys created by earlier releases are refused on load with no fix
   offered. Until these are fixed, Windows isn't supported for sensitive-file
   or backup keys.
-- **Restore** takes roughly half a second per restored file on a busy
-  machine (it runs several Git processes per file).
+- **Restore** takes about a fifth of a second per restored file on a busy
+  machine (it runs several Git processes per file), also in a repository
+  whose main index holds 90,000 paths.
 - **Seeding** a worktree takes about 16 ms per seeded file on a busy machine,
   most of it spent making each file durable.
 - **Maintenance** isn't automatic: run `git local maintenance` now and then.

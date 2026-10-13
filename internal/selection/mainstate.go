@@ -2,23 +2,27 @@ package selection
 
 import (
 	"context"
+	"errors"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
 // MainState is what can change main ownership and is cheap to read: the files
 // Git replaces to move HEAD (the worktree's HEAD file, the loose ref it names,
-// packed-refs and the reftable stack's tables.list) and the index file, by
+// packed-refs and the reftable stacks' tables.list) and the index file, by
 // identity, size, mode and times. Reading it starts no Git process, where
 // Revalidate lists the whole index; a long operation reads it before each
 // step and revalidates ownership only when it changed.
 type MainState struct {
 	// Head is the content of the worktree's HEAD file.
 	Head string
-	// Files are the stats of the HEAD file, the ref it names, packed-refs and
+	// Files are the stats of the HEAD file, the ref it names, packed-refs,
+	// the repository's tables.list and, for a linked worktree, its own
 	// tables.list, in that order; nil when absent.
 	Files []fs.FileInfo
 	Index fs.FileInfo // nil when there is no index file
@@ -57,10 +61,13 @@ func ReadMainState(admin, common, index string) (MainState, error) {
 	}
 	state.Head = string(head)
 	names := []string{filepath.Join(admin, "HEAD"), "", filepath.Join(common, "packed-refs"), filepath.Join(common, "reftable", "tables.list")}
-	if ref, ok := strings.CutPrefix(strings.TrimSuffix(state.Head, "\n"), "ref: "); ok {
-		if !strings.HasPrefix(ref, "refs/") || strings.Contains(ref, "..") || strings.ContainsAny(ref, "\\\n") {
-			state.unknown = true
-		}
+	// The reftable backend keeps a linked worktree's HEAD in the worktree's
+	// own stack.
+	if filepath.Clean(admin) != filepath.Clean(common) {
+		names = append(names, filepath.Join(admin, "reftable", "tables.list"))
+	}
+	content := strings.TrimSuffix(state.Head, "\n")
+	if ref, ok := strings.CutPrefix(content, "ref: "); ok && strings.HasPrefix(ref, "refs/") && !strings.Contains(ref, "..") && !strings.ContainsAny(ref, "\\ \t\r\n") {
 		dir := common
 		for _, prefix := range worktreeRefs {
 			if strings.HasPrefix(ref, prefix) {
@@ -68,18 +75,30 @@ func ReadMainState(admin, common, index string) (MainState, error) {
 			}
 		}
 		names[1] = filepath.Join(dir, filepath.FromSlash(ref))
+	} else if len(content) != 40 && len(content) != 64 || !objectID(content) {
+		// Git also accepts other spellings ("ref:" without a space,
+		// trailing whitespace); always revalidate rather than guess.
+		state.unknown = true
 	}
-	for _, name := range names {
+	for i, name := range names {
 		var info fs.FileInfo
 		if name != "" {
 			var regular bool
-			if info, regular, err = lstatRegular(name); os.IsNotExist(err) {
+			info, regular, err = lstatRegular(name)
+			switch {
+			case os.IsNotExist(err) || errors.Is(err, syscall.ENOTDIR):
+				// Absent. With the reftable backend refs/heads is a file,
+				// so a loose ref under it is "not a directory".
 				info, err = nil, nil
-			} else if err != nil {
+			case err != nil:
 				return state, err
-			} else if !regular {
+			case !regular:
 				// A symbolic ref stored as a symlink, or anything else
 				// unexpected: always revalidate.
+				state.unknown = true
+			case i == 1 && symbolic(name):
+				// The ref names another ref (a symbolic ref chain), which
+				// this reading doesn't follow.
 				state.unknown = true
 			}
 		}
@@ -90,6 +109,19 @@ func ReadMainState(admin, common, index string) (MainState, error) {
 		state.Index, err = nil, nil
 	}
 	return state, err
+}
+
+// symbolic reports whether the loose ref file name holds a symbolic ref (or
+// can't be read). A loose ref is an object name and a newline.
+func symbolic(name string) bool {
+	f, err := os.Open(name)
+	if err != nil {
+		return true
+	}
+	defer f.Close()
+	b := make([]byte, 4)
+	n, _ := io.ReadFull(f, b)
+	return string(b[:n]) == "ref:"
 }
 
 // Same reports whether nothing that can change ownership changed between two

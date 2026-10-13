@@ -25,7 +25,12 @@ var ctx = context.Background()
 
 func fixture(t *testing.T) (*testutil.Repo, *gitexec.Runner, *workspace.Context) {
 	t.Helper()
-	repo := testutil.New(t)
+	return fixtureFrom(t, testutil.New(t))
+}
+
+// fixtureFrom commits to repo and initializes git local in it.
+func fixtureFrom(t *testing.T, repo *testutil.Repo) (*testutil.Repo, *gitexec.Runner, *workspace.Context) {
+	t.Helper()
 	repo.Commit()
 	r, err := gitexec.New(repo.RunnerEnv())
 	if err != nil {

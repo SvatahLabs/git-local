@@ -262,25 +262,27 @@ func checkInitialized(w *workspace.Context) error {
 	if _, err := os.Stat(filepath.Join(w.Admin, "gitlocal-workspace.json")); err == nil || !os.IsNotExist(err) {
 		return err
 	}
-	// The workspace records hold each initialized worktree's absolute root,
-	// also for a --separate-git-dir layout or a relative gitdir file.
 	var roots []string
-	meta, err := storage.OpenDir(filepath.Join(w.Common, "gitlocal"))
-	if err != nil {
-		return err
+	if _, err := os.Stat(filepath.Join(w.Common, "gitlocal-workspace.json")); err == nil {
+		if root := mainRoot(w.Common); root != "" {
+			roots = append(roots, root)
+		}
 	}
-	defer meta.Close()
-	entries, _ := meta.ReadDir("workspaces")
-	for _, entry := range entries {
-		var record workspace.Record
-		if !entry.IsDir() || !storage.ValidUUID(entry.Name()) || meta.ReadJSON(filepath.Join("workspaces", entry.Name(), "workspace.json"), &record) != nil {
+	// A linked worktree's gitdir file names its .git file, also after
+	// git worktree move; Git may write it relative to the worktree's
+	// administrative directory.
+	linked, _ := filepath.Glob(filepath.Join(w.Common, "worktrees", "*", "gitlocal-workspace.json"))
+	for _, identity := range linked {
+		admin := filepath.Dir(identity)
+		gitdir, err := os.ReadFile(filepath.Join(admin, "gitdir"))
+		if err != nil {
 			continue
 		}
-		if record.State == "active" && filepath.IsAbs(record.Root) {
-			if _, err := os.Stat(filepath.Join(record.Admin, "gitlocal-workspace.json")); err == nil {
-				roots = append(roots, record.Root)
-			}
+		dotgit := strings.TrimSpace(string(gitdir))
+		if !filepath.IsAbs(dotgit) {
+			dotgit = filepath.Join(admin, dotgit)
 		}
+		roots = append(roots, filepath.Dir(filepath.Clean(dotgit)))
 	}
 	sort.Strings(roots)
 	where := "a worktree where git local init ran"
@@ -288,6 +290,29 @@ func checkInitialized(w *workspace.Context) error {
 		where = strings.Join(roots, " or ")
 	}
 	return fmt.Errorf("%w: git local was never initialized in this worktree; run git local deinit from %s", storage.ErrConflict, where)
+}
+
+// mainRoot is the main worktree of the repository whose common directory is
+// common: the root its workspace record holds (a --separate-git-dir layout
+// keeps the Git directory elsewhere), or else the parent of a .git directory.
+func mainRoot(common string) string {
+	if meta, err := storage.OpenDir(filepath.Join(common, "gitlocal")); err == nil {
+		defer meta.Close()
+		entries, _ := meta.ReadDir("workspaces")
+		for _, entry := range entries {
+			var record workspace.Record
+			if !entry.IsDir() || !storage.ValidUUID(entry.Name()) || meta.ReadJSON(filepath.Join("workspaces", entry.Name(), "workspace.json"), &record) != nil {
+				continue
+			}
+			if record.State == "active" && filepath.IsAbs(record.Root) && filepath.Clean(record.Admin) == filepath.Clean(common) {
+				return record.Root
+			}
+		}
+	}
+	if filepath.Base(common) == ".git" {
+		return filepath.Dir(common)
+	}
+	return ""
 }
 
 // checkRemovable refuses what deinit can't undo safely: a pending

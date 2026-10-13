@@ -94,14 +94,17 @@ func packDirectory(ctx context.Context, root *storage.Dir, dst *tar.Writer, rel,
 		}
 		// A file list kept beside a seed journal is state only while its
 		// completed journal exists; one left by an interrupted seed or an
-		// abandoned migration isn't needed to restore, and restore refuses it.
+		// abandoned migration isn't needed to restore, and restore refuses it,
+		// as it refuses anything else there (a copy of a list, say).
 		if filepath.ToSlash(rel) == "transactions/seed-files" {
-			if id, ok := strings.CutSuffix(component, ".json"); ok && storage.ValidUUID(id) {
-				if _, err := root.Lstat(filepath.Join("transactions", "completed", "seed-"+id+".json")); os.IsNotExist(err) {
-					continue
-				} else if err != nil {
-					return err
-				}
+			id, ok := strings.CutSuffix(component, ".json")
+			if !ok || !storage.ValidUUID(id) || !entry.Type().IsRegular() {
+				continue
+			}
+			if _, err := root.Lstat(filepath.Join("transactions", "completed", "seed-"+id+".json")); os.IsNotExist(err) {
+				continue
+			} else if err != nil {
+				return err
 			}
 		}
 		// Restore reads a completed seed journal with its file list, so a

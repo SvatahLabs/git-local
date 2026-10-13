@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"gitlocal/internal/gitexec"
@@ -150,11 +151,12 @@ func removeOverlay(ctx context.Context, r *gitexec.Runner, cwd, owner, name stri
 		install = installation{SchemaVersion: 1}
 		warning = fmt.Sprintf("the overlay installation record %s was missing, so the overlay filter (include.path %s, %s, its config file and the managed block in info/attributes) was removed as installed by git-local; add back any of them you had set yourself", filepath.Join(p.Common, "gitlocal", installationFile), filterInclude, requiredKey)
 	}
-	if len(remaining) == 0 && assumeInstalled && (install.IncludePathExisted || install.RequiredExisted) {
+	presetInclude, presetRequired := false, false
+	if len(remaining) == 0 && assumeInstalled {
 		// The include names a file in the private state, which deinit sets
 		// aside, and deinit's final check refuses while either is left.
+		presetInclude, presetRequired = install.IncludePathExisted, install.RequiredExisted
 		install.IncludePathExisted, install.RequiredExisted = false, false
-		warning = fmt.Sprintf("include.path %s and %s were set before overlays were installed; deinit removed them with the overlay filter", filterInclude, requiredKey)
 	}
 	includes, err := localIncludes(ctx, r, p.Root)
 	if err != nil {
@@ -174,6 +176,20 @@ func removeOverlay(ctx context.Context, r *gitexec.Runner, cwd, owner, name stri
 	requiredExists, err := localRequired(ctx, r, p.Root)
 	if err != nil {
 		return empty, "", err
+	}
+	// Name what was set before overlays were installed and is removed now.
+	var preset []string
+	if presetInclude && includeCount+len(legacy) > 0 {
+		preset = append(preset, "include.path "+filterInclude)
+	}
+	if presetRequired && requiredExists {
+		preset = append(preset, requiredKey)
+	}
+	switch len(preset) {
+	case 1:
+		warning = preset[0] + " was set before overlays were installed; deinit removed it with the overlay filter"
+	case 2:
+		warning = preset[0] + " and " + preset[1] + " were set before overlays were installed; deinit removed them with the overlay filter"
 	}
 	if m.State != "removing" {
 		m.State = "removing"
@@ -257,7 +273,9 @@ func renewTimes(root, path string) error {
 	}
 	defer files.Close()
 	info, err := files.Lstat(filepath.FromSlash(path))
-	if os.IsNotExist(err) {
+	// Missing, or under a symlink or a file in this checkout: Git has no
+	// stat of it cached here.
+	if os.IsNotExist(err) || errors.Is(err, syscall.ENOTDIR) || errors.Is(err, syscall.ELOOP) {
 		return nil
 	}
 	if err != nil {

@@ -73,7 +73,8 @@ func TestPushSkipsTempLeftoversAndRefusesUnknownState(t *testing.T) {
 
 // A seed's file list is state only while its completed journal exists: push
 // leaves out a list an interrupted seed or abandoned migration orphaned, and
-// restore refuses a backup that carries one.
+// anything else there (a copy of a list, a directory), and restore refuses a
+// backup that carries one.
 func TestPushSkipsOrphanSeedFileListsAndRestoreRefusesThem(t *testing.T) {
 	remote := filepath.Join(t.TempDir(), "remote.git")
 	source := newBoundSource(t, remote, "saved\n")
@@ -88,8 +89,13 @@ func TestPushSkipsOrphanSeedFileListsAndRestoreRefusesThem(t *testing.T) {
 	if err := os.MkdirAll(lists, 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(lists, orphan), []byte("{\"files\": []}\n"), 0600); err != nil {
-		t.Fatal(err)
+	for _, name := range []string{orphan, orphan + ".bak", "copy/" + orphan} {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(lists, name)), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(lists, name), []byte("{\"files\": []}\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
 	}
 	ref := source.push(t, keyPath)
 	stage, err := source.fetch(t, keyPath, ref, ref)
@@ -97,10 +103,13 @@ func TestPushSkipsOrphanSeedFileListsAndRestoreRefusesThem(t *testing.T) {
 		t.Fatalf("fetch the backup: %v", err)
 	}
 	defer os.RemoveAll(stage)
-	staged := filepath.Join(stage, "state", "transactions", "seed-files", orphan)
-	if _, err := os.Stat(staged); !os.IsNotExist(err) {
-		t.Fatalf("push archived an orphan seed file list: %v", err)
+	if entries, err := os.ReadDir(filepath.Join(stage, "state", "transactions", "seed-files")); err == nil && len(entries) > 0 || err != nil && !os.IsNotExist(err) {
+		t.Fatalf("push archived seed-files entries no completed seed names: %v %v", entries, err)
 	}
+	if _, err := ValidateStaged(ctx, source.g, stage); err != nil {
+		t.Fatalf("restore of the backup: %v", err)
+	}
+	staged := filepath.Join(stage, "state", "transactions", "seed-files", orphan)
 	if err := os.MkdirAll(filepath.Dir(staged), 0700); err != nil {
 		t.Fatal(err)
 	}

@@ -38,6 +38,20 @@ func New(t testing.TB) *Repo {
 	r.Git("init", "-q", "-b", "main", "--template=")
 	return r
 }
+
+// NewReftable is New with Git's reftable ref backend: refs/heads is then a
+// file, and each worktree keeps its own refs, HEAD included, in a reftable
+// stack.
+func NewReftable(t testing.TB) *Repo {
+	t.Helper()
+	r := New(t)
+	if err := os.RemoveAll(filepath.Join(r.Root, ".git")); err != nil {
+		t.Fatal(err)
+	}
+	r.Git("init", "-q", "-b", "main", "--template=", "--ref-format=reftable")
+	return r
+}
+
 func (r *Repo) Git(args ...string) []byte { return r.At(r.Root, args...) }
 func (r *Repo) At(cwd string, args ...string) []byte {
 	r.T.Helper()

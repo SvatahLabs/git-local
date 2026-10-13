@@ -95,8 +95,11 @@ abandoned journal is archived with outcome `abandoned`, and a restore keeps its
 recovery ref. Run `git local doctor` afterwards to check the result.
 
 A restore that stopped at a file edited after it started keeps the edit; resume
-and rollback refuse while it is there, so move the file aside first, or
-abandon. A large seed keeps its file list beside its journal, in
+and rollback refuse while it is there. If the restore creates or deletes that
+file, move the file aside, then resume or roll back. If it replaces the file, a
+file moved aside is a change too: abandon to keep the edit (every file stays as
+it is), or undo the edit, then resume or roll back. The message says which
+applies. A large seed keeps its file list beside its journal, in
 `.git/gitlocal/transactions/seed-files/<id>.json`. If that list is missing or
 damaged, the seed can be neither resumed nor rolled back (and a completed one
 blocks `encrypt migrate` and backups); `recover --list`, doctor and the refusal

@@ -11,6 +11,7 @@ import (
 	"gitlocal/internal/gitexec"
 	"gitlocal/internal/selection"
 	"gitlocal/internal/storage"
+	"gitlocal/internal/testutil"
 	"gitlocal/internal/workspace"
 )
 
@@ -106,82 +107,101 @@ func TestSeedListsMainIndexOnlyWhenItChanged(t *testing.T) {
 // Between full listings a seed still stops when main ownership changes: a
 // path taken into the main index or a new HEAD stops it before the next file,
 // and that file isn't written. An index rewritten with the same entries is
-// only listed again.
+// only listed again. Also with the reftable backend, which keeps a linked
+// worktree's HEAD in the worktree's own stack.
 func TestSeedDetectsOwnershipChangesBetweenListings(t *testing.T) {
-	for _, kind := range []string{"owned", "head", "update-ref", "index-rewritten"} {
-		t.Run(kind, func(t *testing.T) {
-			t.Parallel()
-			repo, r, main := fixture(t)
-			repo.Commit()
-			ctx := context.Background()
-			linked := filepath.Join(t.TempDir(), "linked")
-			repo.Git("worktree", "add", "-q", "-b", "seed", linked)
-			w, err := workspace.Init(ctx, r, linked)
-			if err != nil {
-				t.Fatal(err)
-			}
-			blob, err := r.History(ctx, w.Store, strings.NewReader("seeded"), "hash-object", "-w", "--stdin", "--no-filters")
-			if err != nil {
-				t.Fatal(err)
-			}
-			id := strings.TrimSpace(string(blob))
-			names := []string{"notes/a", "notes/b", "notes/c"}
-			planner := func(workspace.Context) (SeedPlan, error) {
-				state := selection.Empty()
-				state.Generation = 1
-				state.Include = []selection.Rule{{Path: "notes", Kind: "directory"}}
-				files := []SeedFile{}
-				for _, name := range names {
-					files = append(files, SeedFile{Path: name, Mode: "100644", Blob: id})
-				}
-				return SeedPlan{SourceWorkspace: main.WorkspaceID, SourceSnapshot: id, Selection: state, Files: files}, nil
-			}
-			_, err = seed(ctx, r, linked, planner, func(at string) error {
-				if at != "seed-file-0" {
-					return nil
-				}
-				switch kind {
-				case "owned":
-					app := strings.TrimSpace(string(repo.At(linked, "hash-object", "-w", "app.txt")))
-					repo.At(linked, "update-index", "--add", "--cacheinfo", "100644,"+app+",notes/b")
-				case "head":
-					repo.At(linked, "commit", "-q", "--allow-empty", "-m", "moved")
-				case "update-ref":
-					// Moves HEAD without touching the index.
-					repo.At(linked, "update-ref", "HEAD", strings.TrimSpace(string(repo.At(linked, "commit-tree", "HEAD^{tree}", "-m", "moved"))))
-				case "index-rewritten":
-					index := filepath.Join(w.Admin, "index")
-					b, e := os.ReadFile(index)
-					if e != nil {
-						return e
-					}
-					if e = os.WriteFile(index+".new", b, 0644); e != nil {
-						return e
-					}
-					return os.Rename(index+".new", index)
-				}
-				return nil
+	for _, format := range []string{"files", "reftable"} {
+		for _, kind := range []string{"owned", "head", "update-ref", "detached-update-ref", "index-rewritten"} {
+			t.Run(format+"/"+kind, func(t *testing.T) {
+				t.Parallel()
+				seedDetectsOwnershipChange(t, format, kind)
 			})
-			if kind == "index-rewritten" {
-				if err != nil {
-					t.Fatalf("seed after an unchanged index rewrite: %v", err)
-				}
-				for _, name := range names {
-					if b, e := os.ReadFile(filepath.Join(linked, filepath.FromSlash(name))); e != nil || string(b) != "seeded" {
-						t.Fatalf("%s: %q %v", name, b, e)
-					}
-				}
-				return
+		}
+	}
+}
+
+func seedDetectsOwnershipChange(t *testing.T, format, kind string) {
+	newRepo := testutil.New
+	if format == "reftable" {
+		newRepo = testutil.NewReftable
+	}
+	repo, r, main := fixtureFrom(t, newRepo(t))
+	repo.Commit()
+	ctx := context.Background()
+	linked := filepath.Join(t.TempDir(), "linked")
+	if kind == "detached-update-ref" {
+		repo.Git("worktree", "add", "-q", "--detach", linked)
+	} else {
+		repo.Git("worktree", "add", "-q", "-b", "seed", linked)
+	}
+	w, err := workspace.Init(ctx, r, linked)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blob, err := r.History(ctx, w.Store, strings.NewReader("seeded"), "hash-object", "-w", "--stdin", "--no-filters")
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := strings.TrimSpace(string(blob))
+	names := []string{"notes/a", "notes/b", "notes/c"}
+	planner := func(workspace.Context) (SeedPlan, error) {
+		state := selection.Empty()
+		state.Generation = 1
+		state.Include = []selection.Rule{{Path: "notes", Kind: "directory"}}
+		files := []SeedFile{}
+		for _, name := range names {
+			files = append(files, SeedFile{Path: name, Mode: "100644", Blob: id})
+		}
+		return SeedPlan{SourceWorkspace: main.WorkspaceID, SourceSnapshot: id, Selection: state, Files: files}, nil
+	}
+	_, err = seed(ctx, r, linked, planner, func(at string) error {
+		if at != "seed-file-0" {
+			return nil
+		}
+		switch kind {
+		case "owned":
+			app := strings.TrimSpace(string(repo.At(linked, "hash-object", "-w", "app.txt")))
+			repo.At(linked, "update-index", "--add", "--cacheinfo", "100644,"+app+",notes/b")
+		case "head":
+			repo.At(linked, "commit", "-q", "--allow-empty", "-m", "moved")
+		case "update-ref":
+			// Moves HEAD without touching the index.
+			repo.At(linked, "update-ref", "HEAD", strings.TrimSpace(string(repo.At(linked, "commit-tree", "HEAD^{tree}", "-m", "moved"))))
+		case "detached-update-ref":
+			// Moves a detached HEAD without touching the index; the
+			// reftable backend keeps it in the worktree's own stack.
+			repo.At(linked, "update-ref", "--no-deref", "HEAD", strings.TrimSpace(string(repo.At(linked, "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "moved"))))
+		case "index-rewritten":
+			index := filepath.Join(w.Admin, "index")
+			b, e := os.ReadFile(index)
+			if e != nil {
+				return e
 			}
-			if err == nil || !strings.Contains(err.Error(), "main HEAD or index changed") {
-				t.Fatalf("seed accepted a main ownership change: %v", err)
+			if e = os.WriteFile(index+".new", b, 0644); e != nil {
+				return e
 			}
-			if b, e := os.ReadFile(filepath.Join(linked, "notes", "a")); e != nil || string(b) != "seeded" {
-				t.Fatalf("notes/a: %q %v", b, e)
+			return os.Rename(index+".new", index)
+		}
+		return nil
+	})
+	if kind == "index-rewritten" {
+		if err != nil {
+			t.Fatalf("seed after an unchanged index rewrite: %v", err)
+		}
+		for _, name := range names {
+			if b, e := os.ReadFile(filepath.Join(linked, filepath.FromSlash(name))); e != nil || string(b) != "seeded" {
+				t.Fatalf("%s: %q %v", name, b, e)
 			}
-			if _, e := os.Lstat(filepath.Join(linked, "notes", "b")); !os.IsNotExist(e) {
-				t.Fatalf("seed wrote notes/b after main ownership changed: %v", e)
-			}
-		})
+		}
+		return
+	}
+	if err == nil || !strings.Contains(err.Error(), "main HEAD or index changed") {
+		t.Fatalf("seed accepted a main ownership change: %v", err)
+	}
+	if b, e := os.ReadFile(filepath.Join(linked, "notes", "a")); e != nil || string(b) != "seeded" {
+		t.Fatalf("notes/a: %q %v", b, e)
+	}
+	if _, e := os.Lstat(filepath.Join(linked, "notes", "b")); !os.IsNotExist(e) {
+		t.Fatalf("seed wrote notes/b after main ownership changed: %v", e)
 	}
 }

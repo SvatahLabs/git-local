@@ -158,15 +158,6 @@ func RemoveFilter(ctx context.Context, r *gitexec.Runner, cwd string) ([]string,
 	if err != nil || len(found) == 0 {
 		return nil, err
 	}
-	state, err := storage.OpenDir(filepath.Join(w.Common, "gitlocal"))
-	if err != nil {
-		return nil, err
-	}
-	install, _, err := loadInstallation(state)
-	state.Close()
-	if err != nil {
-		return nil, err
-	}
 	data, exists, mode, err := readOptional(common, "info/attributes", 1<<20)
 	if err != nil {
 		return nil, err
@@ -181,6 +172,15 @@ func RemoveFilter(ctx context.Context, r *gitexec.Runner, cwd string) ([]string,
 		// user added inside it isn't dropped with it.
 		if unfiltered, err = blockPaths(data[:end+len(attrEnd)]); err != nil {
 			return nil, edited
+		}
+		state, err := storage.OpenDir(filepath.Join(w.Common, "gitlocal"))
+		if err != nil {
+			return nil, err
+		}
+		install, _, err := loadInstallation(state)
+		state.Close()
+		if err != nil {
+			return nil, err
 		}
 		user := data[end+len(attrEnd):]
 		if len(user) == 0 && !install.AttributesExisted {

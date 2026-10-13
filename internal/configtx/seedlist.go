@@ -7,6 +7,7 @@ import (
 	"path"
 
 	"gitlocal/internal/storage"
+	"gitlocal/internal/workspace"
 )
 
 // SeedListError reports a seed journal whose file list, kept beside it
@@ -32,11 +33,13 @@ func (e *SeedListError) Unwrap() error { return e.Err }
 func (e *SeedListError) Is(target error) bool { return target == storage.ErrConflict }
 
 // abandonSeedWithoutList abandons the seed journal name (pending or
-// completed) whose file list is missing or damaged: the journal, and the
-// damaged list if any, move into the quarantine, so nothing in transactions/
-// names the list any more. Without the list the staging files can't be
-// recognized, so they are left for doctor, which reports any that remain.
-func (s *session) abandonSeedWithoutList(id, name string, listErr error, result AbandonResult) (AbandonResult, error) {
+// completed), j as decoded without its list, whose file list is missing or
+// damaged: the journal, and the damaged list if any, move into the
+// quarantine, so nothing in transactions/ names the list any more. Without
+// the list a pending seed's staging files can't be recognized, so they are
+// left for doctor in the seed's destination worktree, which reports any that
+// remain.
+func (s *session) abandonSeedWithoutList(id, name string, j seedJournal, listErr error, result AbandonResult) (AbandonResult, error) {
 	result.Kind = "seed"
 	q, err := NewQuarantine(s.meta, id, "seed")
 	if err != nil {
@@ -53,7 +56,17 @@ func (s *session) abandonSeedWithoutList(id, name string, listErr error, result 
 	}
 	result.Quarantined = append(result.Quarantined, entry)
 	result.Quarantine = q.Directory(s.w.Common)
-	result.Warnings = append(result.Warnings, "without its file list the seed's staging files (.gitlocal-tmp-*, which Git ignores) couldn't be checked; git local doctor lists any that are left")
+	// A completed seed left no staging files.
+	if name == seedPath(id) {
+		where := "the seed's destination worktree"
+		var record workspace.Record
+		if j.WorkspaceID == s.w.WorkspaceID {
+			where = s.w.Root
+		} else if storage.ValidUUID(j.WorkspaceID) && s.meta.ReadJSON(path.Join("workspaces", j.WorkspaceID, "workspace.json"), &record) == nil && record.Root != "" {
+			where = record.Root
+		}
+		result.Warnings = append(result.Warnings, "without its file list the seed's staging files (.gitlocal-tmp-*, which Git ignores) couldn't be checked; git local doctor run in "+where+" lists any that are left")
+	}
 	return result, nil
 }
 

@@ -107,9 +107,18 @@ func TestLostSeedListNamesListAndAbandonQuarantinesJournal(t *testing.T) {
 			}); err != nil {
 				t.Fatal(err)
 			}
-			result, err := Abandon(ctx, r, linked, id)
+			// Abandon works from any worktree; its warning names the one where
+			// doctor sees the seed's staging files.
+			from := linked
+			if kind == "missing" {
+				from = filepath.Dir(w.Common)
+			}
+			result, err := Abandon(ctx, r, from, id)
 			if err != nil || result.Quarantine == "" {
 				t.Fatalf("abandon without the seed list: %+v %v", result, err)
+			}
+			if len(result.Warnings) != 1 || !strings.Contains(result.Warnings[0], "git local doctor run in "+w.Root+" lists") {
+				t.Errorf("abandon from %s warns: %q", from, result.Warnings)
 			}
 			if _, err := os.Stat(filepath.Join(result.Quarantine, "journals", "seed-"+id+".json")); err != nil {
 				t.Fatalf("journal not quarantined: %v", err)
@@ -123,8 +132,12 @@ func TestLostSeedListNamesListAndAbandonQuarantinesJournal(t *testing.T) {
 			if data, err := os.ReadFile(filepath.Join(linked, "notes", "a")); err != nil || string(data) != "seeded" {
 				t.Fatalf("abandon changed a seeded file: %q %v", data, err)
 			}
-			if _, err := Abandon(ctx, r, linked, id); err != nil {
-				t.Fatalf("abandon again: %v", err)
+			// recover <id> --abandon run again finds the quarantined journal.
+			if kind, err := JournalKind(ctx, r, linked, id); err != nil || kind != "seed" {
+				t.Fatalf("journal kind after the abandon: %q %v", kind, err)
+			}
+			if again, err := Abandon(ctx, r, linked, id); err != nil || again.Kind != "seed" {
+				t.Fatalf("abandon again: %+v %v", again, err)
 			}
 		})
 	}
@@ -151,6 +164,10 @@ func TestLostListOfCompletedSeedIsAbandoned(t *testing.T) {
 	result, err := Abandon(ctx, r, linked, id)
 	if err != nil || result.Quarantine == "" {
 		t.Fatalf("abandon a completed seed without its list: %+v %v", result, err)
+	}
+	// A completed seed left no staging files to warn about.
+	if len(result.Warnings) != 0 {
+		t.Fatalf("abandon of a completed seed warns: %q", result.Warnings)
 	}
 	if err := ReadDiagnostic(ctx, r, linked, func(d DiagnosticState) error {
 		for _, j := range d.Journals {

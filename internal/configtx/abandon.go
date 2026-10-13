@@ -58,8 +58,15 @@ func Abandon(ctx context.Context, r *gitexec.Runner, cwd, id string) (AbandonRes
 	// A completed seed whose file list is lost blocks encryption migration and
 	// makes encrypted backups unrestorable; abandoning it quarantines it.
 	var listErr *SeedListError
-	if _, err := readSeed(s.meta, seedCompletedPath(id)); errors.As(err, &listErr) {
-		return s.abandonSeedWithoutList(id, seedCompletedPath(id), listErr, result)
+	if j, err := readSeed(s.meta, seedCompletedPath(id)); errors.As(err, &listErr) {
+		return s.abandonSeedWithoutList(id, seedCompletedPath(id), j, listErr, result)
+	}
+	// An earlier abandon of a seed whose list was lost quarantined it.
+	if _, err := s.meta.Lstat(path.Join(quarantinePath(id), "journals", "seed-"+id+".json")); err == nil {
+		result.Kind = "seed"
+		return result, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return result, err
 	}
 	result.Kind = "config"
 	var j Journal
@@ -174,12 +181,6 @@ func abandonedAlready(meta *storage.Dir, id string) error {
 		}
 		return nil
 	}
-	// An abandon of a seed whose file list was lost quarantines the journal.
-	for _, name := range []string{seedPath(id), seedCompletedPath(id)} {
-		if _, err := meta.Lstat(path.Join(quarantinePath(id), "journals", path.Base(name))); err == nil {
-			return nil
-		}
-	}
 	return os.ErrNotExist
 }
 
@@ -187,7 +188,7 @@ func (s *session) abandonSeed(ctx context.Context, id string, result AbandonResu
 	j, err := readSeed(s.meta, seedPath(id))
 	var listErr *SeedListError
 	if errors.As(err, &listErr) {
-		return s.abandonSeedWithoutList(id, seedPath(id), listErr, result)
+		return s.abandonSeedWithoutList(id, seedPath(id), j, listErr, result)
 	}
 	if err != nil {
 		return result, err
@@ -463,6 +464,15 @@ func JournalKind(ctx context.Context, r *gitexec.Runner, cwd, id string) (string
 	for _, kind := range []string{"config", "seed", "restore", "encrypt", "init"} {
 		if _, err := common.Lstat("gitlocal/transactions/completed/" + kind + "-" + id + ".json"); err == nil {
 			return kind, nil
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return "", err
+		}
+	}
+	// An abandon of a seed whose file list was lost moved the journal into
+	// the quarantine; running the abandon again finds it there.
+	if storage.ValidUUID(id) {
+		if _, err := common.Lstat(path.Join("gitlocal", quarantinePath(id), "journals", "seed-"+id+".json")); err == nil {
+			return "seed", nil
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return "", err
 		}

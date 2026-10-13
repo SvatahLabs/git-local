@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	"gitlocal/internal/selection"
 	"gitlocal/internal/storage"
+	"gitlocal/internal/testutil"
 )
 
 // restoreFolds restores n changed files in a repository whose main index
@@ -61,13 +63,33 @@ func TestRestoreOwnershipChecksDontGrowWithMainIndex(t *testing.T) {
 	}
 }
 
-// restoreChecks restores n changed files, optionally replacing the main index
-// with an identical copy before each operation (as a tool polling git status
-// does), and returns the path checks the restore's guard made.
-func restoreChecks(t *testing.T, n int, rewrite bool) int {
+// restoreChecks restores n changed files and returns the path checks the
+// restore's guard made. how is "quiet"; "rewrite", which replaces the main
+// index with an identical copy before each operation (as a tool polling git
+// status does); "symlinked-head", a HEAD written as a symlink (which
+// core.preferSymlinkRefs does), a state MainState never trusts; or
+// "reftable", a repository with the reftable ref backend.
+func restoreChecks(t *testing.T, n int, how string) int {
 	t.Helper()
-	repo, r, w := fixture(t)
+	newRepo := testutil.New
+	if how == "reftable" {
+		newRepo = testutil.NewReftable
+	}
+	repo, r, w := fixtureFrom(t, newRepo(t))
 	root := repo.Root
+	if how == "symlinked-head" {
+		head := filepath.Join(w.Admin, "HEAD")
+		if err := os.Remove(head); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink("refs/heads/main", head); err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.TrimSpace(string(repo.Git("symbolic-ref", "HEAD"))); got != "refs/heads/main" {
+			t.Fatalf("Git reads the symlinked HEAD as %q", got)
+		}
+	}
+	rewrite := how == "rewrite"
 	for i := 0; i < n; i++ {
 		write(t, root, fmt.Sprintf("notes/file-%03d", i), "source")
 	}
@@ -96,7 +118,7 @@ func restoreChecks(t *testing.T, n int, rewrite bool) int {
 		return os.Rename(index+".new", index)
 	})
 	if err != nil {
-		t.Fatalf("restore with index rewrites %v: %v", rewrite, err)
+		t.Fatalf("restore (%s): %v", how, err)
 	}
 	if rewrite && rewrites < n {
 		t.Fatalf("index rewritten %d times for %d files", rewrites, n)
@@ -112,13 +134,22 @@ func restoreChecks(t *testing.T, n int, rewrite bool) int {
 // An index rewritten without entry changes between operations makes the
 // guard read ownership and the branch again, not every operation's image.
 // Before, each rewrite forced a full check, so a tool rewriting the index
-// during a long restore made it quadratic again. Not parallel: it replaces
-// pathChecked.
+// during a long restore made it quadratic again. So does a main state that
+// can't show the next change (it isn't settled): the next step reads
+// ownership again; it used to force a full check at every step. A reftable
+// repository restores too (its refs/heads is a file, which stopped every
+// restore). Not parallel: it replaces pathChecked.
 func TestRestoreIndexRewritesRecheckOnlyOwnership(t *testing.T) {
 	const n = 6
-	quiet, rewritten := restoreChecks(t, n, false), restoreChecks(t, n, true)
-	t.Logf("path checks for %d files: %d, with an index rewrite before each operation %d", n, quiet, rewritten)
-	if quiet == 0 || rewritten > quiet+n {
-		t.Fatalf("index rewrites raised the path checks from %d to %d", quiet, rewritten)
+	quiet := restoreChecks(t, n, "quiet")
+	for _, how := range []string{"rewrite", "symlinked-head", "reftable"} {
+		if how == "symlinked-head" && runtime.GOOS == "windows" {
+			continue
+		}
+		checks := restoreChecks(t, n, how)
+		t.Logf("path checks for %d files: %d, %s %d", n, quiet, how, checks)
+		if quiet == 0 || checks > quiet+n {
+			t.Errorf("%s raised the path checks from %d to %d", how, quiet, checks)
+		}
 	}
 }
