@@ -434,3 +434,142 @@ func TestDeinitRefusesBeforeChangingAnything(t *testing.T) {
 		})
 	}
 }
+
+// overlayFixture commits two files and saves an overlay of each.
+func overlayFixture(t *testing.T) *fixture {
+	f := newFixture(t)
+	root := f.repo.Root
+	write(t, filepath.Join(root, "a.txt"), "mode=shared\n")
+	write(t, filepath.Join(root, "b.txt"), "mode=shared\n")
+	f.git(f.plain, root, "add", "a.txt", "b.txt")
+	f.git(f.plain, root, "commit", "-qm", "initial")
+	f.gl(root, "init")
+	write(t, filepath.Join(root, "a.txt"), "mode=local\n")
+	f.gl(root, "overlay", "add", "first", "--", "a.txt")
+	write(t, filepath.Join(root, "b.txt"), "mode=local\n")
+	f.gl(root, "overlay", "add", "second", "--", "b.txt")
+	return f
+}
+
+// GL-118: the hook records are checked before the first overlay is removed,
+// so a refusal leaves every overlay in place.
+func TestDeinitChecksHookRecordsBeforeRemovingOverlays(t *testing.T) {
+	f := overlayFixture(t)
+	root := f.repo.Root
+	f.gl(root, "hook", "install")
+	write(t, filepath.Join(root, ".git", "gitlocal", "hook-install.json"), "damaged\n")
+	before := f.git(f.withTool, root, "status", "--porcelain")
+	config, _ := os.ReadFile(filepath.Join(root, ".git", "config"))
+	if out, err := f.run(f.withTool, root, f.bin, "deinit"); err == nil {
+		t.Fatalf("deinit accepted a damaged hook record:\n%s", out)
+	}
+	attributes, _ := os.ReadFile(filepath.Join(root, ".git", "info", "attributes"))
+	for _, name := range []string{"a.txt", "b.txt"} {
+		if !bytes.Contains(attributes, []byte(name)) {
+			t.Fatalf("refused deinit removed the overlay of %s:\n%s", name, attributes)
+		}
+	}
+	if after, _ := os.ReadFile(filepath.Join(root, ".git", "config")); !bytes.Equal(after, config) || !bytes.Contains(after, []byte("gitlocal")) {
+		t.Fatalf("refused deinit changed the overlay filter config:\n%s", after)
+	}
+	if status := f.git(f.withTool, root, "status", "--porcelain"); status != before {
+		t.Fatalf("status changed by a refused deinit:\n%s\nbefore:\n%s", status, before)
+	}
+}
+
+// GL-118: with the overlay installation record gone, the last overlay can't
+// tell which filter settings existed before; deinit removes them as
+// git-local's and says so, instead of stopping after the first overlay with
+// nothing left that could finish it.
+func TestDeinitFinishesWithoutOverlayInstallationRecord(t *testing.T) {
+	f := overlayFixture(t)
+	root := f.repo.Root
+	if err := os.Remove(filepath.Join(root, ".git", "gitlocal", "overlay-install.json")); err != nil {
+		t.Fatal(err)
+	}
+	out, err := f.run(f.withTool, root, f.bin, "deinit")
+	if err != nil || !strings.Contains(out, "overlay-install.json was missing") {
+		t.Fatalf("deinit without the installation record: %v\n%s", err, out)
+	}
+	for _, name := range []string{"info/attributes", "config"} {
+		if data, _ := os.ReadFile(filepath.Join(root, ".git", name)); bytes.Contains(data, []byte("gitlocal")) || bytes.Contains(data, []byte("git-local")) {
+			t.Fatalf("%s still mentions git-local:\n%s", name, data)
+		}
+	}
+	if status := f.git(f.plain, root, "status", "--porcelain"); status != " M a.txt\n M b.txt\n" {
+		t.Fatalf("status after deinit:\n%s", status)
+	}
+}
+
+// GL-118: removing the filter an interrupted overlay add left keeps a line
+// the user wrote inside the managed attributes block (it refuses instead),
+// and makes Git read the file it no longer filters again.
+func TestDeinitStaleFilterKeepsUserLinesAndRenewsTimes(t *testing.T) {
+	for _, kind := range []string{"user-line", "times"} {
+		t.Run(kind, func(t *testing.T) {
+			f := newFixture(t)
+			root := f.repo.Root
+			write(t, filepath.Join(root, "config.txt"), "mode=shared\n")
+			f.git(f.plain, root, "add", "config.txt")
+			f.git(f.plain, root, "commit", "-qm", "initial")
+			f.gl(root, "init")
+			write(t, filepath.Join(root, "config.txt"), "mode=local\n")
+			f.gl(root, "overlay", "add", "local-mode", "--", "config.txt")
+			// Staging while the filter runs caches the file's size and time
+			// next to the upstream blob (see TestDeinitLeavesAPlainRepository).
+			past := time.Now().Add(-time.Hour)
+			if err := os.Chtimes(filepath.Join(root, "config.txt"), past, past); err != nil {
+				t.Fatal(err)
+			}
+			f.git(f.withTool, root, "add", "config.txt")
+			if err := os.RemoveAll(filepath.Join(root, ".git", "gitlocal", "overlays")); err != nil {
+				t.Fatal(err)
+			}
+			attributes := filepath.Join(root, ".git", "info", "attributes")
+			if kind == "user-line" {
+				data, err := os.ReadFile(attributes)
+				if err != nil {
+					t.Fatal(err)
+				}
+				edited := strings.Replace(string(data), " filter=gitlocal-overlay\n", " filter=gitlocal-overlay\n*.bin binary\n", 1)
+				write(t, attributes, edited)
+				out, err := f.run(f.withTool, root, f.bin, "deinit")
+				if err == nil || !strings.Contains(out, "was edited") {
+					t.Fatalf("deinit dropped a user line in the managed block: %v\n%s", err, out)
+				}
+				if data, _ := os.ReadFile(attributes); string(data) != edited {
+					t.Fatalf("refused deinit changed info/attributes:\n%s", data)
+				}
+				return
+			}
+			f.gl(root, "deinit")
+			if status := f.git(f.plain, root, "status", "--porcelain"); status != " M config.txt\n" {
+				t.Fatalf("Git doesn't see the local value after the filter's removal:\n%s", status)
+			}
+		})
+	}
+}
+
+// GL-118: from a worktree git local init never ran in, deinit names the
+// initialized worktree by its recorded root, also when the Git directory is
+// separate from the main worktree (--separate-git-dir).
+func TestDeinitNamesInitializedWorktreeWithSeparateGitDir(t *testing.T) {
+	f := newFixture(t)
+	root := f.repo.Root
+	write(t, filepath.Join(root, "app.txt"), "application\n")
+	f.git(f.plain, root, "add", "app.txt")
+	f.git(f.plain, root, "commit", "-qm", "initial")
+	separate := filepath.Join(t.TempDir(), "repo.git")
+	f.git(f.plain, root, "init", "-q", "--separate-git-dir", separate)
+	f.gl(root, "init")
+	plain := filepath.Join(filepath.Dir(root), filepath.Base(root)+"-plain")
+	f.git(f.plain, root, "worktree", "add", "-q", plain, "-b", "plain")
+	t.Cleanup(func() { os.RemoveAll(plain) })
+	out, err := f.run(f.withTool, plain, f.bin, "deinit")
+	if err == nil || !strings.Contains(out, "run git local deinit from "+root) {
+		t.Fatalf("deinit from an uninitialized worktree: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(separate, "gitlocal")); err != nil {
+		t.Fatalf("refused deinit changed the private state: %v", err)
+	}
+}

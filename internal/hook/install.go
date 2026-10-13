@@ -468,14 +468,26 @@ func modeForInstall(info os.FileInfo, exists bool) os.FileMode {
 // directory, hook file or block is gone is dropped, and an unrecorded block in
 // the current hooks directory is removed unless the directory is shared.
 func Uninstall(ctx context.Context, r *gitexec.Runner, cwd string, preCommit, prePush bool) ([]string, []string, error) {
-	return uninstallNamed(ctx, r, cwd, names(preCommit, prePush))
+	return uninstallNamed(ctx, r, cwd, names(preCommit, prePush), false)
 }
 
 func UninstallSnapshots(ctx context.Context, r *gitexec.Runner, cwd string) ([]string, []string, error) {
-	return uninstallNamed(ctx, r, cwd, snapshotEvents)
+	return uninstallNamed(ctx, r, cwd, snapshotEvents, false)
 }
 
-func uninstallNamed(ctx context.Context, r *gitexec.Runner, cwd string, selected []string) ([]string, []string, error) {
+// CheckUninstall runs every check of UninstallSnapshots and Uninstall
+// without changing anything, so git local deinit can refuse before its first
+// change rather than after removing overlays.
+func CheckUninstall(ctx context.Context, r *gitexec.Runner, cwd string) error {
+	for _, selected := range [][]string{snapshotEvents, names(false, false)} {
+		if _, _, err := uninstallNamed(ctx, r, cwd, selected, true); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func uninstallNamed(ctx context.Context, r *gitexec.Runner, cwd string, selected []string, check bool) ([]string, []string, error) {
 	w, common, lock, err := open(ctx, r, cwd)
 	if err != nil {
 		return nil, nil, err
@@ -531,7 +543,10 @@ func uninstallNamed(ctx context.Context, r *gitexec.Runner, cwd string, selected
 			kept = append(kept, record)
 			continue
 		}
-		dropped, err := uninstallRecord(record)
+		dropped, err := uninstallRecord(record, check)
+		if err != nil && check {
+			return nil, nil, err
+		}
 		if err != nil {
 			// Keep the records not yet handled, so a rerun can finish.
 			m.Records = append(kept, records[i:]...)
@@ -547,14 +562,17 @@ func uninstallNamed(ctx context.Context, r *gitexec.Runner, cwd string, selected
 			warnings = append(warnings, fmt.Sprintf("%s is a shared hooks directory; other repositories using it lose these git-local hooks too", record.Directory))
 		}
 	}
+	if check {
+		return nil, nil, nil
+	}
 	m.Records = kept
 	return removed, warnings, save(common, m)
 }
 
-// uninstallRecord removes one managed block. When the hooks directory, the
-// hook file or the block is gone, it changes nothing and explains why the
-// record is dropped.
-func uninstallRecord(record Record) (string, error) {
+// uninstallRecord removes one managed block, or with check only reads it.
+// When the hooks directory, the hook file or the block is gone, it changes
+// nothing and explains why the record is dropped.
+func uninstallRecord(record Record, check bool) (string, error) {
 	path := filepath.Join(record.Directory, record.Name)
 	d, err := storage.OpenDir(record.Directory)
 	if os.IsNotExist(err) {
@@ -575,7 +593,7 @@ func uninstallRecord(record Record) (string, error) {
 		return fmt.Sprintf("%s no longer holds a git-local block; left it as it is", path), nil
 	}
 	out, err := remove(data, record.Name)
-	if err != nil {
+	if err != nil || check {
 		return "", err
 	}
 	if record.Existed {

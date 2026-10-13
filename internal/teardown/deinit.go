@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 
 	"gitlocal/internal/configtx"
@@ -56,10 +57,19 @@ func Deinit(ctx context.Context, r *gitexec.Runner, cwd string, removeHistory bo
 		return result, err
 	}
 	defer common.Close()
+	// belongs reports whether an identity file belongs to the state this
+	// deinit removes. Another worktree's git local init may build new state
+	// once the old one is set aside, and keeps its identity.
+	var belongs func(workspace.Identity) bool
 	if _, err := common.Lstat("gitlocal"); err == nil {
 		if err := checkInitialized(w); err != nil {
 			return result, err
 		}
+		var repository workspace.Repository
+		if err := common.ReadJSON("gitlocal/repository.json", &repository); err != nil {
+			return result, err
+		}
+		belongs = func(id workspace.Identity) bool { return id.RepositoryID == repository.RepositoryID }
 		if err := checkRemovable(ctx, r, w, removeHistory); err != nil {
 			return result, err
 		}
@@ -70,7 +80,15 @@ func Deinit(ctx context.Context, r *gitexec.Runner, cwd string, removeHistory bo
 		if err := common.ReadJSON(secureblob.PolicyFile, &policy); err != nil && !os.IsNotExist(err) {
 			return result, err
 		}
-		if result.Overlays, err = removeOverlays(ctx, r, w); err != nil {
+		// The hook records are checked before the first change too: a
+		// refusal after overlays were removed would leave deinit half done.
+		if err := hook.CheckUninstall(ctx, r, cwd); err != nil {
+			return result, err
+		}
+		var warnings []string
+		result.Overlays, warnings, err = removeOverlays(ctx, r, w)
+		result.Warnings = append(result.Warnings, warnings...)
+		if err != nil {
 			return result, err
 		}
 		// An overlay add interrupted before its manifest, whose directory was
@@ -118,10 +136,22 @@ func Deinit(ctx context.Context, r *gitexec.Runner, cwd string, removeHistory bo
 		for _, dir := range kept {
 			result.Warnings = append(result.Warnings, "the private state an earlier git local deinit set aside is in "+dir+"; delete it when you no longer need it")
 		}
+		var live workspace.Repository
+		if err := common.ReadJSON("gitlocal/repository.json", &live); err != nil && !os.IsNotExist(err) {
+			return result, err
+		}
+		belongs = func(id workspace.Identity) bool {
+			return live.RepositoryID == "" || id.RepositoryID != live.RepositoryID
+		}
 	}
-	result.Identities, err = removeIdentities(common, w.Common)
+	beforeRemoveIdentities()
+	result.Identities, err = removeIdentities(common, w.Common, belongs)
 	return result, err
 }
+
+// beforeRemoveIdentities runs just before deinit removes the identity files;
+// tests replace it to run git local init meanwhile.
+var beforeRemoveIdentities = func() {}
 
 // beforeSetAside runs just before deinit takes the lock to set the private
 // state aside; tests replace it to install something meanwhile.
@@ -232,33 +262,32 @@ func checkInitialized(w *workspace.Context) error {
 	if _, err := os.Stat(filepath.Join(w.Admin, "gitlocal-workspace.json")); err == nil || !os.IsNotExist(err) {
 		return err
 	}
+	// The workspace records hold each initialized worktree's absolute root,
+	// also for a --separate-git-dir layout or a relative gitdir file.
 	var roots []string
-	if _, err := os.Stat(filepath.Join(w.Common, "gitlocal-workspace.json")); err == nil {
-		if root, err := mainRoot(w.Common); err == nil {
-			roots = append(roots, root)
+	meta, err := storage.OpenDir(filepath.Join(w.Common, "gitlocal"))
+	if err != nil {
+		return err
+	}
+	defer meta.Close()
+	entries, _ := meta.ReadDir("workspaces")
+	for _, entry := range entries {
+		var record workspace.Record
+		if !entry.IsDir() || !storage.ValidUUID(entry.Name()) || meta.ReadJSON(filepath.Join("workspaces", entry.Name(), "workspace.json"), &record) != nil {
+			continue
+		}
+		if record.State == "active" && filepath.IsAbs(record.Root) {
+			if _, err := os.Stat(filepath.Join(record.Admin, "gitlocal-workspace.json")); err == nil {
+				roots = append(roots, record.Root)
+			}
 		}
 	}
-	linked, _ := filepath.Glob(filepath.Join(w.Common, "worktrees", "*", "gitlocal-workspace.json"))
-	for _, identity := range linked {
-		gitdir, err := os.ReadFile(filepath.Join(filepath.Dir(identity), "gitdir"))
-		if err == nil {
-			roots = append(roots, filepath.Dir(strings.TrimSpace(string(gitdir))))
-		}
-	}
+	sort.Strings(roots)
 	where := "a worktree where git local init ran"
 	if len(roots) > 0 {
 		where = strings.Join(roots, " or ")
 	}
 	return fmt.Errorf("%w: git local was never initialized in this worktree; run git local deinit from %s", storage.ErrConflict, where)
-}
-
-// mainRoot is the main worktree of a non-bare repository whose common
-// directory is commonPath: its parent, for the usual .git directory.
-func mainRoot(commonPath string) (string, error) {
-	if filepath.Base(commonPath) != ".git" {
-		return "", errors.New("main worktree not found")
-	}
-	return filepath.Dir(commonPath), nil
 }
 
 // checkRemovable refuses what deinit can't undo safely: a pending
@@ -338,14 +367,14 @@ func removeHistoryRefusal(lost []string) error {
 
 // removeOverlays deactivates every overlay. Each must be removed from its own
 // worktree, or from here when its workspace is retained.
-func removeOverlays(ctx context.Context, r *gitexec.Runner, w *workspace.Context) ([]string, error) {
+func removeOverlays(ctx context.Context, r *gitexec.Runner, w *workspace.Context) ([]string, []string, error) {
 	versions, err := overlay.Registered(ctx, w.Common)
 	if err != nil || len(versions) == 0 {
-		return []string{}, err
+		return []string{}, nil, err
 	}
 	workspaces, err := configtx.ListWorkspaces(ctx, r, w.Root)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	byID := map[string]configtx.WorkspaceInfo{}
 	for _, info := range workspaces {
@@ -362,7 +391,7 @@ func removeOverlays(ctx context.Context, r *gitexec.Runner, w *workspace.Context
 			}
 			working, err := os.ReadFile(filepath.Join(info.Root, filepath.FromSlash(v.Manifest.Path)))
 			if err != nil && !os.IsNotExist(err) {
-				return nil, err
+				return nil, nil, err
 			}
 			if err != nil {
 				continue
@@ -376,7 +405,7 @@ func removeOverlays(ctx context.Context, r *gitexec.Runner, w *workspace.Context
 				continue
 			}
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			if !bytes.Equal(working, expected) {
 				problems = append(problems, fmt.Sprintf("%s in %s has changes the overlay %s doesn't hold; save them with git local overlay add %s -- %s, or undo them", v.Manifest.Path, info.Root, v.Manifest.Name, v.Manifest.Name, v.Manifest.Path))
@@ -386,23 +415,31 @@ func removeOverlays(ctx context.Context, r *gitexec.Runner, w *workspace.Context
 		}
 	}
 	if len(problems) > 0 {
-		return nil, fmt.Errorf("%w: %s", storage.ErrConflict, strings.Join(problems, "; "))
+		return nil, nil, fmt.Errorf("%w: %s", storage.ErrConflict, strings.Join(problems, "; "))
+	}
+	// Removing the last overlay also removes the filter; its checks run
+	// before the first overlay is removed.
+	if err := overlay.CheckRemoveAll(ctx, r, w.Root, w.Common); err != nil {
+		return nil, nil, err
 	}
 	removed := []string{}
+	var warnings []string
 	for _, v := range versions {
 		info := byID[v.Manifest.WorkspaceID]
+		var more []string
 		var err error
 		if info.State == "retained" {
-			_, err = overlay.RemoveFor(ctx, r, w.Root, v.Manifest.WorkspaceID, v.Manifest.Name)
+			_, more, err = overlay.RemoveForDeinit(ctx, r, w.Root, v.Manifest.WorkspaceID, v.Manifest.Name)
 		} else {
-			_, err = overlay.Remove(ctx, r, info.Root, v.Manifest.Name)
+			_, more, err = overlay.RemoveForDeinit(ctx, r, info.Root, "", v.Manifest.Name)
 		}
+		warnings = append(warnings, more...)
 		if err != nil {
-			return removed, fmt.Errorf("remove overlay %s: %w", v.Manifest.Name, err)
+			return removed, warnings, fmt.Errorf("remove overlay %s: %w", v.Manifest.Name, err)
 		}
 		removed = append(removed, v.Manifest.Name)
 	}
-	return removed, nil
+	return removed, warnings, nil
 }
 
 // workingImage is the working file the overlay filter writes for v: its
@@ -416,8 +453,9 @@ func workingImage(ctx context.Context, r *gitexec.Runner, root string, v overlay
 }
 
 // removeIdentities deletes the workspace identity file of the main worktree
-// (in the common directory) and of each linked worktree.
-func removeIdentities(common *storage.Dir, commonPath string) ([]string, error) {
+// (in the common directory) and of each linked worktree that belongs to the
+// removed state; an unreadable one is deleted too.
+func removeIdentities(common *storage.Dir, commonPath string, belongs func(workspace.Identity) bool) ([]string, error) {
 	names := []string{"gitlocal-workspace.json"}
 	linked, err := os.ReadDir(filepath.Join(commonPath, "worktrees"))
 	if err != nil && !os.IsNotExist(err) {
@@ -430,6 +468,12 @@ func removeIdentities(common *storage.Dir, commonPath string) ([]string, error) 
 	}
 	removed := []string{}
 	for _, name := range names {
+		var id workspace.Identity
+		if err := common.ReadJSON(name, &id); err == nil && !belongs(id) {
+			continue
+		} else if os.IsNotExist(err) {
+			continue
+		}
 		if err := common.Remove(name); err == nil {
 			removed = append(removed, filepath.Join(commonPath, name))
 		} else if !os.IsNotExist(err) {

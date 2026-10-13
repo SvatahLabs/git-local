@@ -553,8 +553,15 @@ while an overlay's file holds changes the overlay doesn't or the overlay no
 longer applies to the file, for an overlay of a worktree that is missing
 (prune it first), for a hand-edited managed block in `.git/info/exclude`, and in
 a worktree where git local was never initialized (it names the worktrees to run
-it from); each of these refusals comes before it changes anything. It also
-removes the overlay filter an interrupted `overlay add` left behind. It sets the
+it from), and for a damaged hook record; each of these refusals comes before it
+changes anything. It also removes the overlay filter an interrupted
+`overlay add` left behind, unless you added your own lines inside its managed
+block in `.git/info/attributes` (move them out first). If the overlay
+installation record is missing, deinit still removes the filter and says what
+it removed. A git local command waiting for the repository lock while deinit
+sets the private state aside stops with a message saying so, and a
+`git local init` run in another worktree at that moment keeps the new state it
+creates. It sets the
 private state aside under the repository lock, after checking that no other git
 local command (an `overlay add`, `hook install` or `track` in another worktree)
 installed something meanwhile; if one did, deinit refuses and running it again

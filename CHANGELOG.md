@@ -88,7 +88,8 @@ The first release meant for general use. It replaces the 0.1.4 test builds.
 - `git local deinit` removes git-local from a repository and its worktrees
   (overlays, hooks, managed ignore and attribute blocks, the required filter,
   workspace identities) and keeps the private history unless you pass
-  `--remove-history`.
+  `--remove-history`. Every check that can refuse runs before its first
+  change, and a rerun finishes an interrupted one.
 - `git local maintenance` packs the private history store and deletes objects
   no snapshot or recovery ref uses; `doctor` reports the store's size.
 - `git local encrypt migrate` corrects an existing sensitive-file policy with

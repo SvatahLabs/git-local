@@ -369,3 +369,16 @@ func (d *Dir) writable(name string, replaces bool, fn func() error) error {
 	}
 	return err
 }
+
+// holds reports whether the open file f is still the file at name.
+func (d *Dir) holds(name string, f *os.File) (bool, error) {
+	held, err := f.Stat()
+	if err != nil {
+		return false, err
+	}
+	info, err := d.Lstat(name)
+	if err != nil {
+		return false, err
+	}
+	return os.SameFile(held, info), nil
+}

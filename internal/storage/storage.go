@@ -307,7 +307,8 @@ func (d *Dir) Lock(ctx context.Context, name string, shared bool) (*Lock, error)
 	if err != nil {
 		return nil, err
 	}
-	return lockFile(ctx, f, shared)
+	l, err := lockFile(ctx, f, shared)
+	return d.locked(name, l, err)
 }
 
 // LockExisting acquires a shared read lock without creating or rewriting state.
@@ -316,7 +317,27 @@ func (d *Dir) LockExisting(ctx context.Context, name string) (*Lock, error) {
 	if err != nil {
 		return nil, err
 	}
-	return lockFile(ctx, f, true)
+	l, err := lockFile(ctx, f, true)
+	return d.locked(name, l, err)
+}
+
+// locked checks that a lock acquired after waiting still guards name: git
+// local deinit renames the private state, lock file included, while other
+// commands may wait for the lock, and they would otherwise go on to fail on
+// the first missing file with a bare "no such file or directory".
+func (d *Dir) locked(name string, l *Lock, err error) (*Lock, error) {
+	if err != nil {
+		return nil, err
+	}
+	same, err := d.holds(name, l.file)
+	if err == nil && same {
+		return l, nil
+	}
+	l.Close()
+	if err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	return nil, fmt.Errorf("%w: %s was removed or replaced while this command waited for it (git local deinit sets the private state aside); run the command again", ErrConflict, name)
 }
 func lockFile(ctx context.Context, f *os.File, shared bool) (*Lock, error) {
 	fi, err := f.Stat()

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 
 	"gitlocal/internal/gitexec"
 	"gitlocal/internal/storage"
@@ -156,24 +158,31 @@ func RemoveFilter(ctx context.Context, r *gitexec.Runner, cwd string) ([]string,
 	if err != nil || len(found) == 0 {
 		return nil, err
 	}
+	state, err := storage.OpenDir(filepath.Join(w.Common, "gitlocal"))
+	if err != nil {
+		return nil, err
+	}
+	install, _, err := loadInstallation(state)
+	state.Close()
+	if err != nil {
+		return nil, err
+	}
 	data, exists, mode, err := readOptional(common, "info/attributes", 1<<20)
 	if err != nil {
 		return nil, err
 	}
+	var unfiltered []string
 	if begin, end := bytes.Index(data, []byte(attrBegin)), bytes.Index(data, []byte(attrEnd)); begin >= 0 || end >= 0 {
+		edited := fmt.Errorf("%w: the git-local block in %s was edited; move your own lines out of it or delete it by hand, then run the command again", storage.ErrConflict, filepath.Join(w.Common, "info", "attributes"))
 		if begin != 0 || end < 0 {
-			return nil, fmt.Errorf("%w: the git-local block in %s was edited; delete it by hand, then run the command again", storage.ErrConflict, filepath.Join(w.Common, "info", "attributes"))
+			return nil, edited
+		}
+		// Every line in the block must be one git-local writes, so a line a
+		// user added inside it isn't dropped with it.
+		if unfiltered, err = blockPaths(data[:end+len(attrEnd)]); err != nil {
+			return nil, edited
 		}
 		user := data[end+len(attrEnd):]
-		state, err := storage.OpenDir(filepath.Join(w.Common, "gitlocal"))
-		if err != nil {
-			return nil, err
-		}
-		install, _, err := loadInstallation(state)
-		state.Close()
-		if err != nil {
-			return nil, err
-		}
 		if len(user) == 0 && !install.AttributesExisted {
 			err = common.Remove("info/attributes")
 		} else if exists {
@@ -188,6 +197,9 @@ func RemoveFilter(ctx context.Context, r *gitexec.Runner, cwd string) ([]string,
 		return nil, err
 	}
 	set := classifyIncludes(includes, w.Common)
+	// The include and the required key go even when the installation found
+	// them already set: the include names a file in the private state, which
+	// deinit sets aside, and its final check refuses while either is left.
 	for _, include := range append([]string{filterInclude}, set.legacy()...) {
 		if err := unsetLocal(ctx, r, w.Root, "--fixed-value", "include.path", include); err != nil {
 			return nil, err
@@ -196,5 +208,73 @@ func RemoveFilter(ctx context.Context, r *gitexec.Runner, cwd string) ([]string,
 	if err := unsetLocal(ctx, r, w.Root, requiredKey); err != nil {
 		return nil, err
 	}
+	// Git may have cached a filtered file's size and time; see removeOverlay.
+	for _, path := range unfiltered {
+		if err := renewTimes(w.Root, path); err != nil {
+			return nil, err
+		}
+	}
 	return found, nil
+}
+
+// blockPaths returns the paths of a managed attributes block, refusing a
+// block with any line git-local doesn't write.
+func blockPaths(block []byte) ([]string, error) {
+	lines := strings.Split(strings.TrimSuffix(strings.TrimPrefix(string(block), attrBegin), attrEnd), "\n")
+	var paths []string
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+		quoted, ok := strings.CutSuffix(line, " filter=gitlocal-overlay")
+		if !ok {
+			return nil, errors.New("unrecognized line in the managed attributes block")
+		}
+		literal, err := strconv.Unquote(quoted)
+		if err != nil || !strings.HasPrefix(literal, "/") {
+			return nil, errors.New("unrecognized line in the managed attributes block")
+		}
+		var path strings.Builder
+		for i := 1; i < len(literal); i++ {
+			if literal[i] == '\\' && i+1 < len(literal) {
+				i++
+			}
+			path.WriteByte(literal[i])
+		}
+		paths = append(paths, path.String())
+	}
+	for _, render := range []func(string) string{attrPattern, legacyAttrPattern} {
+		if want, err := renderBlock(paths, render); err == nil && bytes.Equal(want, block) {
+			return paths, nil
+		}
+	}
+	return nil, errors.New("unrecognized managed attributes block")
+}
+
+// CheckRemoveAll runs, without changing anything, the checks that removing
+// the last of the registered overlays makes on the filter it then removes,
+// so git local deinit refuses before removing any overlay rather than after
+// removing all but the last. A missing installation record isn't refused:
+// RemoveForDeinit removes the filter as installed by git-local.
+func CheckRemoveAll(ctx context.Context, r *gitexec.Runner, root, commonPath string) error {
+	d, err := storage.OpenDir(filepath.Join(commonPath, "gitlocal"))
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	if _, _, err := loadInstallation(d); err != nil {
+		return err
+	}
+	includes, err := localIncludes(ctx, r, root)
+	if err != nil {
+		return err
+	}
+	set := classifyIncludes(includes, commonPath)
+	if len(set.foreign) > 0 {
+		return foreignIncludeError(set.foreign[0])
+	}
+	if set.relative+len(set.legacy()) > 1 {
+		return errors.New("duplicate overlay filter include")
+	}
+	return nil
 }

@@ -373,3 +373,17 @@ func (d *Dir) SyncStaged(name string) error {
 	defer unix.Close(fd)
 	return syncDir(fd)
 }
+
+// holds reports whether the open file f is still the file at name.
+func (d *Dir) holds(name string, f *os.File) (bool, error) {
+	var held unix.Stat_t
+	if err := unix.Fstat(int(f.Fd()), &held); err != nil {
+		return false, err
+	}
+	info, err := d.Lstat(name)
+	if err != nil {
+		return false, err
+	}
+	st := info.(statInfo).st
+	return st.Dev == held.Dev && st.Ino == held.Ino, nil
+}
