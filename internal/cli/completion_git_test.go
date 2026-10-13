@@ -257,14 +257,19 @@ service=git
 zstyle ':completion:*:*:git:*' script "$2"
 source "$1" || exit 3
 source "$3" || exit 3
+# As Git's _git and __git_zsh_main set them: cword and cur from the command
+# line, words rebuilt unquoted (which drops an empty current word), and
+# __git_cmd_idx 1 even after global options.
 complete_words() {
-	local -a words orig_words; words=("$@"); orig_words=("$@")
-	local cword=$(( $# - 1 )) cur=${words[-1]} prev=${words[-2]} __git_cmd_idx=1 _ret=1
-	print -r -- "== ${words[*]}"
+	local -a orig_words words; orig_words=("$@"); words=( ${orig_words[@]} )
+	local cword=$(( $# - 1 )) cur=${orig_words[-1]} prev=${orig_words[-2]} __git_cmd_idx=1 _ret=1
+	print -r -- "== ${orig_words[*]}"
 	__git_zsh_bash_func local
 }
 complete_words git local ""
 complete_words git local hook ""
+complete_words git local ho
+complete_words git --no-pager local hook ""
 `
 	cmd := exec.Command(zsh, "-f", "-c", driver, "driver", gitZsh, gitBash, scriptPath)
 	cmd.Env = shellEnv(t, bin)
@@ -283,7 +288,7 @@ complete_words git local hook ""
 			sections[current] = append(sections[current], line)
 		}
 	}
-	for line, want := range map[string][]string{"git local ": {"commit", "track", "hook"}, "git local hook ": {"install", "uninstall"}} {
+	for line, want := range map[string][]string{"git local ": {"commit", "track", "hook"}, "git local hook ": {"install", "uninstall"}, "git local ho": {"hook"}, "git --no-pager local hook ": {"install", "uninstall"}} {
 		for _, w := range want {
 			if !slices.Contains(sections[line], w) {
 				t.Fatalf("zsh with Git's script: %q doesn't complete %q:\n%s", line, w, out)

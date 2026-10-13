@@ -1538,16 +1538,18 @@ _git_local()
 // zshGitForm lets Git's own git-completion.zsh (installed as _git by some
 // distributions, Homebrew's git among them) complete `git local ...`: it
 // dispatches subcommands to the bash-style _git_<command> functions, under
-// ksh emulation, with words holding the whole command line, cword the index of
-// the current word and __git_cmd_idx that of the command. zsh's own _git
-// completes through _git-local instead (above).
+// ksh emulation, with words holding the command line, cword the index of the
+// current word and cur the current word. It rebuilds words unquoted, which
+// drops an empty current word, and sets __git_cmd_idx to 1 even after global
+// options, so the arguments are the words after "local" before the cursor,
+// then cur. zsh's own _git completes through _git-local instead (above).
 const zshGitForm = `
 _git_local()
 {
     emulate -L zsh
     local -a args lines names
-    local directive suffix=" "
-    args=("${(@)words[__git_cmd_idx+2,cword+1]}")
+    local directive suffix=" " i=${words[(i)local]}
+    args=("${(@)words[i+1,cword]}" "$cur")
     lines=("${(@f)$(git-local __completeNoDesc "${args[@]}" 2>/dev/null)}")
     [[ ${lines[-1]} == :* ]] || return
     directive=${lines[-1]#:}

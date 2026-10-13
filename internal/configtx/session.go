@@ -77,6 +77,20 @@ const JournalLimit = 1 << 20
 // errJournalLimit is returned by encode for a journal over JournalLimit.
 var errJournalLimit = errors.New("configuration transaction exceeds metadata size limit (1 MiB)")
 
+// journalHeadroom is kept free when a journal is first written: its later
+// writes (direction, outcome) add a few dozen bytes, and must still fit, or
+// a transaction that already changed files couldn't record how it ended.
+const journalHeadroom = 4 << 10
+
+// encodeNew is encode for a journal's first write, keeping journalHeadroom.
+func encodeNew(v any) ([]byte, error) {
+	b, err := encode(v)
+	if err == nil && len(b) > JournalLimit-journalHeadroom {
+		return nil, errJournalLimit
+	}
+	return b, err
+}
+
 func encode(v any) ([]byte, error) {
 	b, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {

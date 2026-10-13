@@ -70,3 +70,44 @@ func TestPushSkipsTempLeftoversAndRefusesUnknownState(t *testing.T) {
 		t.Fatalf("restored history: %q %v", data, err)
 	}
 }
+
+// A seed's file list is state only while its completed journal exists: push
+// leaves out a list an interrupted seed or abandoned migration orphaned, and
+// restore refuses a backup that carries one.
+func TestPushSkipsOrphanSeedFileListsAndRestoreRefusesThem(t *testing.T) {
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	source := newBoundSource(t, remote, "saved\n")
+	ctx := context.Background()
+	source.git(t, ctx, "init", "--bare", "-q", remote)
+	keyPath := filepath.Join(t.TempDir(), "backup.key")
+	if err := CreateKeyFile(keyPath, source.repo.Root); err != nil {
+		t.Fatal(err)
+	}
+	const orphan = "0b9e8a1c-7d3f-4c2a-9e5b-1f2d3c4b5a69.json"
+	lists := filepath.Join(source.w.Common, "gitlocal", "transactions", "seed-files")
+	if err := os.MkdirAll(lists, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(lists, orphan), []byte("{\"files\": []}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	ref := source.push(t, keyPath)
+	stage, err := source.fetch(t, keyPath, ref, ref)
+	if err != nil {
+		t.Fatalf("fetch the backup: %v", err)
+	}
+	defer os.RemoveAll(stage)
+	staged := filepath.Join(stage, "state", "transactions", "seed-files", orphan)
+	if _, err := os.Stat(staged); !os.IsNotExist(err) {
+		t.Fatalf("push archived an orphan seed file list: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(staged), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(staged, []byte("{\"files\": []}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ValidateStaged(ctx, source.g, stage); err == nil || !strings.Contains(err.Error(), "no completed seed journal") {
+		t.Fatalf("restore of a backup with an orphan seed file list: %v", err)
+	}
+}

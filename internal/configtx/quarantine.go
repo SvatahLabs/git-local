@@ -165,6 +165,32 @@ func (q *Quarantine) QuarantineJournal(meta *storage.Dir, name, reason string) (
 	return entry, meta.Rename(name, path.Join(quarantinePath(q.TransactionID), entry.File))
 }
 
+// QuarantineSeedFiles moves the file list kept beside seed journal id into
+// the quarantine, beside that journal under journals/, when the list exists:
+// a quarantined seed journal can't be read without it, and left in place it
+// would be an orphan naming the history it described. Both live in
+// <common>/gitlocal, so the move is a rename.
+func (q *Quarantine) QuarantineSeedFiles(meta *storage.Dir, id, reason string) (QuarantineEntry, bool, error) {
+	source := seedFilesPath(id)
+	entry := QuarantineEntry{File: path.Join("journals", "seed-"+id+".files.json"), Source: source, Kind: "seed-files", Reason: reason}
+	if !storage.ValidUUID(id) {
+		return entry, false, fmt.Errorf("refusing to quarantine %q", source)
+	}
+	if _, err := meta.Lstat(source); errors.Is(err, os.ErrNotExist) {
+		return entry, false, nil
+	} else if err != nil {
+		return entry, false, err
+	}
+	if err := meta.MkdirAll(path.Join(quarantinePath(q.TransactionID), "journals")); err != nil {
+		return entry, false, err
+	}
+	q.add(entry)
+	if err := q.Save(meta); err != nil {
+		return entry, false, err
+	}
+	return entry, true, meta.Rename(source, path.Join(quarantinePath(q.TransactionID), entry.File))
+}
+
 // HoldsJournal reports whether this quarantine already holds the completed
 // journal name (transactions/completed/...): an interrupted abandon recorded
 // and moved it, so a rerun must not expect it in its old place.

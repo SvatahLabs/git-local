@@ -77,3 +77,41 @@ func TestCheckIgnoreKeepsRepeatedRulesOnce(t *testing.T) {
 		t.Fatalf("check-ignore of 64 paths matching one 1 MiB rule allocated %d MiB", allocated>>20)
 	}
 }
+
+// An output bound that stops Git is reported as the safety limit, not as the
+// exit status Git got when its output was cut (reset's filter attributes, and
+// check-ignore records). Not parallel: it lowers MaxOutput.
+func TestStoppedOutputReportsTheSafetyLimit(t *testing.T) {
+	repo := testutil.New(t)
+	r := newRunner(t, repo)
+	ctx := context.Background()
+	admin := filepath.Join(repo.Root, ".git")
+	// Each path's filter value is longer than reset allows per value (and
+	// within the 2,048 bytes Git reads of an attributes line).
+	if err := os.WriteFile(filepath.Join(repo.Root, ".gitattributes"), []byte("* filter="+strings.Repeat("x", 1500)+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var paths []string
+	for i := 0; i < 50; i++ {
+		name := fmt.Sprintf("file-%02d.txt", i)
+		if err := os.WriteFile(filepath.Join(repo.Root, name), []byte("x\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		paths = append(paths, name)
+	}
+	repo.Git("add", ".")
+	repo.Git("commit", "-qm", "long filter values")
+	commit := strings.TrimSpace(string(repo.Git("rev-parse", "HEAD")))
+	if _, err := r.ResetFilters(ctx, repo.Root, admin, commit, paths); err == nil || !strings.Contains(err.Error(), "safety limit") {
+		t.Fatalf("reset attribute response over its bound: %v", err)
+	}
+	saved := MaxOutput
+	MaxOutput = 8 << 10
+	t.Cleanup(func() { MaxOutput = saved })
+	if err := os.WriteFile(filepath.Join(repo.Root, ".gitignore"), []byte("["+strings.Repeat("a", 64<<10)+"]*\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.CheckIgnoreMatches(ctx, repo.Root, admin, []string{"a-1", "a-2"}); err == nil || !strings.Contains(err.Error(), "safety limit") {
+		t.Fatalf("check-ignore record over the limit: %v", err)
+	}
+}

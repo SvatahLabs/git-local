@@ -3,6 +3,7 @@ package backup
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -205,7 +206,16 @@ func adoptStaged(ctx context.Context, r *gitexec.Runner, cwd, stage string, faul
 	}
 	destination.Close()
 	j := restoreJournal{SchemaVersion: 1, RepositoryID: info.RepositoryID, WorkspaceID: info.WorkspaceID, Prepared: prepared, Identity: identity, OldExclude: old, NewExclude: exclude.Render(user, patterns), ExcludeExists: exists, ExcludeMode: mode, ArchivedOverlays: info.ArchivedOverlays}
-	if err := common.WriteJSON(restoreJournalName, j); err != nil {
+	data, err := json.MarshalIndent(j, "", "  ")
+	if err != nil {
+		return empty, err
+	}
+	// It holds two info/exclude images of up to 1 MiB each, base64-encoded;
+	// recovery reads it back with the same limit.
+	if len(data)+1 > restoreJournalLimit {
+		return empty, errors.New("backup restore journal exceeds its size limit")
+	}
+	if err := common.AtomicWrite(restoreJournalName, append(data, '\n'), 0600); err != nil {
 		return empty, err
 	}
 	journaled = true
@@ -312,7 +322,7 @@ func RecoverRestore(ctx context.Context, r *gitexec.Runner, cwd string) (StagedI
 	}
 	defer lock.Close()
 	var j restoreJournal
-	if err := common.ReadJSON(restoreJournalName, &j); err != nil {
+	if err := readRestoreJournal(common, &j); err != nil {
 		return empty, err
 	}
 	if err := validateRestoreJournal(j); err != nil {
@@ -370,6 +380,28 @@ func RecoverRestore(ctx context.Context, r *gitexec.Runner, cwd string) (StagedI
 		return empty, err
 	}
 	return StagedInfo{RepositoryID: j.RepositoryID, WorkspaceID: j.WorkspaceID, ArchivedOverlays: j.ArchivedOverlays}, nil
+}
+
+// restoreJournalLimit bounds the backup restore journal when written and
+// when read.
+const restoreJournalLimit = 8 << 20
+
+// readRestoreJournal reads the backup restore journal strictly, like
+// storage.Dir.ReadJSON but with restoreJournalLimit instead of 1 MiB.
+func readRestoreJournal(common *storage.Dir, j *restoreJournal) error {
+	data, err := common.ReadFile(restoreJournalName, restoreJournalLimit)
+	if err != nil {
+		return err
+	}
+	d := json.NewDecoder(bytes.NewReader(data))
+	d.DisallowUnknownFields()
+	if err := d.Decode(j); err != nil {
+		return fmt.Errorf("invalid metadata %s: %w", restoreJournalName, err)
+	}
+	if err := d.Decode(new(any)); err != io.EOF {
+		return fmt.Errorf("invalid trailing metadata in %s", restoreJournalName)
+	}
+	return nil
 }
 
 func validateRestoreJournal(j restoreJournal) error {

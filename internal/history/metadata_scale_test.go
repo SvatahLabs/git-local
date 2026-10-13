@@ -126,3 +126,34 @@ func TestOversizedChangedPathListIsRefusedWhenWritten(t *testing.T) {
 		t.Fatalf("changed-path list over the read limit: %v", err)
 	}
 }
+
+// A completed seed or restore record names one snapshot for each of its many
+// files; checking them reads and lists that snapshot once, not once per file.
+func TestSnapshotFilesListsEachSnapshotOnce(t *testing.T) {
+	ctx := context.Background()
+	repo, g, w := fixture(t)
+	const files = 200
+	for i := 0; i < files; i++ {
+		write(t, repo.Root, filepath.Join("notes", fmt.Sprintf("note-%03d.txt", i)), []byte(fmt.Sprintf("note %d\n", i)))
+	}
+	change(t, g, repo.Root, true, "notes")
+	saved, err := Commit(ctx, g, repo.Root, "notes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader := NewSnapshotFiles(g, *w)
+	before := g.SubprocessCount()
+	for i := 0; i < files; i++ {
+		path := fmt.Sprintf("notes/note-%03d.txt", i)
+		file, digest, err := reader.File(ctx, w.Store, w.WorkspaceID, saved.ID, path)
+		if err != nil || file.ID == "" || digest != "" {
+			t.Fatalf("%s: %+v %q %v", path, file, digest, err)
+		}
+	}
+	if processes := g.SubprocessCount() - before; processes > 20 {
+		t.Fatalf("reading %d files of one snapshot ran %d Git processes", files, processes)
+	}
+	if _, _, err := reader.File(ctx, w.Store, w.WorkspaceID, saved.ID, "notes/missing.txt"); err == nil {
+		t.Fatal("a file the snapshot lacks was found")
+	}
+}

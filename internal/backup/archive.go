@@ -91,6 +91,18 @@ func packDirectory(ctx context.Context, root *storage.Dir, dst *tar.Writer, rel,
 		if filepath.ToSlash(child) == "locks/repository.lock" || child == "quarantine" || storage.IsTempName(component) {
 			continue
 		}
+		// A file list kept beside a seed journal is state only while its
+		// completed journal exists; one left by an interrupted seed or an
+		// abandoned migration isn't needed to restore, and restore refuses it.
+		if filepath.ToSlash(rel) == "transactions/seed-files" {
+			if id, ok := strings.CutSuffix(component, ".json"); ok && storage.ValidUUID(id) {
+				if _, err := root.Lstat(filepath.Join("transactions", "completed", "seed-"+id+".json")); os.IsNotExist(err) {
+					continue
+				} else if err != nil {
+					return err
+				}
+			}
+		}
 		// Restore accepts only known state, so anything else would make the
 		// backup unrestorable.
 		if rel == "" && !stateEntries[component] {

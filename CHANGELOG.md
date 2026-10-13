@@ -41,6 +41,9 @@ The first release meant for general use. It replaces the 0.1.4 test builds.
   their ref. Make a new backup with `git local backup push` after upgrading.
 - Snapshots whose metadata exceeds 1 MiB are written in a form 0.1.4 can't
   read.
+- Seeding a worktree with a large selection keeps the seed's file list in
+  `.git/gitlocal/transactions/seed-files/`, which 0.1.4 takes for an unknown
+  pending transaction (it then refuses every command) and refuses in backups.
 - If a sensitive-file policy from 0.1.4 recorded a directory as a file rule,
   or a sensitive path spelled differently from the file on disk (letter case
   or Unicode normalization), snapshots that would save the files it should

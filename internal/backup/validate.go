@@ -91,6 +91,19 @@ func ValidateStaged(ctx context.Context, r *gitexec.Runner, stage string) (Stage
 			return result, fmt.Errorf("backup contains pending transaction %q", entry.Name())
 		}
 	}
+	lists, err := state.ReadDir("transactions/seed-files")
+	if err != nil && !os.IsNotExist(err) {
+		return result, err
+	}
+	for _, entry := range lists {
+		id, ok := strings.CutSuffix(entry.Name(), ".json")
+		if !ok || !storage.ValidUUID(id) || !entry.Type().IsRegular() {
+			return result, fmt.Errorf("invalid backed-up seed file list %q", entry.Name())
+		}
+		if _, err := state.Lstat(filepath.Join("transactions", "completed", "seed-"+id+".json")); err != nil {
+			return result, fmt.Errorf("backed-up seed file list %q has no completed seed journal: %w", entry.Name(), err)
+		}
+	}
 	entries, err := state.ReadDir("workspaces")
 	if err != nil {
 		return result, err

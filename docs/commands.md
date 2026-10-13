@@ -290,4 +290,7 @@ The bash script completes both `git-local` and `git local`: it defines
 `_git_local` for Git's bash completion. The zsh script's `_git-local` serves the
 `_git` completion bundled with zsh, and its `_git_local` serves Git's own
 `git-completion.zsh` (installed as `_git` by some Git distributions), so both
-forms complete with either. Load the scripts after Git's completion.
+forms complete with either. Load the scripts after Git's completion. With Git's
+`git-completion.zsh`, source the zsh script from your `.zshrc` after `compinit`
+rather than installing it in `fpath`: zsh loads an `fpath` file only at the
+first `git-local <TAB>`, and until then `git local <TAB>` finds no `_git_local`.

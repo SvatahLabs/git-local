@@ -44,7 +44,7 @@ func TestVersionAndMinimumGitAreSingleSourced(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(readme), "Git "+gitexec.MinimumGit+" or later") {
+	if !regexp.MustCompile(`Git\s+` + regexp.QuoteMeta(gitexec.MinimumGit) + `\s+or\s+later`).Match(readme) {
 		t.Fatalf("README doesn't name the minimum Git version %s", gitexec.MinimumGit)
 	}
 	// The user docs repeat both for readers; every copy must be current.
@@ -52,7 +52,8 @@ func TestVersionAndMinimumGitAreSingleSourced(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	minimum := regexp.MustCompile(`Git (\d+\.\d+\.\d+) or later`)
+	// Markdown wraps lines, so a phrase may span a line break.
+	minimum := regexp.MustCompile(`Git\s+(\d+\.\d+\.\d+)\s+or\s+later`)
 	artifacts := regexp.MustCompile(`git-local_v(\d+\.\d+\.\d+)_|GitLocal-(\d+\.\d+\.\d+)-`)
 	for _, name := range append(docs, "../README.md") {
 		data, err := os.ReadFile(name)

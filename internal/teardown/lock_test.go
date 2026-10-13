@@ -55,3 +55,36 @@ func TestDeinitRefusesWhatWasInstalledMeanwhile(t *testing.T) {
 		t.Fatalf("hook left after the rerun:\n%s", data)
 	}
 }
+
+// --remove-history checks again, under the lock, that the deletion loses no
+// data kept nowhere else: a restore that finished in another worktree after
+// deinit's first check leaves a recovery ref. Not parallel: it replaces
+// beforeSetAside.
+func TestRemoveHistoryChecksLossesAgainUnderTheLock(t *testing.T) {
+	ctx := context.Background()
+	repo := testutil.New(t)
+	repo.Commit()
+	r, err := gitexec.New(repo.RunnerEnv())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	w, err := workspace.Init(ctx, r, repo.Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := filepath.Join(repo.Root, ".git", "gitlocal", "history.git")
+	ref := "refs/gitlocal/recovery/" + w.WorkspaceID + "/00000000-0000-4000-8000-000000000001"
+	beforeSetAside = func() {
+		tree := strings.TrimSpace(string(repo.Git("--git-dir="+store, "mktree")))
+		commit := strings.TrimSpace(string(repo.Git("--git-dir="+store, "commit-tree", tree, "-m", "recovery")))
+		repo.Git("--git-dir="+store, "update-ref", ref, commit)
+	}
+	t.Cleanup(func() { beforeSetAside = func() {} })
+	if _, err := Deinit(ctx, r, repo.Root, true); err == nil || !strings.Contains(err.Error(), ref) {
+		t.Fatalf("deinit --remove-history deleted a recovery ref made meanwhile: %v", err)
+	}
+	if _, err := os.Stat(store); err != nil {
+		t.Fatalf("refused deinit deleted the private state: %v", err)
+	}
+}

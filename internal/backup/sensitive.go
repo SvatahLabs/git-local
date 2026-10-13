@@ -84,6 +84,7 @@ func verifySensitiveBackup(ctx context.Context, r *gitexec.Runner, w workspace.C
 		known[entry.Name()] = true
 	}
 	recovery := map[string]string{}
+	snapshots := history.NewSnapshotFiles(r, w)
 	completed, err := state.ReadDir("transactions/completed")
 	if err != nil && !os.IsNotExist(err) {
 		return err
@@ -99,7 +100,7 @@ func verifySensitiveBackup(ctx context.Context, r *gitexec.Runner, w workspace.C
 				if !known[source] {
 					return "", "", "", errors.New("seed source workspace is absent from backup")
 				}
-				file, digest, err := history.SnapshotFileFromStore(ctx, r, w, store, source, snapshot, path)
+				file, digest, err := snapshots.File(ctx, store, source, snapshot, path)
 				return file.ID, file.Mode, digest, err
 			}); err != nil {
 				return fmt.Errorf("backup seed journal %q: %w", name, err)

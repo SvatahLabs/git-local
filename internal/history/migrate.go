@@ -153,19 +153,49 @@ func rewriteStore(ctx context.Context, r *gitexec.Runner, w workspace.Context, d
 // SnapshotFileFromStore reads one file from a known reachable snapshot ID.
 // Migration callers must establish reachability before using it.
 func SnapshotFileFromStore(ctx context.Context, r *gitexec.Runner, w workspace.Context, store, source, snapshotID, path string) (SnapshotFile, string, error) {
-	tree, metadata, err := readPrevious(ctx, r, store, snapshotID, w.RepositoryID, source)
-	if err != nil {
-		return SnapshotFile{}, "", err
+	return NewSnapshotFiles(r, w).File(ctx, store, source, snapshotID, path)
+}
+
+// SnapshotFiles reads files of known reachable snapshots like
+// SnapshotFileFromStore, but resolves and lists each snapshot once: a
+// completed seed or restore record names one snapshot for each of its many
+// files. It is meant for one check; it doesn't notice a store that changes.
+type SnapshotFiles struct {
+	r        *gitexec.Runner
+	w        workspace.Context
+	listings map[string]snapshotListing
+}
+
+type snapshotListing struct {
+	files   map[string]fileValue
+	digests map[string]string
+}
+
+func NewSnapshotFiles(r *gitexec.Runner, w workspace.Context) *SnapshotFiles {
+	return &SnapshotFiles{r: r, w: w, listings: map[string]snapshotListing{}}
+}
+
+// File returns path's entry and encrypted digest in snapshotID of source.
+func (s *SnapshotFiles) File(ctx context.Context, store, source, snapshotID, path string) (SnapshotFile, string, error) {
+	key := store + "\x00" + source + "\x00" + snapshotID
+	listing, ok := s.listings[key]
+	if !ok {
+		tree, metadata, err := readPrevious(ctx, s.r, store, snapshotID, s.w.RepositoryID, source)
+		if err != nil {
+			return SnapshotFile{}, "", err
+		}
+		files, err := readFiles(ctx, s.r, store, tree)
+		if err != nil {
+			return SnapshotFile{}, "", err
+		}
+		listing = snapshotListing{files: files, digests: metadata.EncryptedDigests}
+		s.listings[key] = listing
 	}
-	files, err := readFiles(ctx, r, store, tree)
-	if err != nil {
-		return SnapshotFile{}, "", err
-	}
-	file, ok := files[path]
+	file, ok := listing.files[path]
 	if !ok {
 		return SnapshotFile{}, "", fmt.Errorf("snapshot has no file %q", path)
 	}
-	return SnapshotFile(file), metadata.EncryptedDigests[path], nil
+	return SnapshotFile(file), listing.digests[path], nil
 }
 
 // VerifyEncryptedStore authenticates all migrated user snapshots before the

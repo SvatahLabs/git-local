@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode"
 )
 
 // TransportError is a failed backup push or fetch whose cause Git named.
@@ -37,19 +38,41 @@ var transportClasses = []struct {
 		[]string{"authentication failed", "could not read username", "could not read password", "terminal prompts disabled", "permission denied (publickey", "host key verification failed", "invalid username or password", "returned error: 401"}},
 	{"the remote or its proxy couldn't be reached", "check the URL, your network, and http.proxy (or http.<url>.proxy) in your global Git config",
 		[]string{"proxy", "could not resolve host", "failed to connect", "couldn't connect", "connection refused", "timed out", "network is unreachable", "no route to host", "connection reset", "ssh: connect to host", "empty reply from server", "recv failure", "connection closed"}},
+	{"the backup ref isn't on the remote", "check the ref git local backup push printed, and that the remote is the one it pushed to",
+		[]string{"couldn't find remote ref"}},
 	{"the remote refused the request", "check that the remote repository exists, that you may write to it, and that it accepts refs/gitlocal/backups/ refs",
-		[]string{"[remote rejected]", "[rejected]", "hook declined", "returned error: 403", "returned error: 404", "permission denied", "access denied", "not found", "does not appear to be a git repository", "couldn't find remote ref", "denied"}},
+		[]string{"[remote rejected]", "[rejected]", "hook declined", "returned error: 403", "returned error: 404", "permission denied", "access denied", "not found", "does not appear to be a git repository", "denied"}},
 }
 
-// credentials matches the user information of a URL.
-var credentials = regexp.MustCompile(`(?i)([a-z][a-z0-9+.-]*://)[^\s/@'"]+@`)
+// credentials matches the user information of a URL, up to the last @ before
+// whitespace: Git passes a password it couldn't parse through unencoded, so
+// it may hold any character but whitespace (a slash, a quote or an @ too). A
+// URL with an @ in its path is redacted more than needed, never less.
+var credentials = regexp.MustCompile(`(?i)([a-z][a-z0-9+.-]*://)\S*@`)
+
+// bareCredentials matches user:password@ without a scheme, as ssh prints its
+// destination ("backup:pw@host: Permission denied") and as a proxy may be set.
+var bareCredentials = regexp.MustCompile(`[^\s'"@:/]+:[^\s@]*@`)
+
+// locations matches the URLs and scp-like destinations in a line, which
+// classification ignores: a host named like a cause ("gitproxy.example.com")
+// mustn't decide it.
+var locations = regexp.MustCompile(`(?i)[a-z][a-z0-9+.-]*://\S*|\S+@\S+`)
 
 // redact replaces the user information of every URL in line and drops
-// control characters.
+// control and format characters, C1 controls (which some terminals read as
+// escape sequences) and bidirectional overrides included: a line can come from
+// the remote ("remote: ...").
 func redact(line string) string {
 	line = credentials.ReplaceAllString(line, "${1}***@")
+	line = bareCredentials.ReplaceAllStringFunc(line, func(m string) string {
+		if strings.Contains(m, "://") {
+			return m // A URL, already redacted above.
+		}
+		return "***@"
+	})
 	return strings.Map(func(r rune) rune {
-		if r < 0x20 || r == 0x7f {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
 			return -1
 		}
 		return r
@@ -67,7 +90,7 @@ func transportError(err error, out []byte) error {
 	lines := strings.Split(ge.stderr+"\n"+string(out), "\n")
 	for _, class := range transportClasses {
 		for _, line := range lines {
-			lower := strings.ToLower(line)
+			lower := strings.ToLower(locations.ReplaceAllString(line, ""))
 			for _, pattern := range class.patterns {
 				if strings.Contains(lower, pattern) {
 					detail := strings.TrimSpace(redact(line))

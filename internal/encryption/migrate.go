@@ -304,6 +304,7 @@ func prepareSeedUpdates(ctx context.Context, r *gitexec.Runner, w workspace.Cont
 		return nil, err
 	}
 	updates := make([]recordUpdate, 0, len(names))
+	snapshots := history.NewSnapshotFiles(r, w)
 	for _, name := range names {
 		old, err := meta.ReadFile("transactions/completed/"+name, configtx.JournalLimit)
 		if err != nil {
@@ -318,14 +319,14 @@ func prepareSeedUpdates(ctx context.Context, r *gitexec.Runner, w workspace.Cont
 				return newSnapshot, nil
 			},
 			func(source, oldSnapshot, newSnapshot string, file configtx.SeedFile) (string, string, error) {
-				before, _, err := history.SnapshotFileFromStore(ctx, r, w, w.Store, source, oldSnapshot, file.Path)
+				before, _, err := snapshots.File(ctx, w.Store, source, oldSnapshot, file.Path)
 				if err != nil {
 					return "", "", err
 				}
 				if before.ID != file.Blob || before.Mode != file.Mode {
 					return "", "", errors.New("completed seed file differs from source history")
 				}
-				after, digest, err := history.SnapshotFileFromStore(ctx, r, w, stage, source, newSnapshot, file.Path)
+				after, digest, err := snapshots.File(ctx, stage, source, newSnapshot, file.Path)
 				if err != nil {
 					return "", "", err
 				}
@@ -1025,9 +1026,21 @@ func AbandonMigration(ctx context.Context, r *gitexec.Runner, cwd, id string) (c
 		// migration prepared its update. Neither version fits the encrypted
 		// history, and resuming needs the key, so keep it aside instead.
 		source := "transactions/completed/" + name
+		// A seed journal's file list kept beside it goes with it.
+		seedFiles := func() error {
+			id, ok := strings.CutSuffix(strings.TrimPrefix(name, "seed-"), ".json")
+			if !strings.HasPrefix(name, "seed-") || !ok {
+				return nil
+			}
+			entry, moved, err := q.QuarantineSeedFiles(meta, id, "file list of a quarantined seed journal")
+			if moved {
+				result.Quarantined = append(result.Quarantined, entry)
+			}
+			return err
+		}
 		if _, err := meta.Lstat(source); errors.Is(err, os.ErrNotExist) {
 			if q.HoldsJournal(meta, source) {
-				return nil // Quarantined by an interrupted earlier abandon.
+				return seedFiles() // Quarantined by an interrupted earlier abandon.
 			}
 			return fmt.Errorf("%w: completed journal %q is missing", storage.ErrConflict, name)
 		}
@@ -1036,6 +1049,9 @@ func AbandonMigration(ctx context.Context, r *gitexec.Runner, cwd, id string) (c
 			return err
 		}
 		result.Quarantined = append(result.Quarantined, entry)
+		if err := seedFiles(); err != nil {
+			return err
+		}
 		result.Warnings = append(result.Warnings, "completed journal "+name+" changed outside git-local during the migration and was quarantined; git local doctor reports what it described")
 		return nil
 	}); err != nil {

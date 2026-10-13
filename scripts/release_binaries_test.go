@@ -74,8 +74,11 @@ func TestReleaseInterruptHelper(t *testing.T) {
 	if out == "" {
 		t.Skip("subprocess helper")
 	}
-	removeStagingOnInterrupt()
+	stopOnInterrupt()
 	err := run("..", []string{"-host-only", "-out", out, "-go", os.Getenv("GITLOCAL_TEST_RELEASE_GO")})
+	if interrupted.Err() != nil {
+		os.Exit(130) // As main does, after run removed the staging directory.
+	}
 	t.Fatalf("release builder wasn't interrupted: %v", err)
 }
 

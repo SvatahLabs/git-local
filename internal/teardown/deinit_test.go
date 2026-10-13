@@ -387,7 +387,7 @@ func TestDeinitRemovesFilterLeftByInterruptedOverlayAdd(t *testing.T) {
 // GL-112: checks that can refuse run before deinit changes anything, so a
 // refusal leaves the hooks and private state in place.
 func TestDeinitRefusesBeforeChangingAnything(t *testing.T) {
-	for _, kind := range []string{"edited-exclude-block", "uninitialized-worktree"} {
+	for _, kind := range []string{"edited-exclude-block", "uninitialized-worktree", "uninitialized-worktree-remove-history"} {
 		t.Run(kind, func(t *testing.T) {
 			f := newFixture(t)
 			root := f.repo.Root
@@ -411,14 +411,18 @@ func TestDeinitRefusesBeforeChangingAnything(t *testing.T) {
 					t.Fatalf("no managed line to edit:\n%s", data)
 				}
 				write(t, path, edited)
-			case "uninitialized-worktree":
+			case "uninitialized-worktree", "uninitialized-worktree-remove-history":
 				dir = filepath.Join(filepath.Dir(root), filepath.Base(root)+"-plain")
 				f.git(f.plain, root, "worktree", "add", "-q", dir, "-b", "plain")
 				t.Cleanup(func() { os.RemoveAll(dir) })
-				want = root
+				want = "run git local deinit from " + root
 			}
-			out, err := f.run(f.withTool, dir, f.bin, "deinit")
-			if err == nil || !strings.Contains(out, want) {
+			args := []string{"deinit"}
+			if strings.HasSuffix(kind, "remove-history") {
+				args = append(args, "--remove-history")
+			}
+			out, err := f.run(f.withTool, dir, f.bin, args...)
+			if err == nil || !strings.Contains(out, want) || dir != root && strings.Contains(out, dir) {
 				t.Fatalf("deinit: %v\n%s", err, out)
 			}
 			if hooks, _ := os.ReadFile(filepath.Join(root, ".git", "hooks", "pre-commit")); !bytes.Contains(hooks, []byte("git-local")) {

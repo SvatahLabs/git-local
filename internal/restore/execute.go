@@ -600,7 +600,7 @@ func (g *guard) global(ctx context.Context) (globalState, error) {
 	if state.branch, err = mainBranch(ctx, g.r, g.w); err != nil {
 		return state, err
 	}
-	state.index, err = os.Lstat(g.index)
+	state.index, err = indexStat(g.index)
 	if os.IsNotExist(err) {
 		state.index, err = nil, nil
 	}

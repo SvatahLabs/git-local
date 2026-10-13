@@ -65,7 +65,9 @@ completion: in bash, `eval "$(git-local completion bash)"` (with Git's
 in zsh with compinit, `source <(git-local completion zsh)`. In zsh,
 `git local <TAB>` completes both with the `_git` completion bundled with zsh
 and with Git's own `git-completion.zsh` (installed as `_git` by some Git
-distributions).
+distributions); with the latter, source the script as shown rather than
+installing it in `fpath`, where zsh loads it only at the first
+`git-local <TAB>`.
 
 ## Interrupted transactions
 
@@ -204,9 +206,10 @@ snapshots, and completed recovery records before publishing private state.
 If the original file-key path is still valid, `--file-key` may be omitted.
 
 `backup push` leaves out temporary files that an interrupted write left in the
-private state, and refuses anything restore wouldn't accept (for example the
-store of an encryption migration killed before it wrote its journal), naming
-it, so every pushed backup can be restored.
+private state and seed file lists that no completed seed names (an interrupted
+seed or an abandoned migration can leave one), and refuses anything restore
+wouldn't accept (for example the store of an encryption migration killed before
+it wrote its journal), naming it, so every pushed backup can be restored.
 If publication is interrupted, run `git local backup recover` in that clone.
 The encrypted archive contains committed private snapshots, not unsaved
 working files. Restore refuses a checkout with existing Git Local state or a

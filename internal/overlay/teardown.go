@@ -101,6 +101,13 @@ func FilterLeftovers(ctx context.Context, r *gitexec.Runner, root, commonPath st
 	if required {
 		found = append(found, requiredKey)
 	}
+	// Without the include or the required key no filter driver is defined,
+	// and Git ignores an attribute naming an undefined filter; info/attributes
+	// is read only when it may matter, so a repository that never used
+	// overlays isn't held to what that read refuses (a symlink, over 1 MiB).
+	if len(found) == 0 {
+		return nil, nil
+	}
 	common, err := storage.OpenDir(commonPath)
 	if err != nil {
 		return nil, err

@@ -57,13 +57,17 @@ func Deinit(ctx context.Context, r *gitexec.Runner, cwd string, removeHistory bo
 	}
 	defer common.Close()
 	if _, err := common.Lstat("gitlocal"); err == nil {
-		if err := checkRemovable(ctx, r, w, removeHistory); err != nil {
-			return result, err
-		}
 		if err := checkInitialized(w); err != nil {
 			return result, err
 		}
+		if err := checkRemovable(ctx, r, w, removeHistory); err != nil {
+			return result, err
+		}
 		if err := configtx.CheckExcludeBlock(ctx, r, cwd); err != nil {
+			return result, err
+		}
+		var policy secureblob.Policy
+		if err := common.ReadJSON(secureblob.PolicyFile, &policy); err != nil && !os.IsNotExist(err) {
 			return result, err
 		}
 		if result.Overlays, err = removeOverlays(ctx, r, w); err != nil {
@@ -88,10 +92,6 @@ func Deinit(ctx context.Context, r *gitexec.Runner, cwd string, removeHistory bo
 			if err != nil {
 				return result, err
 			}
-		}
-		var policy secureblob.Policy
-		if err := common.ReadJSON(secureblob.PolicyFile, &policy); err != nil && !os.IsNotExist(err) {
-			return result, err
 		}
 		if result.Exclude, err = configtx.RemoveExcludeBlock(ctx, r, cwd); err != nil {
 			return result, err
@@ -141,7 +141,7 @@ func setAside(ctx context.Context, r *gitexec.Runner, w *workspace.Context, comm
 		return "", false, err
 	}
 	defer lock.Close()
-	if err := finalCheck(ctx, r, w, common); err != nil {
+	if err := finalCheck(ctx, r, w, common, removeHistory); err != nil {
 		return "", false, err
 	}
 	id, err := storage.UUID()
@@ -168,14 +168,26 @@ func setAside(ctx context.Context, r *gitexec.Runner, w *workspace.Context, comm
 
 // finalCheck looks, without taking a lock, for anything git-local installed
 // after deinit removed it: a pending transaction, an overlay, the overlay
-// filter, a hook record or the managed info/exclude block.
-func finalCheck(ctx context.Context, r *gitexec.Runner, w *workspace.Context, common *storage.Dir) error {
+// filter, a hook record or the managed info/exclude block. With removeHistory
+// it also checks again, under the caller's lock, that the deletion loses no
+// data kept nowhere else: a restore elsewhere may have finished since
+// checkRemovable, leaving its recovery ref.
+func finalCheck(ctx context.Context, r *gitexec.Runner, w *workspace.Context, common *storage.Dir, removeHistory bool) error {
 	var found []string
 	meta, err := storage.OpenDir(filepath.Join(w.Common, "gitlocal"))
 	if err != nil {
 		return err
 	}
 	defer meta.Close()
+	if removeHistory {
+		lost, err := historyLosses(ctx, r, w, meta)
+		if err != nil {
+			return err
+		}
+		if len(lost) > 0 {
+			return removeHistoryRefusal(lost)
+		}
+	}
 	pending, err := configtx.PendingLocked(meta)
 	if err != nil {
 		return err
@@ -262,38 +274,66 @@ func checkRemovable(ctx context.Context, r *gitexec.Runner, w *workspace.Context
 	if !removeHistory {
 		return nil
 	}
-	var kept []string
-	quarantine, err := os.ReadDir(filepath.Join(w.Common, "gitlocal", "quarantine"))
-	if err != nil && !os.IsNotExist(err) {
+	meta, err := storage.OpenDir(filepath.Join(w.Common, "gitlocal"))
+	if err != nil {
 		return err
 	}
+	defer meta.Close()
+	lost, err := historyLosses(ctx, r, w, meta)
+	if err != nil {
+		return err
+	}
+	if len(lost) > 0 {
+		return removeHistoryRefusal(lost)
+	}
+	return nil
+}
+
+// historyLosses lists what deleting the private state would lose that exists
+// nowhere else: quarantines, restore recovery refs (the previous file versions
+// of earlier restores) and retired workspaces' history (the only copy of their
+// private files). It reads the records directly, so it can run under the
+// repository lock.
+func historyLosses(ctx context.Context, r *gitexec.Runner, w *workspace.Context, meta *storage.Dir) ([]string, error) {
+	var lost []string
+	quarantine, err := meta.ReadDir("quarantine")
+	if err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
 	for _, entry := range quarantine {
-		kept = append(kept, filepath.Join(w.Common, "gitlocal", "quarantine", entry.Name()))
+		lost = append(lost, filepath.Join(w.Common, "gitlocal", "quarantine", entry.Name()))
 	}
 	refs, err := r.HistoryListing(ctx, w.Store, nil, "show-ref")
 	var ge *gitexec.Error
 	if err != nil && !(errors.As(err, &ge) && ge.Code == 1) {
-		return err
+		return nil, err
 	}
 	for _, line := range strings.Split(string(bytes.TrimSpace(refs)), "\n") {
 		if _, ref, ok := strings.Cut(line, " "); ok && strings.HasPrefix(ref, "refs/gitlocal/recovery/") {
-			kept = append(kept, ref)
+			lost = append(lost, ref)
 		}
 	}
-	// A retired worktree's history is the only copy of its private files.
-	workspaces, err := configtx.ListWorkspaces(ctx, r, w.Root)
-	if err != nil {
-		return err
+	workspaces, err := meta.ReadDir("workspaces")
+	if err != nil && !os.IsNotExist(err) {
+		return nil, err
 	}
-	for _, info := range workspaces {
-		if info.State == "retained" {
-			kept = append(kept, "the history of retired workspace "+info.ID)
+	for _, entry := range workspaces {
+		if !entry.IsDir() || !storage.ValidUUID(entry.Name()) {
+			continue
+		}
+		var record workspace.Record
+		if err := meta.ReadJSON(filepath.Join("workspaces", entry.Name(), "workspace.json"), &record); err != nil {
+			return nil, err
+		}
+		if record.State == "retained" {
+			lost = append(lost, "the history of retired workspace "+entry.Name())
 		}
 	}
-	if len(kept) > 0 {
-		return fmt.Errorf("%w: --remove-history would delete %s, which hold data kept nowhere else (previous file versions of earlier restores, quarantined data, or a retired worktree's files). Run git local deinit without --remove-history: it keeps the private state in the common Git directory as gitlocal-removed-<id>, which you can delete once you no longer need it", storage.ErrConflict, strings.Join(kept, ", "))
-	}
-	return nil
+	return lost, nil
+}
+
+func removeHistoryRefusal(lost []string) error {
+	return fmt.Errorf("%w: --remove-history would delete %s, which hold data kept nowhere else (previous file versions of earlier restores, quarantined data, or a retired worktree's files). Run git local deinit without --remove-history: it keeps the private state in the common Git directory as gitlocal-removed-<id>, which you can delete once you no longer need it", storage.ErrConflict, strings.Join(lost, ", "))
 }
 
 // removeOverlays deactivates every overlay. Each must be removed from its own

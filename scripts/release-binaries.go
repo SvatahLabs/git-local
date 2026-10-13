@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -19,7 +20,6 @@ import (
 	"runtime"
 	"slices"
 	"strings"
-	"sync"
 	"syscall"
 
 	"gitlocal/internal/gitexec"
@@ -49,10 +49,14 @@ type manifest struct {
 }
 
 func main() {
-	removeStagingOnInterrupt()
+	stopOnInterrupt()
 	root, err := os.Getwd()
 	if err == nil {
 		err = run(root, os.Args[1:])
+	}
+	if interrupted.Err() != nil {
+		fmt.Fprintln(os.Stderr, "release builder stopped; staging removed")
+		os.Exit(130)
 	}
 	if err != nil {
 		fail(err)
@@ -125,7 +129,7 @@ func run(root string, args []string) error {
 	for _, platform := range selected {
 		name := artifactName(version, platform)
 		path := filepath.Join(stage, name)
-		cmd := exec.Command(*goBinary, "build", "-trimpath", "-buildvcs=false", "-ldflags=-buildid= -X gitlocal/internal/cli.Version="+version+" -X gitlocal/internal/cli.Commit="+info.SourceRevision, "-o", path, "./cmd/git-local")
+		cmd := exec.CommandContext(interrupted, *goBinary, "build", "-trimpath", "-buildvcs=false", "-ldflags=-buildid= -X gitlocal/internal/cli.Version="+version+" -X gitlocal/internal/cli.Commit="+info.SourceRevision, "-o", path, "./cmd/git-local")
 		cmd.Dir = root
 		cmd.Env = buildEnv(platform)
 		if output, err := cmd.CombinedOutput(); err != nil {
@@ -157,6 +161,9 @@ func run(root string, args []string) error {
 	if err := os.WriteFile(filepath.Join(stage, "SHA256SUMS"), []byte(sums.String()), 0644); err != nil {
 		return err
 	}
+	if err := interrupted.Err(); err != nil {
+		return err
+	}
 	if err := os.Rename(stage, final); err != nil {
 		return err
 	}
@@ -166,39 +173,28 @@ func run(root string, args []string) error {
 
 func fail(err error) { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
 
-// staging holds the staging directories that exist, for
-// removeStagingOnInterrupt.
-var staging sync.Map
+// makeStaging creates a staging directory, which run removes when it
+// returns, also after an interrupt.
+func makeStaging(dir, pattern string) (string, error) { return os.MkdirTemp(dir, pattern) }
 
-// makeStaging creates a staging directory that removeStaging, or an
-// interrupt, removes.
-func makeStaging(dir, pattern string) (string, error) {
-	stage, err := os.MkdirTemp(dir, pattern)
-	if err == nil {
-		staging.Store(stage, true)
-	}
-	return stage, err
-}
+func removeStaging(stage string) { os.RemoveAll(stage) }
 
-func removeStaging(stage string) {
-	os.RemoveAll(stage)
-	staging.Delete(stage)
-}
+// interrupted is canceled when the builder is interrupted or terminated: Go's
+// default signal handling would exit without running deferred calls (the
+// staging cleanup) while child builds kept writing into staging. Builds and
+// smoke tests run under it, so they stop, run returns, and its deferred calls
+// remove the staging directory before main exits.
+var interrupted, interrupt = context.WithCancel(context.Background())
 
-// removeStagingOnInterrupt removes the staging directories when the builder
-// is interrupted or terminated: Go's default signal handling exits without
-// running deferred calls.
-func removeStagingOnInterrupt() {
+// stopOnInterrupt cancels interrupted at the first SIGINT or SIGTERM; a
+// second one ends the builder at once.
+func stopOnInterrupt() {
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 	go func() {
-		received := <-signals
-		staging.Range(func(stage, _ any) bool {
-			os.RemoveAll(stage.(string))
-			return true
-		})
-		fmt.Fprintf(os.Stderr, "release builder stopped (%v); staging removed\n", received)
-		os.Exit(130)
+		<-signals
+		signal.Stop(signals)
+		interrupt()
 	}()
 }
 
@@ -223,7 +219,7 @@ func buildEnv(platform target) []string {
 }
 
 func goEnv(goBinary, root, key string) (string, error) {
-	cmd := exec.Command(goBinary, "env", key)
+	cmd := exec.CommandContext(interrupted, goBinary, "env", key)
 	cmd.Dir = root
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -416,7 +412,7 @@ func smokeHost(stage string, info manifest) error {
 	defer os.RemoveAll(home)
 	env = append(env, "PATH="+strings.Join(paths, string(os.PathListSeparator)), "HOME="+home, "USERPROFILE="+home, "XDG_CONFIG_HOME="+home)
 	run := func(dir string, command ...string) ([]byte, error) {
-		cmd := exec.Command(command[0], command[1:]...)
+		cmd := exec.CommandContext(interrupted, command[0], command[1:]...)
 		cmd.Dir = dir
 		cmd.Env = env
 		output, err := cmd.CombinedOutput()
@@ -487,7 +483,7 @@ func smokeHost(stage string, info manifest) error {
 	if _, err := run(repo, git, "add", "-f", "notes.local"); err != nil {
 		return err
 	}
-	guarded := exec.Command(git, "commit", "-qm", "must not leak")
+	guarded := exec.CommandContext(interrupted, git, "commit", "-qm", "must not leak")
 	guarded.Dir, guarded.Env = repo, env
 	guardOutput, guardErr := guarded.CombinedOutput()
 	if guardErr == nil || !bytes.Contains(guardOutput, []byte("notes.local")) {

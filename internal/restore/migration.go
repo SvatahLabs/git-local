@@ -78,6 +78,8 @@ func RewriteCompletedRecovery(ctx context.Context, r *gitexec.Runner, w workspac
 	}
 	m := &j.Manifest
 	p := &m.Plan
+	// Every operation names a file of the same source snapshot.
+	snapshots := history.NewSnapshotFiles(r, w)
 	if j.SchemaVersion == 2 && p.EncryptedKeyFingerprint != policy.KeyFingerprint {
 		return RewrittenRecovery{}, errors.New("restore anchor is encrypted with a different key")
 	}
@@ -109,7 +111,7 @@ func RewriteCompletedRecovery(ctx context.Context, r *gitexec.Runner, w workspac
 			protected++
 		}
 		if wasEncrypted {
-			if err := keepEncryptedImages(ctx, r, w, destination, &j, i, oldBefore[i], oldPost[i], p.SourceSnapshot, key); err != nil {
+			if err := keepEncryptedImages(ctx, r, w, snapshots, destination, &j, i, oldBefore[i], oldPost[i], p.SourceSnapshot, key); err != nil {
 				return RewrittenRecovery{}, err
 			}
 			continue
@@ -150,14 +152,14 @@ func RewriteCompletedRecovery(ctx context.Context, r *gitexec.Runner, w workspac
 			if !imageEqual(actual, m.Post[i]) {
 				return RewrittenRecovery{}, fmt.Errorf("restore postimage %q differs from anchor", op.Path)
 			}
-			oldFile, _, err := history.SnapshotFileFromStore(ctx, r, w, w.Store, p.SourceWorkspaceID, oldSource, op.Path)
+			oldFile, _, err := snapshots.File(ctx, w.Store, p.SourceWorkspaceID, oldSource, op.Path)
 			if err != nil {
 				return RewrittenRecovery{}, err
 			}
 			if oldFile.ID != op.SourceBlob || oldFile.Mode != op.SourceMode {
 				return RewrittenRecovery{}, fmt.Errorf("restore source %q differs from history", op.Path)
 			}
-			newFile, digest, err := history.SnapshotFileFromStore(ctx, r, w, destination, p.SourceWorkspaceID, p.SourceSnapshot, op.Path)
+			newFile, digest, err := snapshots.File(ctx, destination, p.SourceWorkspaceID, p.SourceSnapshot, op.Path)
 			if err != nil {
 				return RewrittenRecovery{}, err
 			}
@@ -270,7 +272,7 @@ func VerifyMigratedRecovery(ctx context.Context, r *gitexec.Runner, w workspace.
 // keepEncryptedImages authenticates an operation's encrypted images in the
 // live store and copies them unchanged; the rewritten source snapshot must
 // hold the same encrypted source blob.
-func keepEncryptedImages(ctx context.Context, r *gitexec.Runner, w workspace.Context, destination string, j *journal, i int, before, post, newSource string, key []byte) error {
+func keepEncryptedImages(ctx context.Context, r *gitexec.Runner, w workspace.Context, snapshots *history.SnapshotFiles, destination string, j *journal, i int, before, post, newSource string, key []byte) error {
 	m := &j.Manifest
 	p := &m.Plan
 	op := &p.Operations[i]
@@ -297,7 +299,7 @@ func keepEncryptedImages(ctx context.Context, r *gitexec.Runner, w workspace.Con
 		if post != op.SourceBlob || !imageEqual(actual, m.Post[i]) {
 			return fmt.Errorf("restore postimage %q differs from anchor", op.Path)
 		}
-		newFile, digest, err := history.SnapshotFileFromStore(ctx, r, w, destination, p.SourceWorkspaceID, newSource, op.Path)
+		newFile, digest, err := snapshots.File(ctx, destination, p.SourceWorkspaceID, newSource, op.Path)
 		if err != nil {
 			return err
 		}

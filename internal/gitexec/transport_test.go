@@ -114,3 +114,36 @@ func TestRedactRemovesURLCredentials(t *testing.T) {
 		t.Fatalf("redacted: %q", got)
 	}
 }
+
+// A password may hold a quote, and a remote's message may carry C1 controls
+// (U+009B starts an escape sequence on some terminals) or bidirectional
+// overrides; none of them reaches the terminal.
+func TestRedactRemovesQuotedPasswordsAndC1Controls(t *testing.T) {
+	got := redact("fatal: unable to access 'https://user:pa'ss\"w@example.com/r.git/': remote: \u009b31mred\u202eevil")
+	if strings.Contains(got, "pa'ss") || strings.Contains(got, "ss\"w") || strings.ContainsAny(got, "\u009b\u202e") || !strings.Contains(got, "https://***@example.com/r.git/") || !strings.Contains(got, "31mred") {
+		t.Fatalf("redacted: %q", got)
+	}
+}
+
+// Passwords Git couldn't parse (a slash in them) and the destination ssh
+// prints without a scheme are masked too; a cause is read from Git's words,
+// not from a URL or host that happens to contain one; and a missing backup
+// ref says so instead of blaming permissions.
+func TestTransportCausesIgnoreURLsAndMaskEveryPasswordForm(t *testing.T) {
+	for _, tc := range []struct{ stderr, cause string }{
+		{"fatal: Invalid proxy URL 'http://bob:ab/cd+ef@proxy:8080': only SOCKS proxies support paths", "couldn't be reached"},
+		{"backup:pw/cd@backup.example: Permission denied (publickey).\nfatal: Could not read from remote repository.", "authentication failed"},
+		{"To https://gitproxy.example.com/backup.git\n ! [remote rejected] refs/gitlocal/backups/x -> refs/gitlocal/backups/x (pre-receive hook declined)\nerror: failed to push some refs to 'https://gitproxy.example.com/backup.git'", "refused the request"},
+		{"fatal: couldn't find remote ref refs/gitlocal/backups/00000000-0000-4000-8000-000000000000/x", "isn't on the remote"},
+		{"fatal: unable to access 'https://u:ab@cd+ef@backup.example/b.git/': SSL certificate problem: self-signed certificate", "TLS certificate"},
+	} {
+		err := transportError(&Error{Command: "push", Code: 128, stderr: tc.stderr}, nil)
+		var te *TransportError
+		if !errors.As(err, &te) || !strings.Contains(te.Cause, tc.cause) {
+			t.Fatalf("%q: %v", tc.stderr, err)
+		}
+		if message := te.Error(); strings.Contains(message, "cd+ef") || strings.Contains(message, "pw/cd") || strings.Contains(message, "ab/cd") {
+			t.Fatalf("password printed: %s", message)
+		}
+	}
+}

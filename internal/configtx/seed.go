@@ -111,7 +111,8 @@ func encodeSeedBeside(j seedJournal) ([]byte, []byte, error) {
 	}
 	j.FilesDigest = digestOf(files)
 	j.Files = []SeedFile{}
-	b, err := encode(j)
+	// The journal's later writes have no smaller form to fall back to.
+	b, err := encodeNew(j)
 	if errors.Is(err, errJournalLimit) {
 		err = fmt.Errorf("seed journal exceeds its 1 MiB limit even without its file list (selection, ignore rules or created directories); seed a subset with git local init --from <source> --paths <path>...")
 	}

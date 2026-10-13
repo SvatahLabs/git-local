@@ -439,11 +439,13 @@ func (r *Runner) ResetFilters(ctx context.Context, cwd, admin, commit string, pa
 	// is bounded by the query instead, with a generous allowance per value.
 	const maxValue = 1 << 10
 	response := &boundedBuffer{limit: input.Len() + len(paths)*(len("filter")+maxValue+2)}
-	if _, err := r.runOutput(ctx, cwd, false, nil, []string{"--git-dir=" + admin, "--work-tree=" + cwd}, &input, response, "check-attr", "--source="+commit, "-z", "--stdin", "filter"); err != nil {
-		return nil, err
-	}
+	_, err := r.runOutput(ctx, cwd, false, nil, []string{"--git-dir=" + admin, "--work-tree=" + cwd}, &input, response, "check-attr", "--source="+commit, "-z", "--stdin", "filter")
+	// An overflow stops Git, so it is reported before Git's exit status.
 	if response.overflow {
 		return nil, errors.New("Git output exceeded safety limit")
+	}
+	if err != nil {
+		return nil, err
 	}
 	output := response.Bytes()
 	if len(output) == 0 || output[len(output)-1] != 0 {
@@ -881,6 +883,10 @@ func (r *Runner) CheckIgnoreMatches(ctx context.Context, root, admin string, pat
 	// as they arrive and each distinct source and pattern is kept once.
 	records := &ignoreRecords{result: map[string]IgnoreMatch{}, strings: map[string]string{}}
 	_, err := r.mainOutput(ctx, root, admin, &input, records, "check-ignore", "--stdin", "-z", "--no-index", "--verbose", "--non-matching")
+	// A record over the limit stops Git; report that, not Git's exit status.
+	if records.err != nil {
+		return nil, records.err
+	}
 	if err != nil {
 		var ge *Error
 		if !errors.As(err, &ge) || ge.Code != 1 {
@@ -916,6 +922,10 @@ func (p *ignoreRecords) Write(b []byte) (int, error) {
 		end := bytes.IndexByte(b, 0)
 		if end < 0 {
 			p.field = append(p.field, b...)
+			if len(p.field) > MaxOutput {
+				p.err = errors.New("Git ignore record exceeds safety limit")
+				return 0, p.err
+			}
 			break
 		}
 		p.field = append(p.field, b[:end]...)

@@ -25,7 +25,9 @@ type MaintenanceResult struct {
 // shared lock, and guards and the overlay filter don't wait for it.
 func Maintain(ctx context.Context, r *gitexec.Runner, cwd string) (MaintenanceResult, error) {
 	var result MaintenanceResult
+	var packed workspace.Context
 	err := configtx.WithStore(ctx, r, cwd, func(w workspace.Context) error {
+		packed = w
 		var err error
 		if result.Before, err = r.StoreStats(ctx, w.Store); err != nil {
 			return err
@@ -35,6 +37,7 @@ func Maintain(ctx context.Context, r *gitexec.Runner, cwd string) (MaintenanceRe
 	if err != nil {
 		return result, err
 	}
+	afterPacking(packed)
 	err = configtx.ReadStore(ctx, r, cwd, func(w workspace.Context) error {
 		beforeStoreCheck(w)
 		if err := r.CheckStore(ctx, w.Store); err != nil {
@@ -47,6 +50,10 @@ func Maintain(ctx context.Context, r *gitexec.Runner, cwd string) (MaintenanceRe
 	return result, err
 }
 
-// beforeStoreCheck runs before maintenance checks the store; tests replace
-// it.
-var beforeStoreCheck = func(workspace.Context) {}
+// beforeStoreCheck runs before maintenance checks the store, and
+// afterPacking between packing (under the exclusive lock) and that check;
+// tests replace them.
+var (
+	beforeStoreCheck = func(workspace.Context) {}
+	afterPacking     = func(workspace.Context) {}
+)

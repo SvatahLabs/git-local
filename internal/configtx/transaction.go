@@ -202,7 +202,7 @@ func prepare(s *session, current Source, next selection.State, beforeIgnore Imag
 		op = "track"
 	}
 	j := Journal{SchemaVersion: 1, Kind: "selection", ID: id, RepositoryID: s.w.RepositoryID, WorkspaceID: current.ID, Operation: op, Direction: "apply", Sources: s.sources, Before: current.Selection, After: image(afterBytes, true, 0600), ExcludeBefore: beforeIgnore, ExcludeUnion: makeIgnore(both), ExcludeAfter: makeIgnore(newPatterns)}
-	if _, err = encode(j); err != nil {
+	if _, err = encodeNew(j); err != nil {
 		return Journal{}, err
 	}
 	return j, nil

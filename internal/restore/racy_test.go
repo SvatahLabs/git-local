@@ -78,3 +78,37 @@ func (f fakeInfo) Mode() fs.FileMode  { return 0644 }
 func (f fakeInfo) ModTime() time.Time { return f.mtime }
 func (f fakeInfo) IsDir() bool        { return false }
 func (f fakeInfo) Sys() any           { return nil }
+
+// Git replaces the target of a symlinked index; the cheap global state must
+// see that, and compare change times (not only identity, size and time).
+func TestIndexStatFollowsSymlinkAndComparesChangeTime(t *testing.T) {
+	dir := t.TempDir()
+	target, link := filepath.Join(dir, "real-index"), filepath.Join(dir, "index")
+	if err := os.WriteFile(target, []byte("index v1"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	before, err := indexStat(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := before.Sys().(*unix.Stat_t); !ok || changeTime(before).IsZero() {
+		t.Fatalf("index stat has no change time: %T", before.Sys())
+	}
+	// Replace the target as Git does: write a new file and rename it over.
+	if err := os.WriteFile(target+".lock", []byte("index v2"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(target+".lock", target); err != nil {
+		t.Fatal(err)
+	}
+	after, err := indexStat(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if (globalState{index: before}).same(globalState{index: after}) {
+		t.Fatal("a replaced index behind a symlink looks unchanged")
+	}
+}
