@@ -270,8 +270,8 @@ type guard struct {
 	// Lstat they were hashed under; see inspect.
 	images map[string]map[string]cachedImage
 	// index is the main index file; checked is the cheap global state seen at
-	// the start of the last full check, or nil when the next check must be
-	// full; parents indexes the plan's parent directories and created the
+	// the start of the last check of ownership, or nil when the next check
+	// must be full; parents indexes the plan's parent directories and created the
 	// directories it creates. See recognizeScope.
 	index   string
 	checked *globalState
@@ -357,23 +357,16 @@ func newGuard(ctx context.Context, r *gitexec.Runner, w workspace.Context, files
 		e.Close()
 		return nil, fmt.Errorf("%w: main ownership changed", storage.ErrConflict)
 	}
+	paths := make([]string, 0, 3*len(j.Manifest.Plan.Operations))
 	for _, op := range j.Manifest.Plan.Operations {
-		s := selection.Empty()
-		s.Include = []selection.Rule{{Path: op.Path, Kind: "directory"}}
-		if err = owner.Check(s); err != nil {
-			e.Close()
-			return nil, err
-		}
+		paths = append(paths, op.Path)
 	}
 	for _, stages := range j.Manifest.Stages {
-		for _, name := range []string{stages.Apply, stages.Rollback} {
-			scope := selection.Empty()
-			scope.Include = []selection.Rule{{Path: name, Kind: "directory"}}
-			if err = owner.Check(scope); err != nil {
-				e.Close()
-				return nil, err
-			}
-		}
+		paths = append(paths, stages.Apply, stages.Rollback)
+	}
+	if err = owner.CheckPaths(paths); err != nil {
+		e.Close()
+		return nil, err
 	}
 	return g, nil
 }
@@ -496,9 +489,11 @@ func (g *guard) recognize(ctx context.Context) error { return g.recognizeScope(c
 // at its own operation, and a change to one already restored is found by the
 // full check at the next phase boundary and at the end. Ownership can change
 // only through HEAD or the index, so whenever the cheap global state differs
-// from the last full check, the check is full: the ownership listing and every
-// operation's image. The callers run a full check before the first change, at
-// each phase boundary and at the end.
+// from the last check of it, ownership (HEAD and the index listing) and the
+// branch are checked again; a tool that rewrites the index without changing
+// its entries then costs a listing, not every operation's image. The callers
+// run a full check before the first change, at each phase boundary and at the
+// end.
 func (g *guard) recognizeScope(ctx context.Context, op int, dir string) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -512,9 +507,12 @@ func (g *guard) recognizeScope(ctx context.Context, op int, dir string) error {
 	if err != nil {
 		return err
 	}
-	full := op < 0 && dir == "" || g.checked == nil || !state.same(*g.checked)
+	full := op < 0 && dir == "" || g.checked == nil
+	owned := full || !state.same(*g.checked)
 	if full {
 		g.checked = nil
+	}
+	if owned {
 		if err = (selection.Ownership{Evidence: g.evidence}).Revalidate(ctx, g.r, g.w.Root, g.w.Admin); err != nil {
 			return err
 		}
@@ -579,7 +577,9 @@ func (g *guard) recognizeScope(ctx context.Context, op int, dir string) error {
 		}
 		return fmt.Errorf("%w: parent directory changed at %q", storage.ErrConflict, parent.Path)
 	}
-	if full && (state.index == nil || !racy(state.index, state.at)) {
+	// A racy index could change again without its stat showing it, so its
+	// state isn't recorded and the next check reads ownership again.
+	if owned && (state.index == nil || !racy(state.index, state.at)) {
 		g.checked = &state
 	}
 	return nil

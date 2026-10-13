@@ -178,13 +178,12 @@ func planLocked(ctx context.Context, r *gitexec.Runner, cwd string, w workspace.
 		if err = engine.CheckRestorePaths(names); err != nil {
 			return err
 		}
+		// A directory rule also detects main-owned descendants of a candidate
+		// file; one pass folds each owned path once (see CheckPaths).
+		if err = owner.CheckPaths(names); err != nil {
+			return err
+		}
 		for _, p := range names {
-			// A directory rule also detects main-owned descendants of a candidate file.
-			scope := selection.Empty()
-			scope.Include = []selection.Rule{{Path: p, Kind: "directory"}}
-			if err = owner.Check(scope); err != nil {
-				return err
-			}
 			for parent := path.Dir(p); parent != "."; parent = path.Dir(parent) {
 				value, e := inspectParent(files, parent)
 				if e != nil {

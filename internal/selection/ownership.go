@@ -225,14 +225,79 @@ func (o Ownership) Check(s State) error {
 		folded.Exclude[i] = storage.AliasKey(p)
 	}
 	for _, path := range o.Paths {
-		key := storage.AliasKey(path)
+		key := FoldOwned(path)
 		if folded.Selected(key) {
-			return fmt.Errorf("%w: selected path %q is owned by the main index or HEAD; untrack or exclude it", storage.ErrConflict, path)
+			return ownedError(path)
 		}
 		for _, r := range folded.Include {
 			if within(key, r.Path) {
-				return fmt.Errorf("%w: main-owned ancestor %q blocks selection", storage.ErrConflict, path)
+				return ownedAncestorError(path)
 			}
+		}
+	}
+	return nil
+}
+
+// FoldOwned is storage.AliasKey for ownership checks; tests replace it to
+// count the folds.
+var FoldOwned = storage.AliasKey
+
+func ownedError(path string) error {
+	return fmt.Errorf("%w: selected path %q is owned by the main index or HEAD; untrack or exclude it", storage.ErrConflict, path)
+}
+func ownedAncestorError(path string) error {
+	return fmt.Errorf("%w: main-owned ancestor %q blocks selection", storage.ErrConflict, path)
+}
+
+// CheckPaths is Check of a directory rule for each path, as restore and seed
+// check the paths they write: a path is refused when its alias key, or an
+// ancestor's, is main-owned, or when a main-owned key lies under it. It folds
+// every owned path once, so checking N paths against M owned paths costs
+// about N + M folds rather than N·M. The error names the same owned path
+// Check would.
+func (o Ownership) CheckPaths(paths []string) error {
+	owned := map[string][]int{}
+	for i, p := range o.Paths {
+		key := FoldOwned(p)
+		owned[key] = append(owned[key], i)
+	}
+	keys := make([]string, 0, len(owned))
+	for key := range owned {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, p := range paths {
+		s := Empty()
+		s.Include = []Rule{{Path: p, Kind: "directory"}}
+		normalized, err := Canonical(s)
+		if err != nil {
+			return err
+		}
+		rule := FoldOwned(normalized.Include[0].Path)
+		// Check reports the first owned path, in o.Paths order, that the rule
+		// selects or that is an ancestor of the rule.
+		first, ancestor := -1, false
+		consider := func(indexes []int, isAncestor bool) {
+			for _, i := range indexes {
+				if first < 0 || i < first {
+					first, ancestor = i, isAncestor
+				}
+			}
+		}
+		consider(owned[rule], false)
+		for i := sort.SearchStrings(keys, rule+"/"); i < len(keys) && strings.HasPrefix(keys[i], rule+"/"); i++ {
+			consider(owned[keys[i]], false)
+		}
+		for i := 0; i < len(rule); i++ {
+			if rule[i] == '/' {
+				consider(owned[rule[:i]], true)
+			}
+		}
+		if first >= 0 && ancestor {
+			return ownedAncestorError(o.Paths[first])
+		}
+		if first >= 0 {
+			return ownedError(o.Paths[first])
 		}
 	}
 	return nil

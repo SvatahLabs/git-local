@@ -118,8 +118,11 @@ About a hundred defects found in pre-release reviews, among them:
   patterns, per-commit process spawning in guards and doctor, and restore
   time, which grew with the square of the restored file count and is now
   linear: each file's step re-checks that file and the cheap global state
-  (main HEAD, branch and index file), and everything is re-checked at each
-  phase boundary, at the end, and whenever that state changed.
+  (main HEAD, branch and index file), everything is re-checked at each
+  phase boundary and at the end, and main ownership whenever that state
+  changed. Restore and seeding no longer check each file against every path
+  in the main index, so their time per file doesn't grow with the size of
+  the mainline repository.
 - Seeding a worktree from a selection of more than a few thousand files
   failed ("configuration transaction exceeds metadata size limit"); a seed
   journal now keeps a long file list beside it, and every journal kind is

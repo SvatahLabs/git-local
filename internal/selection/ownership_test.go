@@ -3,6 +3,7 @@ package selection
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -51,5 +52,45 @@ func (g unavailableGit) MainListing(ctx context.Context, root, admin string, arg
 func TestUnavailableOwnershipIsNotEmpty(t *testing.T) {
 	if _, err := InspectOwnership(context.Background(), unavailableGit{}, "", " "); err == nil {
 		t.Fatal("unavailable ownership accepted")
+	}
+}
+
+// CheckPaths decides, and names the owned path, exactly as Check of a
+// directory rule for each path does.
+func TestCheckPathsMatchesCheck(t *testing.T) {
+	owned := []string{"NOTES/private", "café/file", "docs", "notes2", "a/b/c", "x/ＡＢ/y", "zz/deep/one", "zz/deep/two"}
+	for _, p := range []string{"notes", "notes/private", "notes/private/x", "café", "docs/readme", "notes2", "notes3", "a", "a/b", "a/b/c/d", "a/bc", "x/ab", "zz", "zz/deep", "zz/other", "fresh/file", "../escape", ""} {
+		s := Empty()
+		s.Include = []Rule{{Path: p, Kind: "directory"}}
+		want := (Ownership{Paths: owned}).Check(s)
+		got := (Ownership{Paths: owned}).CheckPaths([]string{"fresh", p})
+		if (want == nil) != (got == nil) || want != nil && want.Error() != got.Error() {
+			t.Fatalf("%q: CheckPaths %v, Check %v", p, got, want)
+		}
+	}
+}
+
+// Checking many paths folds each owned path once rather than once per
+// checked path. Not parallel: it replaces FoldOwned.
+func TestCheckPathsFoldsEachOwnedPathOnce(t *testing.T) {
+	folds := 0
+	FoldOwned = func(p string) string { folds++; return storage.AliasKey(p) }
+	defer func() { FoldOwned = storage.AliasKey }()
+	owned := make([]string, 20000)
+	for i := range owned {
+		owned[i] = fmt.Sprintf("main/file-%05d", i)
+	}
+	paths := make([]string, 500)
+	for i := range paths {
+		paths[i] = fmt.Sprintf("notes/file-%03d", i)
+	}
+	if err := (Ownership{Paths: owned}).CheckPaths(paths); err != nil {
+		t.Fatal(err)
+	}
+	if folds > len(owned)+len(paths) {
+		t.Fatalf("checking %d paths against %d owned paths made %d folds", len(paths), len(owned), folds)
+	}
+	if err := (Ownership{Paths: owned}).CheckPaths(append(paths, "main")); !errors.Is(err, storage.ErrConflict) || !strings.Contains(err.Error(), `"main/file-00000"`) {
+		t.Fatalf("owned descendant not reported: %v", err)
 	}
 }

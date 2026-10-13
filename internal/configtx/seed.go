@@ -271,6 +271,7 @@ func seed(ctx context.Context, r *gitexec.Runner, cwd string, planner SeedPlanne
 	defer files.Close()
 	created := map[string]bool{}
 	last := ""
+	stages := make([]string, 0, len(plan.Files))
 	for i := range plan.Files {
 		file := &plan.Files[i]
 		if runtime.GOOS == "windows" && (file.Mode == "100755" || file.Mode == "120000") {
@@ -310,17 +311,17 @@ func seed(ctx context.Context, r *gitexec.Runner, cwd string, planner SeedPlanne
 		if err := engine.CheckRestorePath(file.Stage); err != nil {
 			return result, err
 		}
-		stageScope := selection.Empty()
-		stageScope.Include = []selection.Rule{{Path: file.Stage, Kind: "directory"}}
-		if err := validated.Ownership.Check(stageScope); err != nil {
-			return result, err
-		}
+		stages = append(stages, file.Stage)
 		if _, e = files.Lstat(file.Stage); !os.IsNotExist(e) {
 			if e == nil {
 				e = errors.New("seed staging path already exists")
 			}
 			return result, e
 		}
+	}
+	// One pass folds each main-owned path once (see CheckPaths).
+	if err := validated.Ownership.CheckPaths(stages); err != nil {
+		return result, err
 	}
 	dirs := []string{}
 	for name := range created {
