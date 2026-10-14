@@ -226,6 +226,11 @@ func migrationJournalsSupported(meta *storage.Dir) ([]string, []string, error) {
 		switch kind {
 		case "config", "encrypt", "init":
 		case "seed":
+			// A lost file list would stop the migration only after it
+			// rewrote the history (GL-124).
+			if err := configtx.CheckSeedList(meta, "transactions/completed/"+name); err != nil {
+				return nil, nil, err
+			}
 			seeds = append(seeds, name)
 		case "restore":
 			restores = append(restores, name)

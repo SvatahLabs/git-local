@@ -103,6 +103,12 @@ func verifySensitiveBackup(ctx context.Context, r *gitexec.Runner, w workspace.C
 				file, digest, err := snapshots.File(ctx, store, source, snapshot, path)
 				return file.ID, file.Mode, digest, err
 			}); err != nil {
+				// "Put it back or abandon" applies to the repository the
+				// backup came from, not to this one (GL-124).
+				var listErr *configtx.SeedListError
+				if errors.As(err, &listErr) {
+					return fmt.Errorf("%w: backup seed journal %q: its file list (%s) %s in the backup, which an earlier release pushed after the list was lost; in the repository the backup came from, run git local recover %s --abandon, then git local backup push again, and restore the new backup", storage.ErrConflict, name, listErr.List(), listErr.Problem(), listErr.ID)
+				}
 				return fmt.Errorf("backup seed journal %q: %w", name, err)
 			}
 			continue

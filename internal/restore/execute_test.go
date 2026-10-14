@@ -248,13 +248,35 @@ func TestRecoveryPreservesExternalChanges(t *testing.T) {
 					t.Fatal(e)
 				}
 			}
-			before := durable(t, root)
+			// A refused recovery may record in its journal why it stopped
+			// (GL-124); nothing else changes, the journal included.
+			transactions := filepath.Join(w.Common, "gitlocal", "transactions")
+			journalFile := filepath.Join(w.Common, "gitlocal", filepath.FromSlash(journalPath(result.TransactionID)))
+			state := func() (map[string]string, journal) {
+				t.Helper()
+				files := durable(t, root)
+				delete(files, transactions)
+				delete(files, journalFile)
+				meta, e := openMeta(w.Common)
+				if e != nil {
+					t.Fatal(e)
+				}
+				defer meta.Close()
+				j, e := readJournal(meta, journalPath(result.TransactionID))
+				if e != nil {
+					t.Fatal(e)
+				}
+				j.Stopped = nil
+				return files, j
+			}
+			beforeFiles, beforeJournal := state()
 			for _, rollback := range []bool{false, true} {
 				if _, err = Recover(ctx, r, root, result.TransactionID, rollback); err == nil {
 					t.Fatal("external change accepted")
 				}
 			}
-			if !reflect.DeepEqual(before, durable(t, root)) {
+			afterFiles, afterJournal := state()
+			if !reflect.DeepEqual(beforeFiles, afterFiles) || !reflect.DeepEqual(beforeJournal, afterJournal) {
 				t.Fatal("recovery changed external state")
 			}
 		})

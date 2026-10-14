@@ -200,7 +200,7 @@ func ListWorkspaces(ctx context.Context, r *gitexec.Runner, cwd string) ([]Works
 		return nil, err
 	}
 	if len(pending) > 0 {
-		return nil, pendingError(pending[0])
+		return nil, s.pendingError(pending[0])
 	}
 	return s.inventory(ctx)
 }

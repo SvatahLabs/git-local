@@ -182,7 +182,7 @@ func CheckStagedPaths(ctx context.Context, r *gitexec.Runner, cwd string, paths 
 		return nil, err
 	}
 	if len(pending) > 0 {
-		return nil, pendingError(pending[0])
+		return nil, s.pendingError(pending[0])
 	}
 	states := []struct {
 		ID    string

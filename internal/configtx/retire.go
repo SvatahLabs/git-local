@@ -52,7 +52,7 @@ func retire(ctx context.Context, r *gitexec.Runner, cwd, id string, f fault) (Re
 		return Result{}, err
 	}
 	if len(pending) > 0 {
-		return Result{}, pendingError(pending[0])
+		return Result{}, s.pendingError(pending[0])
 	}
 	var target Source
 	for _, src := range s.sources {

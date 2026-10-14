@@ -20,12 +20,26 @@ type SeedListError struct {
 }
 
 func (e *SeedListError) Error() string {
-	problem := "is missing"
-	if !errors.Is(e.Err, os.ErrNotExist) {
-		problem = "can't be used (" + e.Err.Error() + ")"
-	}
-	return fmt.Sprintf("the file list of seed transaction %s (%s in the common Git directory) %s; without it the seed can be neither resumed nor rolled back. If you have a copy of the list, put it back; otherwise run git local recover %s --abandon, which moves the journal into the quarantine and leaves the seeded files as they are", e.ID, path.Join("gitlocal", seedFilesPath(e.ID)), problem, e.ID)
+	return fmt.Sprintf("the file list of seed transaction %s (%s in the common Git directory) %s; without it the seed can be neither resumed nor rolled back. If you have a copy of the list, put it back; otherwise run git local recover %s --abandon, which moves the journal into the quarantine and leaves the seeded files as they are", e.ID, e.List(), e.Problem(), e.ID)
 }
+
+// List is the file list's path in the common Git directory.
+func (e *SeedListError) List() string { return path.Join("gitlocal", seedFilesPath(e.ID)) }
+
+// Problem says what is wrong with the list: "is missing", "doesn't match its
+// journal", or "can't be read (...)".
+func (e *SeedListError) Problem() string {
+	switch {
+	case errors.Is(e.Err, os.ErrNotExist):
+		return "is missing"
+	case errors.Is(e.Err, errListMismatch):
+		return "doesn't match its journal"
+	}
+	return "can't be read (" + e.Err.Error() + ")"
+}
+
+// errListMismatch is a seed file list whose digest isn't the journal's.
+var errListMismatch = fmt.Errorf("%w: it doesn't match its journal", storage.ErrConflict)
 
 func (e *SeedListError) Unwrap() error { return e.Err }
 
@@ -45,12 +59,18 @@ func (s *session) abandonSeedWithoutList(id, name string, j seedJournal, listErr
 	if err != nil {
 		return result, err
 	}
-	if entry, moved, err := q.QuarantineSeedFiles(s.meta, id, "file list that doesn't match its seed journal"); err != nil {
+	// The reasons say what was wrong, not what to do: this is the abandon.
+	problem := "is missing"
+	var seedErr *SeedListError
+	if errors.As(listErr, &seedErr) {
+		problem = seedErr.Problem()
+	}
+	if entry, moved, err := q.QuarantineSeedFiles(s.meta, id, "seed file list that "+problem); err != nil {
 		return result, err
 	} else if moved {
 		result.Quarantined = append(result.Quarantined, entry)
 	}
-	entry, err := q.QuarantineJournal(s.meta, name, "seed journal whose file list is missing or damaged: "+listErr.Error())
+	entry, err := q.QuarantineJournal(s.meta, name, "seed journal whose file list "+problem)
 	if err != nil {
 		return result, err
 	}

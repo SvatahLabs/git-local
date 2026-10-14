@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"gitlocal/internal/exclude"
 	"gitlocal/internal/gitexec"
@@ -75,7 +77,7 @@ func changePlanned(ctx context.Context, r *gitexec.Runner, cwd string, track boo
 		return Result{}, err
 	}
 	if len(pending) > 0 {
-		return Result{}, pendingError(pending[0])
+		return Result{}, s.pendingError(pending[0])
 	}
 	var current Source
 	for _, src := range s.sources {
@@ -209,6 +211,36 @@ func prepare(s *session, current Source, next selection.State, beforeIgnore Imag
 }
 func pendingError(id string) error {
 	return fmt.Errorf("%w: unfinished transaction %s; run git local recover %s --resume or --rollback", storage.ErrConflict, id, id)
+}
+
+// pendingError refuses for the unfinished transaction id, naming the command
+// that resolves it in the state its journal records: a seed whose file list
+// is lost, a restore stopped at an edit or unknown staging bytes, a
+// committed transaction or a rollback in progress (GL-124).
+func (s *session) pendingError(id string) error {
+	for _, prefix := range []string{"config-", "seed-", "restore-"} {
+		name := prefix + id + ".json"
+		if _, err := s.meta.Lstat("transactions/" + name); err != nil {
+			continue
+		}
+		p := describeJournal(s.w, s.common, s.meta, name, func(workspaceID string) string {
+			var record workspace.Record
+			if !storage.ValidUUID(workspaceID) || s.meta.ReadJSON(filepath.Join("workspaces", workspaceID, "workspace.json"), &record) != nil {
+				return ""
+			}
+			return record.Root
+		})
+		action, state := p.Next()
+		var listErr *SeedListError
+		switch {
+		case errors.As(p.Err, &listErr):
+			state = "its file list " + listErr.Problem() + " (" + listErr.List() + " in the common Git directory), so it can be neither resumed nor rolled back"
+		case p.Err != nil || p.Stopped == nil && p.Outcome == "" && p.Direction != "rollback":
+			return pendingError(id)
+		}
+		return fmt.Errorf("%w: unfinished %s transaction %s: %s; %s", storage.ErrConflict, p.Kind, id, state, strings.ToLower(action[:1])+strings.TrimSuffix(action[1:], "."))
+	}
+	return pendingError(id)
 }
 func withRecovery(id string, err error) error {
 	return fmt.Errorf("%w: transaction %s stopped (%v); run git local recover %s --resume or --rollback", storage.ErrConflict, id, err, id)
@@ -423,7 +455,7 @@ func recoverTransaction(ctx context.Context, r *gitexec.Runner, cwd, id string, 
 	}
 	for _, other := range pending {
 		if other != id {
-			return Result{}, pendingError(other)
+			return Result{}, s.pendingError(other)
 		}
 	}
 	var j Journal

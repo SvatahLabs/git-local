@@ -23,7 +23,7 @@ func Prune(ctx context.Context, r *gitexec.Runner, cwd string, dryRun bool) (Pru
 	}
 	pending, err := s.pending()
 	if err == nil && len(pending) > 0 {
-		err = pendingError(pending[0])
+		err = s.pendingError(pending[0])
 	}
 	if err == nil {
 		var entries []WorkspaceInfo

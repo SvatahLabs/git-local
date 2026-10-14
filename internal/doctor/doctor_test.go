@@ -619,3 +619,26 @@ func TestDoctorReportsLostAndOrphanSeedLists(t *testing.T) {
 		t.Fatalf("orphan seed list not reported with its command:\n%s", human)
 	}
 }
+
+// GL-124: while a transaction is pending, the guards finding names the
+// command that resolves it (the transaction's own next step), not "Inspect
+// selection metadata and retry".
+func TestGuardsFindingNamesThePendingTransactionsNextStep(t *testing.T) {
+	t.Parallel()
+	repo, r, w := fixture(t)
+	id := "00000000-0000-4000-8000-000000000001"
+	if err := os.WriteFile(filepath.Join(w.Common, "gitlocal", "transactions", "restore-"+id+".json"), []byte("{}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	report, err := Run(ctx, r, repo.Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actions := map[string]string{}
+	for _, f := range report.Findings {
+		actions[f.Check] = f.Action
+	}
+	if actions["guards"] == "" || actions["guards"] != actions["transaction "+id] || !strings.Contains(actions["guards"], "recover "+id) {
+		t.Fatalf("guards action %q, transaction action %q", actions["guards"], actions["transaction "+id])
+	}
+}

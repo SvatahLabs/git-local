@@ -33,7 +33,7 @@ func WithRestore(ctx context.Context, r *gitexec.Runner, cwd, id string, fn func
 		}
 		for _, other := range ids {
 			if other != id {
-				return pendingError(other)
+				return s.pendingError(other)
 			}
 		}
 		return nil

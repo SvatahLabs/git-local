@@ -263,7 +263,12 @@ func Run(ctx context.Context, r *gitexec.Runner, cwd string) (Report, error) {
 	if err == nil {
 		snapshot, e := configtx.LoadGuardSnapshot(ctx, r, cwd)
 		if e != nil {
-			result.add("guards", "error", e.Error(), "Inspect selection metadata and retry.")
+			action := "Inspect selection metadata and retry."
+			if pendingErr == nil && len(pending) > 0 {
+				// The guards stay blocked until the transaction is resolved.
+				action, _ = pending[0].Next()
+			}
+			result.add("guards", "error", e.Error(), action)
 		} else {
 			hasOverlays, overlayErr := overlay.HasAny(ctx, snapshot.Common)
 			if overlayErr != nil {

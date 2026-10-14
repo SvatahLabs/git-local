@@ -142,7 +142,7 @@ func decodeSeed(data []byte, files func(id string) ([]byte, error)) (seedJournal
 		return j, &SeedListError{ID: j.ID, Err: err}
 	}
 	if digestOf(list) != j.FilesDigest {
-		return j, &SeedListError{ID: j.ID, Err: fmt.Errorf("%w: it doesn't match its journal", storage.ErrConflict)}
+		return j, &SeedListError{ID: j.ID, Err: errListMismatch}
 	}
 	var decoded seedFileList
 	if err := decode(list, &decoded); err != nil {
@@ -218,7 +218,7 @@ func seed(ctx context.Context, r *gitexec.Runner, cwd string, planner SeedPlanne
 		return result, err
 	}
 	if len(pending) > 0 {
-		return result, pendingError(pending[0])
+		return result, s.pendingError(pending[0])
 	}
 	var current Source
 	for _, src := range s.sources {
@@ -954,7 +954,7 @@ func RecoverSeed(ctx context.Context, r *gitexec.Runner, cwd, id string, rollbac
 	}
 	for _, other := range pending {
 		if other != id {
-			return result, pendingError(other)
+			return result, s.pendingError(other)
 		}
 	}
 	j, err := readSeed(s.meta, seedPath(id))

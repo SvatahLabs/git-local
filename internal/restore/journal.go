@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 
+	"gitlocal/internal/configtx"
 	"gitlocal/internal/gitexec"
 	"gitlocal/internal/selection"
 	"gitlocal/internal/storage"
@@ -49,6 +50,10 @@ type journal struct {
 	Direction        string   `json:"direction"`
 	Outcome          string   `json:"outcome,omitempty"`
 	Progress         int      `json:"progress"`
+	// Stopped is why the restore last stopped where resume and rollback
+	// both refuse until the user acts; the pending-transaction refusal,
+	// recover --list and doctor name the way out from it (GL-124).
+	Stopped *configtx.RestoreStop `json:"stopped,omitempty"`
 }
 type Result struct {
 	TransactionID    string
@@ -66,22 +71,30 @@ func point(ctx context.Context, f fault, name string) error {
 	}
 	return nil
 }
-func stopped(id string, err error) error {
-	// Resume and rollback both refuse while an edit or unknown staging bytes
-	// are there.
+
+// stopped explains how to resolve restore transaction j stopped by err. A
+// stop at an edit or unknown staging bytes is recorded in the journal (best
+// effort: the advice is in this message too).
+func stopped(meta *storage.Dir, j *journal, err error) error {
+	id := j.ID
 	var edit *externalEdit
 	var stage *unknownStage
+	var stop *configtx.RestoreStop
 	switch {
-	case errors.As(err, &edit) && edit.aside:
-		return fmt.Errorf("%w: restore transaction %s stopped (%v); move %s aside to keep the edit, then run git local recover %s --resume or --rollback; or run git local recover %s --abandon to leave every file as it is", storage.ErrConflict, id, err, edit.path, id, id)
 	case errors.As(err, &edit):
-		// The path exists both before and after the restore, so a file moved
-		// aside would be a change too.
-		return fmt.Errorf("%w: restore transaction %s stopped (%v); to keep the edit, run git local recover %s --abandon, which leaves every file as it is; or undo the edit, then run git local recover %s --resume or --rollback", storage.ErrConflict, id, err, id, id)
+		stop = &configtx.RestoreStop{Kind: "edit", Path: edit.path, Aside: edit.aside}
 	case errors.As(err, &stage):
-		return fmt.Errorf("%w: restore transaction %s stopped (%v); move %s aside (it is a staging file, which Git ignores), then run git local recover %s --resume or --rollback; or run git local recover %s --abandon, which moves it into the quarantine", storage.ErrConflict, id, err, stage.path, id, id)
+		stop = &configtx.RestoreStop{Kind: "stage", Path: stage.path}
 	}
-	return fmt.Errorf("%w: restore transaction %s stopped (%v); run git local recover %s --resume or --rollback", storage.ErrConflict, id, err, id)
+	if stop == nil {
+		return fmt.Errorf("%w: restore transaction %s stopped (%v); run git local recover %s --resume or --rollback", storage.ErrConflict, id, err, id)
+	}
+	if _, statErr := meta.Lstat(journalPath(id)); statErr == nil && j.Outcome == "" {
+		j.Stopped = stop
+		_ = writeJournal(meta, *j)
+	}
+	// Resume and rollback both refuse while the edit or the bytes are there.
+	return fmt.Errorf("%w: restore transaction %s stopped (%v); %s", storage.ErrConflict, id, err, stop.Advice(id, ""))
 }
 
 // externalEdit is a pending path that changed outside the restore; the

@@ -16,6 +16,12 @@ import (
 func TestStoppedAtExternalEditNamesTheWayOut(t *testing.T) {
 	t.Parallel()
 	id := "00000000-0000-4000-8000-000000000001"
+	// No journal there: nothing is recorded.
+	meta, err := storage.OpenDir(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer meta.Close()
 	for _, c := range []struct {
 		err       error
 		want, not []string
@@ -24,7 +30,7 @@ func TestStoppedAtExternalEditNamesTheWayOut(t *testing.T) {
 		{&externalEdit{path: "notes/c"}, []string{`new external edit at "notes/c"; preserved`, "recover " + id + " --abandon", "undo the edit, then run git local recover " + id + " --resume or --rollback"}, []string{"aside"}},
 		{&unknownStage{path: "notes/.gitlocal-tmp-x"}, []string{`unrecognized staging bytes at "notes/.gitlocal-tmp-x"; preserved`, "move notes/.gitlocal-tmp-x aside", "recover " + id + " --resume or --rollback", "recover " + id + " --abandon"}, nil},
 	} {
-		err := stopped(id, c.err)
+		err := stopped(meta, &journal{ID: id}, c.err)
 		for _, want := range c.want {
 			if !strings.Contains(err.Error(), want) {
 				t.Fatalf("message lacks %q: %v", want, err)
@@ -39,7 +45,7 @@ func TestStoppedAtExternalEditNamesTheWayOut(t *testing.T) {
 			t.Fatalf("not a conflict: %v", err)
 		}
 	}
-	if other := stopped(id, errors.New("disk full")); strings.Contains(other.Error(), "aside") {
+	if other := stopped(meta, &journal{ID: id}, errors.New("disk full")); strings.Contains(other.Error(), "aside") {
 		t.Fatalf("other failures name an edit: %v", other)
 	}
 }

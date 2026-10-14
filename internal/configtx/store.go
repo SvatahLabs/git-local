@@ -21,7 +21,7 @@ func WithStore(ctx context.Context, r *gitexec.Runner, cwd string, fn func(works
 		return err
 	}
 	if len(pending) > 0 {
-		return pendingError(pending[0])
+		return s.pendingError(pending[0])
 	}
 	return fn(*s.w)
 }

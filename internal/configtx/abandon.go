@@ -46,7 +46,7 @@ func Abandon(ctx context.Context, r *gitexec.Runner, cwd, id string) (AbandonRes
 	}
 	for _, other := range pending {
 		if other != id {
-			return result, pendingError(other)
+			return result, s.pendingError(other)
 		}
 	}
 	if _, err := s.meta.Lstat(seedPath(id)); err == nil {
@@ -274,7 +274,43 @@ type PendingJournal struct {
 	// IdentityErr is a worktree identity file that blocks checking where an
 	// initialization journal's identity was published.
 	IdentityErr *workspace.IdentityError
-	Err         error
+	// Stopped is why a restore last stopped, when its journal records it.
+	Stopped *RestoreStop
+	Err     error
+}
+
+// RestoreStop is a restore stopped where resume and rollback both refuse
+// until the user acts, as its journal records it: an external edit it
+// preserved, or staging bytes it doesn't recognize, at Path.
+type RestoreStop struct {
+	Kind string `json:"kind"` // "edit" or "stage"
+	Path string `json:"path"`
+	// Aside marks an edit at a path the restore creates or deletes, which a
+	// file moved aside matches.
+	Aside bool `json:"aside,omitempty"`
+}
+
+// Advice is the way out of restore transaction id stopped at s; from names
+// where to run the commands (" from <root>"), or is empty.
+func (s RestoreStop) Advice(id, from string) string {
+	recover := "git local recover " + id
+	switch {
+	case s.Kind == "stage":
+		return fmt.Sprintf("move %s aside (it is a staging file, which Git ignores), then run %s --resume or --rollback%s; or run %s --abandon%s, which moves it into the quarantine", s.Path, recover, from, recover, from)
+	case s.Aside:
+		return fmt.Sprintf("move %s aside to keep the edit, then run %s --resume or --rollback%s; or run %s --abandon%s to leave every file as it is", s.Path, recover, from, recover, from)
+	}
+	// The path exists both before and after the restore, so a file moved
+	// aside would be a change too.
+	return fmt.Sprintf("to keep the edit, run %s --abandon%s, which leaves every file as it is; or undo the edit, then run %s --resume or --rollback%s", recover, from, recover, from)
+}
+
+// state describes the stop for doctor and recover --list.
+func (s RestoreStop) state() string {
+	if s.Kind == "stage" {
+		return fmt.Sprintf("the restore stopped at staging bytes it doesn't recognize (%s)", s.Path)
+	}
+	return fmt.Sprintf("the restore stopped at an edit of %s, which it preserved", s.Path)
 }
 
 // Next returns the action that resolves the journal and the state behind it.
@@ -302,6 +338,9 @@ func (p PendingJournal) Next() (string, string) {
 		return "Run git local encrypt recover " + p.ID + " --resume. If it fails, run " + abandon + ".", "the encryption policy is published and only cleanup remains"
 	case p.Kind == "encrypt":
 		return "Run git local encrypt recover " + p.ID + " --resume or --rollback. If both fail, run " + abandon + ".", "encryption migration stopped before its policy was published"
+	case p.Kind == "restore" && p.Stopped != nil && p.Outcome == "":
+		advice := p.Stopped.Advice(p.ID, from)
+		return strings.ToUpper(advice[:1]) + advice[1:] + ".", p.Stopped.state()
 	case p.Outcome == "committed":
 		return "Run git local recover " + p.ID + " --resume" + from + ".", "the transaction committed and only bookkeeping remains"
 	case p.Outcome == "rolledback" || p.Direction == "rollback":
@@ -364,79 +403,86 @@ func PendingJournals(ctx context.Context, r *gitexec.Runner, cwd string) ([]Pend
 		if (name == "completed" || name == seedFilesDir) && entry.IsDir() || storage.IsTempName(name) && entry.Type().IsRegular() {
 			continue
 		}
-		data, readErr := common.ReadFile(filepath.Join("gitlocal/transactions", name), 16<<20)
-		var record struct {
-			ID          string `json:"id"`
-			WorkspaceID string `json:"workspaceId"`
-			Direction   string `json:"direction"`
-			Outcome     string `json:"outcome"`
-			Identity    struct {
-				WorkspaceID string `json:"workspaceId"`
-			} `json:"identity"`
-			Workspace struct {
-				Admin string `json:"adminPath"`
-				Root  string `json:"rootPath"`
-			} `json:"workspace"`
-			Manifest struct {
-				Plan struct {
-					Destination string `json:"destinationWorkspaceId"`
-				} `json:"plan"`
-			} `json:"manifest"`
-			Policy      secureblob.Policy  `json:"policy"`
-			OldPolicy   *secureblob.Policy `json:"oldPolicy"`
-			FilesDigest string             `json:"filesDigest"`
-		}
-		if readErr == nil {
-			readErr = json.NewDecoder(bytes.NewReader(data)).Decode(&record)
-		}
-		if name == "init.json" {
-			item := PendingJournal{ID: record.Identity.WorkspaceID, Kind: "init", WorkspaceID: record.Identity.WorkspaceID, Root: record.Workspace.Root, Err: readErr}
-			if readErr == nil {
-				if !filepath.IsAbs(record.Workspace.Admin) {
-					item.Err = errors.New("initialization journal has no administrative path")
-				} else if _, e := os.Stat(record.Workspace.Admin); errors.Is(e, os.ErrNotExist) {
-					var identityErr *workspace.IdentityError
-					if admin, e := workspace.PublishedIdentityAdmin(w.Common, item.ID); errors.As(e, &identityErr) {
-						item.IdentityErr = identityErr
-					} else if e != nil {
-						item.Err = e
-					} else if admin != "" {
-						item.MovedTo = admin
-					} else {
-						item.AdminMissing = true
-					}
-				}
-			}
-			out = append(out, item)
-			continue
-		}
-		kind, id, ok := strings.Cut(strings.TrimSuffix(name, ".json"), "-")
-		if !strings.HasSuffix(name, ".json") || !ok || !storage.ValidUUID(id) || kind != "config" && kind != "seed" && kind != "restore" && kind != "encrypt" {
-			out = append(out, PendingJournal{ID: name, Kind: "unknown", Err: errors.New("unknown transaction file")})
-			continue
-		}
-		item := PendingJournal{ID: id, Kind: kind, WorkspaceID: record.WorkspaceID, Direction: record.Direction, Outcome: record.Outcome, Err: readErr}
-		if kind == "restore" {
-			item.WorkspaceID = record.Manifest.Plan.Destination
-		}
-		if kind == "seed" && readErr == nil && record.FilesDigest != "" {
-			// Resume, rollback and abandon all read the list first.
-			list, err := ReadSeedFiles(meta, id)
-			if err == nil && digestOf(list) != record.FilesDigest {
-				err = fmt.Errorf("%w: it doesn't match its journal", storage.ErrConflict)
-			}
-			if err != nil {
-				item.Err = &SeedListError{ID: id, Err: err}
-			}
-		}
-		if kind == "encrypt" && readErr == nil {
-			// A correction replaces a policy that is already in service.
-			item.Published, item.Err = secureblob.Published(common, record.Policy, record.OldPolicy)
-		}
-		item.Root = root(item.WorkspaceID)
-		out = append(out, item)
+		out = append(out, describeJournal(w, common, meta, name, root))
 	}
 	return out, nil
+}
+
+// describeJournal reads the pending journal name in transactions/ for
+// PendingJournals and the pending-transaction refusal; root names a
+// workspace's checkout.
+func describeJournal(w *workspace.Context, common, meta *storage.Dir, name string, root func(string) string) PendingJournal {
+	data, readErr := common.ReadFile(filepath.Join("gitlocal/transactions", name), 16<<20)
+	var record struct {
+		ID          string `json:"id"`
+		WorkspaceID string `json:"workspaceId"`
+		Direction   string `json:"direction"`
+		Outcome     string `json:"outcome"`
+		Identity    struct {
+			WorkspaceID string `json:"workspaceId"`
+		} `json:"identity"`
+		Workspace struct {
+			Admin string `json:"adminPath"`
+			Root  string `json:"rootPath"`
+		} `json:"workspace"`
+		Manifest struct {
+			Plan struct {
+				Destination string `json:"destinationWorkspaceId"`
+			} `json:"plan"`
+		} `json:"manifest"`
+		Policy      secureblob.Policy  `json:"policy"`
+		OldPolicy   *secureblob.Policy `json:"oldPolicy"`
+		FilesDigest string             `json:"filesDigest"`
+		Stopped     *RestoreStop       `json:"stopped"`
+	}
+	if readErr == nil {
+		readErr = json.NewDecoder(bytes.NewReader(data)).Decode(&record)
+	}
+	if name == "init.json" {
+		item := PendingJournal{ID: record.Identity.WorkspaceID, Kind: "init", WorkspaceID: record.Identity.WorkspaceID, Root: record.Workspace.Root, Err: readErr}
+		if readErr == nil {
+			if !filepath.IsAbs(record.Workspace.Admin) {
+				item.Err = errors.New("initialization journal has no administrative path")
+			} else if _, e := os.Stat(record.Workspace.Admin); errors.Is(e, os.ErrNotExist) {
+				var identityErr *workspace.IdentityError
+				if admin, e := workspace.PublishedIdentityAdmin(w.Common, item.ID); errors.As(e, &identityErr) {
+					item.IdentityErr = identityErr
+				} else if e != nil {
+					item.Err = e
+				} else if admin != "" {
+					item.MovedTo = admin
+				} else {
+					item.AdminMissing = true
+				}
+			}
+		}
+		return item
+	}
+	kind, id, ok := strings.Cut(strings.TrimSuffix(name, ".json"), "-")
+	if !strings.HasSuffix(name, ".json") || !ok || !storage.ValidUUID(id) || kind != "config" && kind != "seed" && kind != "restore" && kind != "encrypt" {
+		return PendingJournal{ID: name, Kind: "unknown", Err: errors.New("unknown transaction file")}
+	}
+	item := PendingJournal{ID: id, Kind: kind, WorkspaceID: record.WorkspaceID, Direction: record.Direction, Outcome: record.Outcome, Err: readErr}
+	if kind == "restore" {
+		item.WorkspaceID = record.Manifest.Plan.Destination
+		item.Stopped = record.Stopped
+	}
+	if kind == "seed" && readErr == nil && record.FilesDigest != "" {
+		// Resume, rollback and abandon all read the list first.
+		list, err := ReadSeedFiles(meta, id)
+		if err == nil && digestOf(list) != record.FilesDigest {
+			err = errListMismatch
+		}
+		if err != nil {
+			item.Err = &SeedListError{ID: id, Err: err}
+		}
+	}
+	if kind == "encrypt" && readErr == nil {
+		// A correction replaces a policy that is already in service.
+		item.Published, item.Err = secureblob.Published(common, record.Policy, record.OldPolicy)
+	}
+	item.Root = root(item.WorkspaceID)
+	return item
 }
 
 // JournalKind finds the kind of a pending or completed journal without

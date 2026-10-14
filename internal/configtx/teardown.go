@@ -36,7 +36,7 @@ func excludeBlock(ctx context.Context, r *gitexec.Runner, cwd string, write bool
 		return false, err
 	}
 	if len(pending) > 0 {
-		return false, pendingError(pending[0])
+		return false, s.pendingError(pending[0])
 	}
 	current, err := readImage(s.common, "info/exclude")
 	if err != nil || !current.Exists || !bytes.Contains(current.Data, []byte(exclude.Begin)) {

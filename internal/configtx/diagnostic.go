@@ -220,7 +220,7 @@ func RefreshIgnore(ctx context.Context, r *gitexec.Runner, cwd string) (bool, []
 		return false, nil, err
 	}
 	if len(pending) > 0 {
-		return false, nil, pendingError(pending[0])
+		return false, nil, s.pendingError(pending[0])
 	}
 	if outdated, err := s.ignoreOutdated(); err != nil || !outdated {
 		return false, nil, err

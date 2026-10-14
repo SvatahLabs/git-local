@@ -23,7 +23,7 @@ func ReadSelection(ctx context.Context, r *gitexec.Runner, cwd string, fn func(w
 		return err
 	}
 	if len(pending) > 0 {
-		return pendingError(pending[0])
+		return s.pendingError(pending[0])
 	}
 	var state selection.State
 	for _, src := range s.sources {

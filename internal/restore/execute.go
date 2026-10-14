@@ -202,7 +202,7 @@ func execute(ctx context.Context, r *gitexec.Runner, cwd, sourceWorkspace, selec
 		// journal.
 		beforeJournal := func(err error) error {
 			if _, statErr := meta.Lstat(journalPath(id)); statErr == nil {
-				return stopped(id, err)
+				return stopped(meta, &j, err)
 			}
 			return errors.Join(err, dropAnchor(ctx, r, w.Store, w.WorkspaceID, id, j.RecoverySnapshot))
 		}
@@ -220,10 +220,10 @@ func execute(ctx context.Context, r *gitexec.Runner, cwd, sourceWorkspace, selec
 		}
 		result.RecoverySnapshot = j.RecoverySnapshot
 		if err = point(ctx, f, "journal"); err != nil {
-			return stopped(id, err)
+			return stopped(meta, &j, err)
 		}
 		if err = run(ctx, r, w, files, meta, &j, guard, f); err != nil {
-			return stopped(id, err)
+			return stopped(meta, &j, err)
 		}
 		result.Changed = true
 		return nil
@@ -942,27 +942,34 @@ func recoverRestore(ctx context.Context, r *gitexec.Runner, cwd, id string, roll
 		defer files.Close()
 		g, err := newGuard(ctx, r, w, files, &j, recheck, true)
 		if err != nil {
-			return stopped(id, err)
+			return stopped(meta, &j, err)
 		}
 		defer g.close()
 		if err = g.recognize(ctx); err != nil {
-			return stopped(id, err)
+			return stopped(meta, &j, err)
+		}
+		// What stopped it last is resolved.
+		if j.Stopped != nil {
+			j.Stopped = nil
+			if err = writeJournal(meta, j); err != nil {
+				return stopped(meta, &j, err)
+			}
 		}
 		if rollback {
 			if err = point(ctx, f, "before-rollback-intent"); err != nil {
-				return stopped(id, err)
+				return stopped(meta, &j, err)
 			}
 			j.Direction = "rollback"
 			j.Progress = 0
 			if err = writeJournal(meta, j); err != nil {
-				return stopped(id, err)
+				return stopped(meta, &j, err)
 			}
 			if err = point(ctx, f, "rollback-intent"); err != nil {
-				return stopped(id, err)
+				return stopped(meta, &j, err)
 			}
 		}
 		if err = run(ctx, r, w, files, meta, &j, g, f); err != nil {
-			return stopped(id, err)
+			return stopped(meta, &j, err)
 		}
 		result.Changed = true
 		return nil

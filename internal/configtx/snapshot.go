@@ -23,7 +23,7 @@ func WithSelection(ctx context.Context, r *gitexec.Runner, cwd string, fn func(w
 		return nil, err
 	}
 	if len(pending) > 0 {
-		return nil, pendingError(pending[0])
+		return nil, s.pendingError(pending[0])
 	}
 	var state selection.State
 	for _, src := range s.sources {
@@ -79,7 +79,7 @@ func WithSelection(ctx context.Context, r *gitexec.Runner, cwd string, fn func(w
 			return e
 		}
 		if len(pending) > 0 {
-			return pendingError(pending[0])
+			return s.pendingError(pending[0])
 		}
 		more, e := s.verify(ctx, s.w.WorkspaceID, state, false)
 		warnings = append(warnings, more...)

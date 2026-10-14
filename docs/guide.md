@@ -75,7 +75,11 @@ An interrupted transaction blocks git-local commands and the commit and push
 guards until it is resolved. `git local doctor` lists every pending journal
 (configuration, seed, restore, encryption migration and initialization) with the
 command that resolves it. Use `recover <id> --resume` or `--rollback` first (for
-an encryption migration, `encrypt recover`). If neither can finish, for example
+an encryption migration, `encrypt recover`). When the journal records why
+neither can finish yet (a seed whose file list is lost, a restore stopped at an
+edit it preserved or at staging bytes it doesn't recognize, a transaction that
+committed or whose rollback started), the refusal of every other command,
+`recover --list` and doctor name the command that works instead. If neither can finish, for example
 because a file was edited after the interruption,
 `git local recover <id> --abandon` gives the transaction up: working files and
 selections stay as they are, a configuration transaction's managed ignore block
