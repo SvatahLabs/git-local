@@ -13,6 +13,7 @@ import (
 // A name like backup~2.txt is an ordinary file outside Windows. Inside a
 // tracked directory it must be snapshotted, not break the workspace.
 func TestTildeDigitNamesAreOrdinaryOutsideWindows(t *testing.T) {
+	t.Parallel()
 	repo := testutil.New(t)
 	repo.Commit()
 	home := filepath.Join(repo.Root, "fixture-home")
@@ -22,9 +23,7 @@ func TestTildeDigitNamesAreOrdinaryOutsideWindows(t *testing.T) {
 	if err := os.MkdirAll(home, 0700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	t.Setenv("XDG_CONFIG_HOME", home)
+	isolateHome(t, home)
 	if err := os.WriteFile(filepath.Join(repo.Root, "notes", "a"), []byte("a\n"), 0600); err != nil {
 		t.Fatal(err)
 	}

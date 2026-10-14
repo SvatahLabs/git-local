@@ -14,6 +14,7 @@ import (
 )
 
 func TestProtectedRestoreMixedDirectoryAndSymlink(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink restore is unavailable on Windows")
 	}
@@ -79,6 +80,7 @@ func TestProtectedRestoreMixedDirectoryAndSymlink(t *testing.T) {
 }
 
 func TestProtectedRestoreCreateRollsBackWithoutPreimage(t *testing.T) {
+	t.Parallel()
 	repo, r, w := fixture(t)
 	write(t, repo.Root, ".env.local", "TOKEN=saved\n")
 	track(t, r, repo.Root, true, ".env.local")
@@ -120,6 +122,7 @@ func TestProtectedRestoreCreateRollsBackWithoutPreimage(t *testing.T) {
 }
 
 func TestProtectedRestoreResumeAndRollback(t *testing.T) {
+	t.Parallel()
 	repo, r, w := fixture(t)
 	write(t, repo.Root, ".env.local", "TOKEN=saved\n")
 	track(t, r, repo.Root, true, ".env.local")
@@ -191,6 +194,7 @@ func TestProtectedRestoreResumeAndRollback(t *testing.T) {
 }
 
 func TestEncryptedRecoveryBlobHasKeyedFingerprintWithoutPlaintextGitObject(t *testing.T) {
+	t.Parallel()
 	repo, r, w := fixture(t)
 	content := append([]byte("TOKEN=private-value\n"), 0, 1, 2)
 	writePath := filepath.Join(repo.Root, ".env.local")

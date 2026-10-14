@@ -8,6 +8,7 @@ import (
 // The completion scripts call the hidden __complete command; it must reach
 // Cobra instead of failing the unknown-command check.
 func TestShellCompletionRequestsListSubcommands(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	for _, request := range []string{"__complete", "__completeNoDesc"} {
 		code, out, diagnostic := callCLI(t, dir, request, "hook", "")
@@ -35,6 +36,7 @@ func TestShellCompletionRequestsListSubcommands(t *testing.T) {
 // A command line being completed may already hold --json; the shell still
 // gets completion lines and a directive, not a JSON envelope.
 func TestShellCompletionIgnoresJSONFlagBeingCompleted(t *testing.T) {
+	t.Parallel()
 	code, out, diagnostic := callCLI(t, t.TempDir(), "__complete", "hook", "--json", "")
 	if code != 0 || strings.Contains(out, "schemaVersion") || !strings.Contains(out, "install") || !strings.Contains(out, ":") {
 		t.Fatalf("__complete hook --json: exit %d\n%s\n%s", code, out, diagnostic)

@@ -14,15 +14,14 @@ import (
 // the working directory, so it must refuse rather than pass because B has no
 // git-local state.
 func TestGuardRefusesHookRunForAnotherRepository(t *testing.T) {
+	t.Parallel()
 	a := testutil.New(t)
 	a.Commit()
 	home := filepath.Join(a.Root, "fixture-home")
 	if err := os.MkdirAll(home, 0700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	t.Setenv("XDG_CONFIG_HOME", home)
+	isolateHome(t, home)
 	successful(t, a.Root, "init")
 	if err := os.WriteFile(filepath.Join(a.Root, "notes.local"), []byte("local only\n"), 0600); err != nil {
 		t.Fatal(err)
@@ -32,8 +31,8 @@ func TestGuardRefusesHookRunForAnotherRepository(t *testing.T) {
 	b := testutil.New(t)
 	b.Commit()
 
-	t.Setenv("GIT_DIR", filepath.Join(a.Root, ".git"))
-	t.Setenv("GIT_INDEX_FILE", filepath.Join(a.Root, ".git", "index"))
+	setenv(t, "GIT_DIR", filepath.Join(a.Root, ".git"))
+	setenv(t, "GIT_INDEX_FILE", filepath.Join(a.Root, ".git", "index"))
 	for _, args := range [][]string{{"guard", "staged"}, {"guard", "push", "origin"}} {
 		code, _, diagnostic := callCLI(t, b.Root, args...)
 		if code != 3 || !strings.Contains(diagnostic, filepath.Join(a.Root, ".git")) || !strings.Contains(diagnostic, b.Root) {
@@ -43,7 +42,7 @@ func TestGuardRefusesHookRunForAnotherRepository(t *testing.T) {
 	// The same GIT_DIR from its own worktree, absolute or relative, is
 	// checked as usual and finds the staged selected file.
 	for _, gitDir := range []string{filepath.Join(a.Root, ".git"), ".git"} {
-		t.Setenv("GIT_DIR", gitDir)
+		setenv(t, "GIT_DIR", gitDir)
 		code, _, diagnostic := callCLI(t, a.Root, "guard", "staged")
 		if code != 1 || !strings.Contains(diagnostic, "notes.local") {
 			t.Fatalf("GIT_DIR=%s: exit %d: %s", gitDir, code, diagnostic)

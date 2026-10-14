@@ -15,6 +15,7 @@ import (
 // writes the current block whether or not anything is selected, and doctor
 // flags a missing one.
 func TestInitWritesStageRuleWithoutSelections(t *testing.T) {
+	t.Parallel()
 	repo := layoutRepo(t)
 	path := filepath.Join(repo.Root, ".git", "info", "exclude")
 	hasStageRule := func() bool {
@@ -58,15 +59,14 @@ func TestInitWritesStageRuleWithoutSelections(t *testing.T) {
 // TestFreshInitSaysBlockAdded: a fresh repository has no managed block, so
 // init adds one; "rewritten for this release" is only for an older block.
 func TestFreshInitSaysBlockAdded(t *testing.T) {
+	t.Parallel()
 	repo := testutil.New(t)
 	repo.Commit()
 	home := filepath.Join(repo.Root, "fixture-home")
 	if err := os.MkdirAll(home, 0700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	t.Setenv("XDG_CONFIG_HOME", home)
+	isolateHome(t, home)
 	if out := successful(t, repo.Root, "init"); !strings.Contains(out, "Managed ignore block: added.") || strings.Contains(out, "rewritten") {
 		t.Fatalf("fresh init output:\n%s", out)
 	}

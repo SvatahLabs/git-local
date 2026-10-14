@@ -45,6 +45,7 @@ func fixtureFrom(t *testing.T, repo *testutil.Repo) (*testutil.Repo, *gitexec.Ru
 }
 
 func TestEncryptedSnapshotRestoreUsesProtectedJournal(t *testing.T) {
+	t.Parallel()
 	repo, r, w := fixture(t)
 	write(t, repo.Root, ".env.local", "TOKEN=private\n")
 	track(t, r, repo.Root, true, ".env.local")
@@ -184,6 +185,7 @@ func durable(t *testing.T, root string) map[string]string {
 	return result
 }
 func TestPreciseReadOnlyPlan(t *testing.T) {
+	t.Parallel()
 	repo, r, _ := fixture(t)
 	root := repo.Root
 	write(t, root, "notes/a", "old")
@@ -232,6 +234,7 @@ func TestPreciseReadOnlyPlan(t *testing.T) {
 	}
 }
 func TestDirtyAndCleanedWorkingTree(t *testing.T) {
+	t.Parallel()
 	repo, r, _ := fixture(t)
 	root := repo.Root
 	write(t, root, "notes/sub/a", "old")
@@ -257,6 +260,7 @@ func TestDirtyAndCleanedWorkingTree(t *testing.T) {
 	}
 }
 func TestDeletedSourceAndExclusions(t *testing.T) {
+	t.Parallel()
 	repo, r, _ := fixture(t)
 	root := repo.Root
 	write(t, root, "notes/a", "saved")
@@ -281,6 +285,7 @@ func TestDeletedSourceAndExclusions(t *testing.T) {
 	}
 }
 func TestCrossWorkspaceWithoutBaseline(t *testing.T) {
+	t.Parallel()
 	repo, r, w := fixture(t)
 	root := repo.Root
 	write(t, root, "notes/a", "saved")
@@ -318,6 +323,7 @@ func TestCrossWorkspaceWithoutBaseline(t *testing.T) {
 	}
 }
 func TestTopologyAndOwnedObstructions(t *testing.T) {
+	t.Parallel()
 	repo, r, _ := fixture(t)
 	root := repo.Root
 	write(t, root, "notes/a", "file")
@@ -344,6 +350,7 @@ func TestTopologyAndOwnedObstructions(t *testing.T) {
 	}
 }
 func TestBoundaryObstructions(t *testing.T) {
+	t.Parallel()
 	for _, kind := range []string{"directory", "symlink-parent", "hardlink", "alias", "nested-repo", "main-owned"} {
 		t.Run(kind, func(t *testing.T) {
 			repo, r, _ := fixture(t)
@@ -381,6 +388,7 @@ func TestBoundaryObstructions(t *testing.T) {
 	}
 }
 func TestLateChangesFail(t *testing.T) {
+	t.Parallel()
 	for _, kind := range []string{"content", "ownership", "parent", "configuration"} {
 		t.Run(kind, func(t *testing.T) {
 			if kind == "parent" && runtime.GOOS == "windows" {
@@ -422,6 +430,7 @@ func TestLateChangesFail(t *testing.T) {
 	}
 }
 func TestSymlinkAndExecutablePlans(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX mode and symlink fixture")
 	}

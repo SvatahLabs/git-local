@@ -10,6 +10,7 @@ import (
 // A journal encode accepts must be readable: exactly journalLimit bytes on
 // disk, newline included, is the largest.
 func TestJournalSizeLimitAgreesWithReader(t *testing.T) {
+	t.Parallel()
 	type padded struct{ S string }
 	overhead := len(`{"S":""}`) + 1
 	dir, err := storage.OpenDir(t.TempDir())

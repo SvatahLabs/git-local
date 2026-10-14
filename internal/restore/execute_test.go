@@ -137,6 +137,7 @@ func TestExecuteAndRecovery(t *testing.T) {
 }
 
 func TestRestoreMissingSelectedFileNeedsNoOverwrite(t *testing.T) {
+	t.Parallel()
 	repo, r, _ := fixture(t)
 	root := repo.Root
 	write(t, root, "notes/a", "saved")
@@ -162,6 +163,7 @@ func TestRestoreMissingSelectedFileNeedsNoOverwrite(t *testing.T) {
 }
 
 func TestCaptureFailureNeverChangesDestinations(t *testing.T) {
+	t.Parallel()
 	repo, r, _ := fixture(t)
 	root := repo.Root
 	write(t, root, "notes/a", "source")
@@ -260,6 +262,7 @@ func TestRecoveryPreservesExternalChanges(t *testing.T) {
 }
 
 func TestCancellationAfterJournal(t *testing.T) {
+	t.Parallel()
 	repo, r, _ := fixture(t)
 	root := repo.Root
 	write(t, root, "notes/a", "source")
@@ -336,6 +339,7 @@ func TestExecutionStopsOnLastMomentChanges(t *testing.T) {
 }
 
 func TestInterruptedPartialStagingIsPreserved(t *testing.T) {
+	t.Parallel()
 	repo, r, w := fixture(t)
 	root := repo.Root
 	write(t, root, "notes/a", "source")
@@ -379,6 +383,7 @@ func TestInterruptedPartialStagingIsPreserved(t *testing.T) {
 }
 
 func TestBinaryModesAndSymlinkExecution(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX link/mode execution")
 	}
@@ -432,6 +437,7 @@ func TestBinaryModesAndSymlinkExecution(t *testing.T) {
 }
 
 func TestImportedRestoreRecoveryWithoutBaseline(t *testing.T) {
+	t.Parallel()
 	repo, r, sourceWorkspace := fixture(t)
 	root := repo.Root
 	write(t, root, "notes/a", "source")

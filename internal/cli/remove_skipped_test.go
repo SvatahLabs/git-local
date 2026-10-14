@@ -23,9 +23,7 @@ func skippedRemoveFixture(t *testing.T) (*testutil.Repo, string, func(root, path
 	if err := os.MkdirAll(home, 0700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	t.Setenv("XDG_CONFIG_HOME", home)
+	isolateHome(t, home)
 	write := func(root, path, content string) {
 		t.Helper()
 		if err := os.MkdirAll(filepath.Join(root, filepath.Dir(path)), 0700); err != nil {
@@ -74,6 +72,7 @@ func skippedRemoveFixture(t *testing.T) (*testutil.Repo, string, func(root, path
 // by spelling, so removal, which saves the worktree first, is refused with
 // the correction command and the worktree is kept, even with --force.
 func TestWorkspaceRemoveRefusesWhenSnapshotRefusesAliasedFile(t *testing.T) {
+	t.Parallel()
 	repo, linked, write := skippedRemoveFixture(t)
 	write(linked, "notes/Secret.txt", "TOKEN=unsaved\n")
 	for _, args := range [][]string{{"workspace", "remove", linked}, {"workspace", "remove", linked, "--force"}} {

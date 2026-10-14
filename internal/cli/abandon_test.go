@@ -11,15 +11,14 @@ import (
 )
 
 func TestRecoverAbandonCLIAndDoctorGuidance(t *testing.T) {
+	t.Parallel()
 	repo := testutil.New(t)
 	repo.Commit()
 	home := filepath.Join(repo.Root, "fixture-home")
 	if err := os.MkdirAll(home, 0700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	t.Setenv("XDG_CONFIG_HOME", home)
+	isolateHome(t, home)
 	root := repo.Root
 	if err := os.WriteFile(filepath.Join(root, "local.txt"), []byte("private\n"), 0600); err != nil {
 		t.Fatal(err)
@@ -93,6 +92,7 @@ func TestRecoverAbandonCLIAndDoctorGuidance(t *testing.T) {
 }
 
 func TestRecoverDiscardRecoveryRequiresAbandon(t *testing.T) {
+	t.Parallel()
 	id := "00000000-0000-4000-8000-000000000000"
 	for _, args := range [][]string{{"recover", id, "--resume", "--discard-recovery"}, {"recover", "--list", "--discard-recovery"}} {
 		if code, _, diagnostic := callCLI(t, t.TempDir(), args...); code != 2 {

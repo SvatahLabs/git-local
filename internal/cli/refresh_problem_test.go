@@ -14,6 +14,7 @@ import (
 // selected path that Git now tracks. Init must still rewrite the block, which
 // is the remedy doctor names, and name the real problem.
 func TestInitRewritesBlockDespiteUnrelatedSelectionProblem(t *testing.T) {
+	t.Parallel()
 	repo := layoutRepo(t)
 	if err := os.WriteFile(filepath.Join(repo.Root, "notes.local"), []byte("local\n"), 0600); err != nil {
 		t.Fatal(err)

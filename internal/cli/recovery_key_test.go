@@ -14,6 +14,7 @@ import (
 // that needs a missing key says to reconnect it at its path and names the
 // other way out instead of sending the user to rebind-key.
 func TestRecoveryNamesTheKeyPathNotRebind(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	missing := filepath.Join(dir, "ejected", "files.key")
 	policy := secureblob.Policy{SchemaVersion: secureblob.PolicySchemaVersion, KeyFile: missing, KeyFingerprint: strings.Repeat("a", 64), Sensitive: []secureblob.PathRule{{Path: "notes.txt", Kind: "file"}}}
@@ -36,6 +37,7 @@ func TestRecoveryNamesTheKeyPathNotRebind(t *testing.T) {
 // A key path given on the command line that doesn't exist is reported as
 // such; rebinding is no remedy for it.
 func TestMissingSuppliedKeyDoesNotSuggestRebind(t *testing.T) {
+	t.Parallel()
 	repo := layoutRepo(t)
 	if err := os.WriteFile(filepath.Join(repo.Root, "notes.txt"), []byte("private\n"), 0600); err != nil {
 		t.Fatal(err)

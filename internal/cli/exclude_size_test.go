@@ -13,6 +13,7 @@ import (
 // managed patterns once names differ near their start. Thirty such
 // sixty-character names exceeded the old 128 KiB cap.
 func TestUntrackThirtyLongNamesInOneDirectory(t *testing.T) {
+	t.Parallel()
 	repo := layoutRepo(t)
 	names := make([]string, 30)
 	for i := range names {

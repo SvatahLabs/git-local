@@ -10,6 +10,7 @@ import (
 // From a linked worktree, a backup key must still stay out of the main
 // checkout and the common Git directory, as for encrypt keygen.
 func TestBackupKeyOutsideEveryCheckoutFromLinkedWorktree(t *testing.T) {
+	t.Parallel()
 	repo := layoutRepo(t)
 	linked := linkedWorkspace(t, repo, t.TempDir(), "backup-key")
 	for _, path := range []string{filepath.Join(repo.Root, "backup.key"), filepath.Join(repo.Root, ".git", "backup.key"), filepath.Join(linked, "backup.key")} {
@@ -39,6 +40,7 @@ func TestBackupKeyOutsideEveryCheckoutFromLinkedWorktree(t *testing.T) {
 // A linked worktree deleted without git worktree prune stays registered. No
 // key can lie below it, so backup and encrypt keygen still work.
 func TestKeygenIgnoresDeletedWorktree(t *testing.T) {
+	t.Parallel()
 	repo := layoutRepo(t)
 	gone := filepath.Join(t.TempDir(), "gone")
 	repo.Git("worktree", "add", "-q", gone)

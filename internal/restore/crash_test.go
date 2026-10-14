@@ -50,19 +50,12 @@ func crash(t *testing.T, env []string, root, source, id, cut string) {
 }
 func TestRestoreProcessDeathBoundaries(t *testing.T) {
 	cuts := []string{"before-capture:0", "capture:0", "before-manifest-blob", "manifest-blob", "before-recovery-tree", "recovery-tree", "before-recovery-commit", "recovery-commit", "before-recovery-ref", "recovery-ref", "before-journal", "journal", "before-directory:0", "directory:0", "before-stage:0", "stage-write:0", "stage:0", "before-install:0", "install:0", "before-progress:0", "progress:0", "before-install:1", "install:1", "stage:2", "install:2", "before-outcome", "outcome", "before-archive", "archived"}
+	template, source := faultTemplate(t)
 	for _, cut := range cuts {
 		t.Run(cut, func(t *testing.T) {
 			t.Parallel()
-			repo, r, _ := fixture(t)
+			repo, r := cloneRepo(t, template)
 			root := repo.Root
-			write(t, root, "notes/a", "source")
-			write(t, root, "notes/z/new", "new")
-			track(t, r, root, true, "notes")
-			source := save(t, r, root)
-			write(t, root, "notes/a", "baseline")
-			remove(t, root, "notes/z")
-			write(t, root, "notes/b", "delete")
-			save(t, r, root)
 			crash(t, repo.RunnerEnv(), root, source, "", cut)
 			pending, err := configtx.Pending(ctx, r, root)
 			if err != nil {
@@ -100,19 +93,12 @@ func TestRestoreProcessDeathBoundaries(t *testing.T) {
 	}
 }
 func TestRollbackProcessDeathBoundaries(t *testing.T) {
+	template, source := faultTemplate(t)
 	for _, cut := range []string{"before-rollback-intent", "rollback-intent", "install:0", "before-stage-cleanup:2", "stage-cleanup:2", "before-remove-directory:0", "remove-directory:0", "outcome", "archived"} {
 		t.Run(cut, func(t *testing.T) {
 			t.Parallel()
-			repo, r, _ := fixture(t)
+			repo, r := cloneRepo(t, template)
 			root := repo.Root
-			write(t, root, "notes/a", "source")
-			write(t, root, "notes/z/new", "new")
-			track(t, r, root, true, "notes")
-			source := save(t, r, root)
-			write(t, root, "notes/a", "baseline")
-			remove(t, root, "notes/z")
-			write(t, root, "notes/b", "delete")
-			save(t, r, root)
 			result, err := execute(ctx, r, root, "", source, []string{"notes"}, false, func(at string) error {
 				if at == "stage:2" {
 					return errors.New("stop")

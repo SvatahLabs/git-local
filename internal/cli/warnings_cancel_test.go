@@ -16,6 +16,7 @@ import (
 // TestResetHardPrintsSnapshotWarningsInHumanMode checks that human mode shows
 // the warnings JSON mode reports, here for an unavailable workspace.
 func TestResetHardPrintsSnapshotWarningsInHumanMode(t *testing.T) {
+	t.Parallel()
 	repo, write := unavailableWorkspaceFixture(t)
 	write(repo.Root, "notes/plain.txt", "plain v2\n")
 	code, out, diagnostic := callCLI(t, repo.Root, "reset", "--hard")

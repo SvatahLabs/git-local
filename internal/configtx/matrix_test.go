@@ -3,6 +3,7 @@ package configtx
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -32,8 +33,11 @@ func stopAt(point string) fault {
 	}
 }
 
-// resolveMatrix applies first (resume or rollback) and falls back to abandon.
-// Some direction must clear the journal and unblock the guards.
+// resolveMatrix recovers in the requested direction, which must clear the
+// journal and unblock the guards; it doesn't fall back to abandon, so a
+// resume or rollback that always fails fails the matrix (GL-123). Only a
+// transaction that already committed refuses rollback, naming resume, which
+// must then finish it.
 func resolveMatrix(t *testing.T, g *gitexec.Runner, root, id string, rollback bool, recover func(bool) error) string {
 	t.Helper()
 	ctx := context.Background()
@@ -52,9 +56,12 @@ func resolveMatrix(t *testing.T, g *gitexec.Runner, root, id string, rollback bo
 		how = "rollback"
 	}
 	if err := recover(rollback); err != nil {
-		how = "abandon"
-		if _, err := Abandon(ctx, g, root, id); err != nil {
-			t.Fatalf("%s failed and abandon failed too: %v", how, err)
+		if !rollback || !strings.Contains(err.Error(), "already committed; use --resume") {
+			t.Fatalf("%s failed: %v", how, err)
+		}
+		how = "resume"
+		if err := recover(false); err != nil {
+			t.Fatalf("rollback refused after the commit, and resume failed: %v", err)
 		}
 	}
 	if pending, err := Pending(ctx, g, root); err != nil || len(pending) != 0 {
@@ -131,10 +138,18 @@ func TestEverySeedFaultIsResolvable(t *testing.T) {
 				if err == nil {
 					t.Fatalf("fault %s missed", point)
 				}
-				resolveMatrix(t, r, linked, result.TransactionID, rollback, func(back bool) error {
+				how := resolveMatrix(t, r, linked, result.TransactionID, rollback, func(back bool) error {
 					_, err := RecoverSeed(ctx, r, linked, result.TransactionID, back)
 					return err
 				})
+				// Resume seeds every file; rollback, or a stop before the
+				// journal, leaves none.
+				for name, want := range map[string]string{"notes/a": "seeded-a", "notes/sub/b": "seeded-b"} {
+					b, err := os.ReadFile(filepath.Join(linked, filepath.FromSlash(name)))
+					if how == "resume" && (err != nil || string(b) != want) || how != "resume" && !os.IsNotExist(err) {
+						t.Fatalf("%s left %s: %q %v", how, name, b, err)
+					}
+				}
 			})
 		}
 	}

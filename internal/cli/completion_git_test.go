@@ -68,6 +68,7 @@ func gitBashCompletion(t *testing.T) string {
 // GL-106: with Git's bash completion loaded, `git local <TAB>` reaches
 // git-local, as `git-local <TAB>` always did.
 func TestBashCompletionCompletesGitLocalForm(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("bash completion isn't tested on Windows")
 	}
@@ -155,6 +156,7 @@ printf 'raw <%s>\n' "${COMPREPLY[@]}"
 // GL-106: zsh's _git completes `git local ...` through _git-local, with
 // words[1] set to "local"; the request must still run git-local.
 func TestZshCompletionCompletesGitLocalForm(t *testing.T) {
+	t.Parallel()
 	zsh, err := exec.LookPath("zsh")
 	if err != nil || runtime.GOOS == "windows" {
 		t.Skip("zsh isn't installed")
@@ -229,6 +231,7 @@ func gitZshCompletion(t *testing.T) string {
 // distributions) dispatches `git local ...` to a bash-style _git_local, under
 // ksh emulation; the zsh script defines it.
 func TestZshCompletionWithGitsScriptCompletesGitLocalForm(t *testing.T) {
+	t.Parallel()
 	zsh, err := exec.LookPath("zsh")
 	if err != nil || runtime.GOOS == "windows" {
 		t.Skip("zsh isn't installed")

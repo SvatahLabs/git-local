@@ -15,6 +15,7 @@ import (
 // objects, keeping every snapshot and recovery ref; history, show and restore
 // still work, and doctor reports the store's size.
 func TestMaintenancePrunesUnreachableObjectsAndKeepsRefs(t *testing.T) {
+	t.Parallel()
 	repo := layoutRepo(t)
 	store := filepath.Join(repo.Root, ".git", "gitlocal", "history.git")
 	gitStore := func(args ...string) string {

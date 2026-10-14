@@ -10,6 +10,7 @@ import (
 )
 
 func TestAbandonRestoreKeepsUserEditsAndQuarantinesUnknownStage(t *testing.T) {
+	t.Parallel()
 	repo, r, w := fixture(t)
 	root := repo.Root
 	write(t, root, "notes/a", "source")

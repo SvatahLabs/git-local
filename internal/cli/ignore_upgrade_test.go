@@ -13,6 +13,7 @@ import (
 )
 
 func TestInitRewritesUpgradedIgnoreBlockThatHidesAnExclusion(t *testing.T) {
+	t.Parallel()
 	repo := testutil.New(t)
 	repo.Commit()
 	repo.Git("config", "core.ignorecase", "true")
@@ -20,9 +21,7 @@ func TestInitRewritesUpgradedIgnoreBlockThatHidesAnExclusion(t *testing.T) {
 	if err := os.MkdirAll(home, 0700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	t.Setenv("XDG_CONFIG_HOME", home)
+	isolateHome(t, home)
 	for _, p := range []string{"docs/README.md", "docs/other.txt"} {
 		if err := os.MkdirAll(filepath.Join(repo.Root, filepath.Dir(p)), 0700); err != nil {
 			t.Fatal(err)

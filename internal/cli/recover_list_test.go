@@ -14,15 +14,14 @@ import (
 // blocks every session, but recover --list must still list it with its kind
 // and next command.
 func TestRecoverListShowsPendingEncryptionJournal(t *testing.T) {
+	t.Parallel()
 	repo := testutil.New(t)
 	repo.Commit()
 	home := filepath.Join(repo.Root, "fixture-home")
 	if err := os.MkdirAll(home, 0700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	t.Setenv("XDG_CONFIG_HOME", home)
+	isolateHome(t, home)
 	root := repo.Root
 	if err := os.WriteFile(filepath.Join(root, "secret.txt"), []byte("TOKEN=1\n"), 0600); err != nil {
 		t.Fatal(err)
@@ -69,6 +68,7 @@ func TestRecoverListShowsPendingEncryptionJournal(t *testing.T) {
 // TestAutomaticEventPrintsSnapshotWarnings checks that a hook-driven snapshot
 // shows the warning a manual commit shows, here for an unavailable workspace.
 func TestAutomaticEventPrintsSnapshotWarnings(t *testing.T) {
+	t.Parallel()
 	repo, write := unavailableWorkspaceFixture(t)
 	write(repo.Root, "notes/plain.txt", "plain v2\n")
 	code, _, diagnostic := callCLI(t, repo.Root, "auto", "event", "post-commit")
@@ -87,6 +87,7 @@ func TestAutomaticEventPrintsSnapshotWarnings(t *testing.T) {
 // initialization journal are listed in transactions, but transactionIds holds
 // only IDs recover accepts.
 func TestRecoverListKeepsTransactionIDsToUUIDs(t *testing.T) {
+	t.Parallel()
 	repo, _ := unavailableWorkspaceFixture(t)
 	transactions := filepath.Join(repo.Root, ".git", "gitlocal", "transactions")
 	if err := os.MkdirAll(transactions, 0700); err != nil {

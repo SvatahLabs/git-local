@@ -18,24 +18,6 @@ import (
 	"gitlocal/internal/testutil"
 )
 
-func callCLI(t *testing.T, cwd string, args ...string) (int, string, string) {
-	t.Helper()
-	old, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = os.Chdir(cwd); err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if e := os.Chdir(old); e != nil {
-			t.Error(e)
-		}
-	}()
-	var out, diagnostic bytes.Buffer
-	code := Execute(context.Background(), args, &out, &diagnostic)
-	return code, out.String(), diagnostic.String()
-}
 func successful(t *testing.T, cwd string, args ...string) string {
 	t.Helper()
 	code, out, err := callCLI(t, cwd, args...)
@@ -121,15 +103,14 @@ func TestAutoWatchJSONStopsWithSnapshotSummary(t *testing.T) {
 }
 
 func TestSeedNewWorktreeFromMainAndSubset(t *testing.T) {
+	t.Parallel()
 	repo := testutil.New(t)
 	repo.Commit()
 	home := filepath.Join(repo.Root, "fixture-home")
 	if err := os.MkdirAll(home, 0700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	t.Setenv("XDG_CONFIG_HOME", home)
+	isolateHome(t, home)
 	successful(t, repo.Root, "init")
 	if err := os.Mkdir(filepath.Join(repo.Root, "notes"), 0700); err != nil {
 		t.Fatal(err)
@@ -168,15 +149,14 @@ func TestSeedNewWorktreeFromMainAndSubset(t *testing.T) {
 }
 
 func TestLogFiltersSnapshotTimeBranchAndMainlineCommit(t *testing.T) {
+	t.Parallel()
 	repo := testutil.New(t)
 	repo.Commit()
 	home := filepath.Join(repo.Root, "fixture-home")
 	if err := os.MkdirAll(home, 0700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	t.Setenv("XDG_CONFIG_HOME", home)
+	isolateHome(t, home)
 	successful(t, repo.Root, "init")
 	if err := os.WriteFile(filepath.Join(repo.Root, "local"), []byte("main"), 0600); err != nil {
 		t.Fatal(err)
@@ -213,15 +193,14 @@ func TestLogFiltersSnapshotTimeBranchAndMainlineCommit(t *testing.T) {
 }
 
 func TestBrowseOldSnapshotsWithoutRestoring(t *testing.T) {
+	t.Parallel()
 	repo := testutil.New(t)
 	repo.Commit()
 	home := filepath.Join(repo.Root, "fixture-home")
 	if err := os.MkdirAll(home, 0700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	t.Setenv("XDG_CONFIG_HOME", home)
+	isolateHome(t, home)
 	successful(t, repo.Root, "init")
 	if err := os.Mkdir(filepath.Join(repo.Root, "notes"), 0700); err != nil {
 		t.Fatal(err)
@@ -264,15 +243,14 @@ func TestBrowseOldSnapshotsWithoutRestoring(t *testing.T) {
 }
 
 func TestBackupKeyGenerationAndDestinationRefusal(t *testing.T) {
+	t.Parallel()
 	repo := testutil.New(t)
 	repo.Commit()
 	home := filepath.Join(repo.Root, "fixture-home")
 	if err := os.MkdirAll(home, 0700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	t.Setenv("XDG_CONFIG_HOME", home)
+	isolateHome(t, home)
 	successful(t, repo.Root, "init")
 	keyPath := filepath.Join(t.TempDir(), "backup.key")
 	successful(t, repo.Root, "backup", "keygen", keyPath)
@@ -301,15 +279,14 @@ func TestBackupKeyGenerationAndDestinationRefusal(t *testing.T) {
 }
 
 func TestScopedCommitAndWriterProvenanceCLI(t *testing.T) {
+	t.Parallel()
 	repo := testutil.New(t)
 	repo.Commit()
 	home := filepath.Join(repo.Root, "fixture-home")
 	if err := os.MkdirAll(home, 0700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	t.Setenv("XDG_CONFIG_HOME", home)
+	isolateHome(t, home)
 	successful(t, repo.Root, "init")
 	if err := os.Mkdir(filepath.Join(repo.Root, "notes"), 0700); err != nil {
 		t.Fatal(err)
@@ -342,15 +319,14 @@ func TestScopedCommitAndWriterProvenanceCLI(t *testing.T) {
 }
 
 func TestJSONAgentInterfaceForCoreCommands(t *testing.T) {
+	t.Parallel()
 	repo := testutil.New(t)
 	repo.Commit()
 	home := filepath.Join(repo.Root, "fixture-home")
 	if err := os.MkdirAll(home, 0700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	t.Setenv("XDG_CONFIG_HOME", home)
+	isolateHome(t, home)
 	type envelope struct {
 		SchemaVersion int                        `json:"schemaVersion"`
 		Command       string                     `json:"command"`
@@ -461,6 +437,7 @@ func TestJSONAgentInterfaceForCoreCommands(t *testing.T) {
 }
 
 func TestSeedPreservesExecutableAndSymlink(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink fixture requires POSIX")
 	}
@@ -470,9 +447,7 @@ func TestSeedPreservesExecutableAndSymlink(t *testing.T) {
 	if err := os.MkdirAll(home, 0700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	t.Setenv("XDG_CONFIG_HOME", home)
+	isolateHome(t, home)
 	successful(t, repo.Root, "init")
 	if err := os.Mkdir(filepath.Join(repo.Root, "scripts"), 0700); err != nil {
 		t.Fatal(err)
@@ -498,6 +473,7 @@ func TestSeedPreservesExecutableAndSymlink(t *testing.T) {
 	}
 }
 func TestCleanRestoreAndRetainedWorktreeExample(t *testing.T) {
+	t.Parallel()
 	repo := testutil.New(t)
 	repo.Commit()
 	root := repo.Root
@@ -505,9 +481,7 @@ func TestCleanRestoreAndRetainedWorktreeExample(t *testing.T) {
 	if err := os.MkdirAll(home, 0700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	t.Setenv("XDG_CONFIG_HOME", home)
+	isolateHome(t, home)
 	successful(t, root, "init")
 	if err := os.MkdirAll(filepath.Join(root, "notes"), 0700); err != nil {
 		t.Fatal(err)

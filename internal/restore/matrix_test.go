@@ -2,10 +2,12 @@ package restore
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"gitlocal/internal/configtx"
@@ -61,33 +63,51 @@ func copyTree(t *testing.T, src, dst string) {
 	}
 }
 
-func TestEveryRestoreFaultIsResolvable(t *testing.T) {
+// cloneRepo copies template, a fixture repository (see copyTree), to a new
+// temporary directory and opens a runner on the copy.
+func cloneRepo(t *testing.T, template *testutil.Repo) (*testutil.Repo, *gitexec.Runner) {
+	t.Helper()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	root = filepath.Join(root, "repo")
+	copyTree(t, template.Root, root)
+	copy := &testutil.Repo{T: t, Root: root, Env: template.Env, GitPath: template.GitPath}
+	g, err := gitexec.New(copy.RunnerEnv())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { g.Close() })
+	return copy, g
+}
+
+// faultTemplate is the repository every fault and crash case starts from:
+// notes tracked, a source snapshot with notes/a and notes/z/new, then a
+// baseline snapshot that changes notes/a, deletes notes/z and adds notes/b.
+// It returns the template and the source snapshot.
+func faultTemplate(t *testing.T) (*testutil.Repo, string) {
+	t.Helper()
 	repo, r, _ := fixture(t)
-	template := repo.Root
-	write(t, template, "notes/a", "source")
-	write(t, template, "notes/z/new", "new")
-	track(t, r, template, true, "notes")
-	source := save(t, r, template)
-	write(t, template, "notes/a", "baseline")
-	remove(t, template, "notes/z")
-	write(t, template, "notes/b", "delete")
-	save(t, r, template)
+	root := repo.Root
+	write(t, root, "notes/a", "source")
+	write(t, root, "notes/z/new", "new")
+	track(t, r, root, true, "notes")
+	source := save(t, r, root)
+	write(t, root, "notes/a", "baseline")
+	remove(t, root, "notes/z")
+	write(t, root, "notes/b", "delete")
+	save(t, r, root)
+	return repo, source
+}
+
+func TestEveryRestoreFaultIsResolvable(t *testing.T) {
+	template, source := faultTemplate(t)
 	// Record the points on a copy, keeping the template unchanged.
 	clone := func(t *testing.T) (string, *gitexec.Runner) {
 		t.Helper()
-		root, err := filepath.EvalSymlinks(t.TempDir())
-		if err != nil {
-			t.Fatal(err)
-		}
-		root = filepath.Join(root, "repo")
-		copyTree(t, template, root)
-		copy := &testutil.Repo{T: t, Root: root, Env: repo.Env, GitPath: repo.GitPath}
-		g, err := gitexec.New(copy.RunnerEnv())
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { g.Close() })
-		return root, g
+		repo, g := cloneRepo(t, template)
+		return repo.Root, g
 	}
 	root, g := clone(t)
 	var points []string
@@ -120,20 +140,60 @@ func TestEveryRestoreFaultIsResolvable(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				// want checks the files: the source after resume, the
+				// baseline after rollback or a stop before the journal.
+				want := func(how string, restored bool) {
+					t.Helper()
+					expected := map[string]string{"notes/a": "baseline", "notes/b": "delete", "notes/z/new": ""}
+					if restored {
+						expected = map[string]string{"notes/a": "source", "notes/b": "", "notes/z/new": "new"}
+					}
+					for name, content := range expected {
+						b, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(name)))
+						if content == "" && !os.IsNotExist(err) || content != "" && (err != nil || string(b) != content) {
+							t.Fatalf("after %s, %s: %q %v", how, name, b, err)
+						}
+					}
+				}
 				if len(pending) == 0 {
+					want("a stop before the journal", point == "archived")
 					return
 				}
+				// Recovery in the requested direction must finish; it doesn't
+				// fall back to abandon (GL-123). Two stops have a documented
+				// way out instead: partial bytes of an interrupted stage
+				// write are preserved (they could hold an edit) until the
+				// staging file is moved aside, and a restore that committed
+				// can only be resumed.
 				how := "resume"
 				if rollback {
 					how = "rollback"
 				}
-				if _, err := Recover(ctx, r, root, result.TransactionID, rollback); err != nil {
-					how = "abandon"
-					if _, err := Abandon(ctx, r, root, result.TransactionID); err != nil {
-						t.Fatalf("recovery and abandon both failed: %v", err)
+				_, err = Recover(ctx, r, root, result.TransactionID, rollback)
+				if err != nil && strings.Contains(err.Error(), "staging file, which Git ignores") {
+					stages, _ := filepath.Glob(filepath.Join(root, "notes", "*", ".gitlocal-tmp-*"))
+					more, _ := filepath.Glob(filepath.Join(root, "notes", ".gitlocal-tmp-*"))
+					stages = append(stages, more...)
+					aside := t.TempDir()
+					for i, stage := range stages {
+						if !strings.Contains(err.Error(), filepath.ToSlash(strings.TrimPrefix(stage, root+string(filepath.Separator)))) {
+							continue
+						}
+						if e := os.Rename(stage, filepath.Join(aside, fmt.Sprint(i))); e != nil {
+							t.Fatal(e)
+						}
 					}
+					how += " after moving the staging file aside"
+					_, err = Recover(ctx, r, root, result.TransactionID, rollback)
+				} else if err != nil && rollback && strings.Contains(err.Error(), "already completed with a different outcome") {
+					how = "resume"
+					_, err = Recover(ctx, r, root, result.TransactionID, false)
+				}
+				if err != nil {
+					t.Fatalf("%s failed: %v", how, err)
 				}
 				t.Logf("resolved by %s", how)
+				want(how, strings.HasPrefix(how, "resume"))
 				if pending, err := configtx.Pending(ctx, r, root); err != nil || len(pending) != 0 {
 					t.Fatalf("pending after %s: %v %v", how, pending, err)
 				}

@@ -13,6 +13,7 @@ import (
 )
 
 func TestResetUsage(t *testing.T) {
+	t.Parallel()
 	for _, args := range [][]string{{"reset"}, {"reset", "--hard", "HEAD", "extra"}} {
 		var out, diagnostic bytes.Buffer
 		if code := Execute(context.Background(), args, &out, &diagnostic); code != 2 {
@@ -22,6 +23,7 @@ func TestResetUsage(t *testing.T) {
 }
 
 func TestResetHardCapturesSelectedFilesBeforeChangingMain(t *testing.T) {
+	t.Parallel()
 	repo := testutil.New(t)
 	repo.Commit()
 	initial := strings.TrimSpace(string(repo.Git("rev-parse", "HEAD")))
@@ -83,6 +85,7 @@ func TestResetHardCapturesSelectedFilesBeforeChangingMain(t *testing.T) {
 }
 
 func TestResetHardRefusesUnsafeFilterAndSnapshotConflict(t *testing.T) {
+	t.Parallel()
 	repo := testutil.New(t)
 	repo.Commit()
 	if err := os.WriteFile(filepath.Join(repo.Root, ".gitattributes"), []byte("app.txt filter=third-party\n"), 0600); err != nil {
@@ -112,6 +115,7 @@ func TestResetHardRefusesUnsafeFilterAndSnapshotConflict(t *testing.T) {
 }
 
 func TestResetHardRejectsTargetTreeContainingSelectedPath(t *testing.T) {
+	t.Parallel()
 	repo := testutil.New(t)
 	repo.Commit()
 	successful(t, repo.Root, "init")
@@ -135,6 +139,7 @@ func TestResetHardRejectsTargetTreeContainingSelectedPath(t *testing.T) {
 }
 
 func TestResetHardRejectsTargetTreeOwningSelectedAncestor(t *testing.T) {
+	t.Parallel()
 	repo := testutil.New(t)
 	repo.Commit()
 	successful(t, repo.Root, "init")

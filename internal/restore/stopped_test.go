@@ -14,6 +14,7 @@ import (
 // it doesn't recognize, names the way out rather than only resume and
 // rollback, which both refuse while the edit or the bytes are there.
 func TestStoppedAtExternalEditNamesTheWayOut(t *testing.T) {
+	t.Parallel()
 	id := "00000000-0000-4000-8000-000000000001"
 	for _, c := range []struct {
 		err       error

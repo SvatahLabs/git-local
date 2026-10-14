@@ -14,6 +14,7 @@ import (
 )
 
 func TestRestoreOfAliasedPathWritesNoNewPlaintext(t *testing.T) {
+	t.Parallel()
 	repo, r, w := fixture(t)
 	write(t, repo.Root, "notes/Secret.txt", "TOKEN=saved\n")
 	write(t, repo.Root, "notes/plain.txt", "plain\n")

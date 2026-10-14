@@ -10,6 +10,7 @@ import (
 )
 
 func TestResetHardNamesCommittedStagingFile(t *testing.T) {
+	t.Parallel()
 	repo := testutil.New(t)
 	repo.Commit()
 	successful(t, repo.Root, "init")

@@ -20,9 +20,7 @@ func layoutRepo(t *testing.T) *testutil.Repo {
 	if err := os.MkdirAll(home, 0700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	t.Setenv("XDG_CONFIG_HOME", home)
+	isolateHome(t, home)
 	successful(t, repo.Root, "init")
 	return repo
 }
@@ -75,6 +73,7 @@ func doctorReportsNoErrors(t *testing.T, cwd string) {
 // gitdir pointer as a relative path. Lifecycle commands and doctor must
 // resolve it.
 func TestRelativeWorktreePathsWork(t *testing.T) {
+	t.Parallel()
 	repo := layoutRepo(t)
 	linked := filepath.Join(t.TempDir(), "linked")
 	repo.Git("worktree", "add", "-q", "--relative-paths", "-b", "relative", linked)
@@ -137,6 +136,7 @@ func linkedWorkspace(t *testing.T, repo *testutil.Repo, dir, branch string) stri
 // replaced by a file, so stat reports ENOTDIR. The other checkouts keep
 // working and are warned.
 func TestOfflineWorktreeIsUnavailableNotFatal(t *testing.T) {
+	t.Parallel()
 	repo := layoutRepo(t)
 	volume := filepath.Join(t.TempDir(), "volume")
 	if err := os.Mkdir(volume, 0700); err != nil {
@@ -192,6 +192,7 @@ func TestOfflineWorktreeIsUnavailableNotFatal(t *testing.T) {
 // file was deleted still exists as a directory. Init elsewhere skips it with
 // a warning naming the fix, unless it holds a git-local workspace.
 func TestRegisteredWorktreeThatIsNoCheckout(t *testing.T) {
+	t.Parallel()
 	repo := layoutRepo(t)
 	plain := filepath.Join(t.TempDir(), "plain")
 	repo.Git("worktree", "add", "-q", "-b", "plain", plain)
@@ -228,6 +229,7 @@ func TestRegisteredWorktreeThatIsNoCheckout(t *testing.T) {
 // registered worktree that is no checkout holds a workspace when its gitdir
 // file can't be read, so it stops and names the file instead of skipping it.
 func TestUnreadableWorktreeRegistrationStopsInit(t *testing.T) {
+	t.Parallel()
 	if os.Geteuid() == 0 {
 		t.Skip("root reads unreadable files")
 	}
@@ -262,15 +264,14 @@ func TestUnreadableWorktreeRegistrationStopsInit(t *testing.T) {
 // TestStrayFileInWorktreesDirectoryIsIgnored: Git ignores files such as
 // .DS_Store under .git/worktrees, and so must init.
 func TestStrayFileInWorktreesDirectoryIsIgnored(t *testing.T) {
+	t.Parallel()
 	repo := testutil.New(t)
 	repo.Commit()
 	home := filepath.Join(repo.Root, "fixture-home")
 	if err := os.MkdirAll(home, 0700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	t.Setenv("XDG_CONFIG_HOME", home)
+	isolateHome(t, home)
 	common := strings.TrimSpace(string(repo.Git("rev-parse", "--git-common-dir")))
 	if !filepath.IsAbs(common) {
 		common = filepath.Join(repo.Root, common)
@@ -292,15 +293,14 @@ func TestStrayFileInWorktreesDirectoryIsIgnored(t *testing.T) {
 // its worktrees, though it isn't one. Removed linked worktrees must still be
 // retired, and --from main must say there is no main checkout.
 func TestBareRepositoryWorktreesRetire(t *testing.T) {
+	t.Parallel()
 	seed := testutil.New(t)
 	seed.Commit()
 	home := filepath.Join(t.TempDir(), "home")
 	if err := os.MkdirAll(home, 0700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	t.Setenv("XDG_CONFIG_HOME", home)
+	isolateHome(t, home)
 	dir, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)

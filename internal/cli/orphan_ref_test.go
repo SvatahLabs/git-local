@@ -12,6 +12,7 @@ import (
 // command that removes it, recover --abandon removes it, and encryption
 // migration, which refuses unknown private refs, then succeeds.
 func TestDoctorAndAbandonResolveOrphanRecoveryRef(t *testing.T) {
+	t.Parallel()
 	repo := layoutRepo(t)
 	root := repo.Root
 	if err := os.WriteFile(filepath.Join(root, "secret.txt"), []byte("TOKEN=1\n"), 0600); err != nil {

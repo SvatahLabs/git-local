@@ -11,6 +11,7 @@ import (
 )
 
 func TestEncryptionCommandsForFreshHistory(t *testing.T) {
+	t.Parallel()
 	repo := testutil.New(t)
 	repo.Commit()
 	successful(t, repo.Root, "init")
@@ -54,6 +55,7 @@ func TestEncryptionCommandsForFreshHistory(t *testing.T) {
 }
 
 func TestEncryptionMigrateExistingHistory(t *testing.T) {
+	t.Parallel()
 	repo := testutil.New(t)
 	repo.Commit()
 	successful(t, repo.Root, "init")
@@ -83,6 +85,7 @@ func TestEncryptionMigrateExistingHistory(t *testing.T) {
 // The documented relocation path works when the old key's directory is gone,
 // for example on an ejected drive.
 func TestRebindKeyAfterOldKeyDirectoryIsGone(t *testing.T) {
+	t.Parallel()
 	repo := layoutRepo(t)
 	if err := os.WriteFile(filepath.Join(repo.Root, ".env.local"), []byte("TOKEN=private\n"), 0600); err != nil {
 		t.Fatal(err)
@@ -121,6 +124,7 @@ func TestRebindKeyAfterOldKeyDirectoryIsGone(t *testing.T) {
 // GL-108: commands that need the key name the relocation command, not a raw
 // path error, when the key's directory is gone.
 func TestMissingKeyDirectoryNamesRebindKey(t *testing.T) {
+	t.Parallel()
 	repo := layoutRepo(t)
 	if err := os.WriteFile(filepath.Join(repo.Root, ".env.local"), []byte("TOKEN=private\n"), 0600); err != nil {
 		t.Fatal(err)
