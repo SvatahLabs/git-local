@@ -64,50 +64,62 @@ func Canonical(s State) (State, error) {
 		}
 	}
 	sort.Slice(n.Include, func(i, j int) bool { return n.Include[i].Path < n.Include[j].Path })
+	// Kept rules never contain one another, so at most one kept rule is r's
+	// path or an ancestor of it: looking up r's path and each ancestor keeps
+	// this O(K log K) rather than comparing every pair of rules (GL-122).
 	includes := []Rule{}
+	kept := map[string]Rule{}
 	for _, r := range n.Include {
-		redundant := false
-		for _, a := range includes {
+		a, found := Rule{}, false
+		for p := r.Path; ; {
+			if a, found = kept[p]; found {
+				break
+			}
+			i := strings.LastIndexByte(p, '/')
+			if i < 0 {
+				break
+			}
+			p = p[:i]
+		}
+		if found {
 			if a.Path == r.Path && a.Kind != r.Kind {
 				return State{}, fmt.Errorf("conflicting selection kinds for %q", r.Path)
 			}
 			if covers(a, r.Path) {
-				redundant = true
-				break
+				continue
 			}
-			if within(a.Path, r.Path) {
-				return State{}, fmt.Errorf("file selection %q cannot have selected descendants", a.Path)
-			}
+			return State{}, fmt.Errorf("file selection %q cannot have selected descendants", a.Path)
 		}
-		if !redundant {
-			includes = append(includes, r)
-		}
+		includes = append(includes, r)
+		kept[r.Path] = r
 	}
 	n.Include = includes
 	sort.Strings(n.Exclude)
 	excludes := []string{}
+	keptExcludes := map[string]bool{}
 	for _, p := range n.Exclude {
-		covered := false
-		for _, r := range n.Include {
-			if r.Kind == "directory" && r.Path != p && within(r.Path, p) {
-				covered = true
+		// The includes are sorted: p itself, then those under p, are found
+		// by binary search.
+		under := sort.Search(len(n.Include), func(i int) bool { return n.Include[i].Path >= p+"/" })
+		if kept[p].Path != "" || under < len(n.Include) && strings.HasPrefix(n.Include[under].Path, p+"/") {
+			return State{}, fmt.Errorf("exclusion %q obscures an explicit include", p)
+		}
+		covered, redundant := false, keptExcludes[p]
+		for parent := p; ; {
+			j := strings.LastIndexByte(parent, '/')
+			if j < 0 {
+				break
 			}
-			if within(p, r.Path) {
-				return State{}, fmt.Errorf("exclusion %q obscures an explicit include", p)
-			}
+			parent = parent[:j]
+			covered = covered || kept[parent].Kind == "directory"
+			redundant = redundant || keptExcludes[parent]
 		}
 		if !covered {
 			return State{}, fmt.Errorf("exclusion %q has no containing directory selection", p)
 		}
-		redundant := false
-		for _, a := range excludes {
-			if within(a, p) {
-				redundant = true
-				break
-			}
-		}
 		if !redundant {
 			excludes = append(excludes, p)
+			keptExcludes[p] = true
 		}
 	}
 	n.Exclude = excludes

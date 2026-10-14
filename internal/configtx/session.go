@@ -253,7 +253,13 @@ func (s *session) close() {
 		s.common.Close()
 	}
 }
+
+// sourcesRead is called each time readSources reads every workspace's
+// configuration; a test replaces it to count them.
+var sourcesRead = func() {}
+
 func (s *session) readSources() ([]Source, error) {
+	sourcesRead()
 	dirs, err := s.meta.ReadDir("workspaces")
 	if err != nil {
 		return nil, err

@@ -125,8 +125,10 @@ About a hundred defects found in pre-release reviews, among them:
   changed. Restore and seeding no longer check each file against every path
   in the main index, so their time per file doesn't grow with the size of
   the mainline repository. Seeding no longer lists the main index and starts
-  Git processes for each file, sensitive files and symlinks included, and
-  syncs each file's directory once; it is about six times faster.
+  Git processes for each file, sensitive files and symlinks included, syncs
+  each file's directory once, and reads the workspaces' configuration again
+  only when it changed (a selection of thousands of rules made each file
+  cost about 0.1 s); it is about six times faster.
 - Seeding a worktree from a selection of more than a few thousand files
   failed ("configuration transaction exceeds metadata size limit"); a seed
   journal now keeps a long file list beside it, and every journal kind is

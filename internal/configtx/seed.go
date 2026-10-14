@@ -688,12 +688,32 @@ func (s *session) runSeed(ctx context.Context, files *storage.Dir, j *seedJourna
 		}
 		return blobs.Blob(file.Blob, dst)
 	}
+	// Before each file the configuration is recognized again only when one of
+	// its files changed (GL-122).
+	var recognized *configState
+	recognize := func() error {
+		state, err := s.readConfigState(j.Config)
+		if err != nil {
+			return err
+		}
+		if recognized != nil && state.same(*recognized) {
+			return nil
+		}
+		recognized = nil
+		if err := s.recognize(j.Config); err != nil {
+			return err
+		}
+		if state.settled() {
+			recognized = &state
+		}
+		return nil
+	}
 	for index, file := range j.Files {
 		identity := secureblob.Identity{RepositoryID: s.w.RepositoryID, WorkspaceID: j.Source, Path: file.Path, Mode: file.Mode}
 		if err := ctx.Err(); err != nil {
 			return warnings, err
 		}
-		if err := s.recognize(j.Config); err != nil {
+		if err := recognize(); err != nil {
 			return warnings, err
 		}
 		if err := revalidate(false); err != nil {
