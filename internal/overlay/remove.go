@@ -140,8 +140,12 @@ func removeOverlay(ctx context.Context, r *gitexec.Runner, cwd, owner, name stri
 	if err != nil {
 		return empty, "", err
 	}
-	install, installExists, err := loadInstallation(d)
-	if err != nil {
+	var install installation
+	var installExists bool
+	problem := ""
+	if assumeInstalled {
+		install, installExists, problem = loadInstallationForDeinit(d)
+	} else if install, installExists, err = loadInstallation(d); err != nil {
 		return empty, "", err
 	}
 	if len(remaining) == 0 && !installExists {
@@ -149,7 +153,7 @@ func removeOverlay(ctx context.Context, r *gitexec.Runner, cwd, owner, name stri
 			return empty, "", errors.New("overlay installation provenance is missing; cannot safely restore Git attributes and config")
 		}
 		install = installation{SchemaVersion: 1}
-		warning = fmt.Sprintf("the overlay installation record %s was missing, so the overlay filter (include.path %s, %s, its config file and the managed block in info/attributes) was removed as installed by git-local; add back any of them you had set yourself", filepath.Join(p.Common, "gitlocal", installationFile), filterInclude, requiredKey)
+		warning = installationWarning(p.Common, problem)
 	}
 	presetInclude, presetRequired := false, false
 	if len(remaining) == 0 && assumeInstalled {
@@ -286,4 +290,9 @@ func renewTimes(root, path string) error {
 	}
 	now := time.Now()
 	return os.Chtimes(filepath.Join(root, filepath.FromSlash(path)), now, now)
+}
+
+// installationWarning tells what deinit did without the installation record.
+func installationWarning(common, problem string) string {
+	return fmt.Sprintf("the overlay installation record %s %s, so the overlay filter (include.path %s, %s, its config file and the managed block in info/attributes) was removed as installed by git-local; add back any of them you had set yourself", filepath.Join(common, "gitlocal", installationFile), problem, filterInclude, requiredKey)
 }

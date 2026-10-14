@@ -89,7 +89,8 @@ The first release meant for general use. It replaces the 0.1.4 test builds.
   (overlays, hooks, managed ignore and attribute blocks, the required filter,
   workspace identities) and keeps the private history unless you pass
   `--remove-history`. Every check that can refuse runs before its first
-  change, and a rerun finishes an interrupted one.
+  change, and a rerun finishes an interrupted one; until it has, `init` in a
+  worktree still holding an old identity refuses without creating anything.
 - `git local maintenance` packs the private history store and deletes objects
   no snapshot or recovery ref uses; `doctor` reports the store's size.
 - `git local encrypt migrate` corrects an existing sensitive-file policy with

@@ -131,56 +131,57 @@ func FilterLeftovers(ctx context.Context, r *gitexec.Runner, root, commonPath st
 // last overlay normally does this; it is left behind when an overlay add was
 // interrupted before writing its manifest and its directory was then deleted,
 // and Git then fails on that path ("clean filter failed"). It returns what it
-// removed.
-func RemoveFilter(ctx context.Context, r *gitexec.Runner, cwd string) ([]string, error) {
+// removed, and warnings.
+func RemoveFilter(ctx context.Context, r *gitexec.Runner, cwd string) ([]string, []string, error) {
+	var warnings []string
 	w, err := workspace.Discover(ctx, r, cwd)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	common, err := storage.OpenDir(w.Common)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer common.Close()
 	lock, err := common.Lock(ctx, "gitlocal/locks/repository.lock", false)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer lock.Close()
 	versions, err := RegisteredLocked(w.Common)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if len(versions) > 0 {
-		return nil, fmt.Errorf("%w: overlay %s is still registered", storage.ErrConflict, versions[0].Manifest.Name)
+		return nil, nil, fmt.Errorf("%w: overlay %s is still registered", storage.ErrConflict, versions[0].Manifest.Name)
 	}
 	found, err := FilterLeftovers(ctx, r, w.Root, w.Common)
 	if err != nil || len(found) == 0 {
-		return nil, err
+		return nil, nil, err
 	}
 	data, exists, mode, err := readOptional(common, "info/attributes", 1<<20)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var unfiltered []string
 	if begin, end := bytes.Index(data, []byte(attrBegin)), bytes.Index(data, []byte(attrEnd)); begin >= 0 || end >= 0 {
 		edited := fmt.Errorf("%w: the git-local block in %s was edited; move your own lines out of it or delete it by hand, then run the command again", storage.ErrConflict, filepath.Join(w.Common, "info", "attributes"))
 		if begin != 0 || end < 0 {
-			return nil, edited
+			return nil, nil, edited
 		}
 		// Every line in the block must be one git-local writes, so a line a
 		// user added inside it isn't dropped with it.
 		if unfiltered, err = blockPaths(data[:end+len(attrEnd)]); err != nil {
-			return nil, edited
+			return nil, nil, edited
 		}
 		state, err := storage.OpenDir(filepath.Join(w.Common, "gitlocal"))
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		install, _, err := loadInstallation(state)
+		install, _, problem := loadInstallationForDeinit(state)
 		state.Close()
-		if err != nil {
-			return nil, err
+		if strings.HasPrefix(problem, "couldn't") {
+			warnings = append(warnings, installationWarning(w.Common, problem))
 		}
 		user := data[end+len(attrEnd):]
 		if len(user) == 0 && !install.AttributesExisted {
@@ -189,12 +190,12 @@ func RemoveFilter(ctx context.Context, r *gitexec.Runner, cwd string) ([]string,
 			err = common.AtomicWrite("info/attributes", user, mode)
 		}
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 	includes, err := localIncludes(ctx, r, w.Root)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	set := classifyIncludes(includes, w.Common)
 	// The include and the required key go even when the installation found
@@ -202,19 +203,21 @@ func RemoveFilter(ctx context.Context, r *gitexec.Runner, cwd string) ([]string,
 	// deinit sets aside, and its final check refuses while either is left.
 	for _, include := range append([]string{filterInclude}, set.legacy()...) {
 		if err := unsetLocal(ctx, r, w.Root, "--fixed-value", "include.path", include); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 	if err := unsetLocal(ctx, r, w.Root, requiredKey); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	// Git may have cached a filtered file's size and time; see removeOverlay.
+	// The filter is gone already and a rerun finds nothing left to do, so a
+	// failure is a warning.
 	for _, path := range unfiltered {
 		if err := renewTimes(w.Root, path); err != nil {
-			return nil, err
+			warnings = append(warnings, fmt.Sprintf("Git may still show %s as unchanged (renewing its times failed: %v); touch it so Git reads it again", path, err))
 		}
 	}
-	return found, nil
+	return found, warnings, nil
 }
 
 // blockPaths returns the paths of a managed attributes block, refusing a
@@ -254,17 +257,15 @@ func blockPaths(block []byte) ([]string, error) {
 // CheckRemoveAll runs, without changing anything, the checks that removing
 // the last of the registered overlays makes on the filter it then removes,
 // so git local deinit refuses before removing any overlay rather than after
-// removing all but the last. A missing installation record isn't refused:
-// RemoveForDeinit removes the filter as installed by git-local.
+// removing all but the last. A missing or unreadable installation record
+// isn't refused: RemoveForDeinit removes the filter as installed by git-local.
 func CheckRemoveAll(ctx context.Context, r *gitexec.Runner, root, commonPath string) error {
 	d, err := storage.OpenDir(filepath.Join(commonPath, "gitlocal"))
 	if err != nil {
 		return err
 	}
 	defer d.Close()
-	if _, _, err := loadInstallation(d); err != nil {
-		return err
-	}
+	// An unreadable record is taken as missing (see RemoveForDeinit).
 	includes, err := localIncludes(ctx, r, root)
 	if err != nil {
 		return err

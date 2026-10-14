@@ -566,8 +566,8 @@ it from), and for a damaged hook record; each of these refusals comes before it
 changes anything. It also removes the overlay filter an interrupted
 `overlay add` left behind, unless you added your own lines inside its managed
 block in `.git/info/attributes` (move them out first). If the overlay
-installation record is missing, deinit still removes the filter and says what
-it removed. A git local command waiting for the repository lock while deinit
+installation record is missing or can't be read, deinit still removes the
+filter and says what it removed. A git local command waiting for the repository lock while deinit
 sets the private state aside stops with a message saying so, and a
 `git local init` run in another worktree at that moment keeps the new state it
 creates. It sets the
@@ -581,6 +581,12 @@ kept nowhere else: a quarantine, a restore recovery ref (the previous file
 versions of an earlier restore) or a retired worktree's history. Encryption
 keys outside the repository are never touched. An interrupted `deinit`
 finishes when run again, and a rerun names any state an earlier run set aside.
+Until it has, `git local init` in a worktree that still holds the old
+identity refuses before creating anything and says to run deinit there. If a
+worktree was away (on a disk that wasn't mounted, say) while another worktree
+was initialized again, it keeps the identity of the earlier state: init there
+names the identity file to delete, deinit there refuses rather than remove the
+new state, and a deinit of the new state removes that file too.
 To remove the program itself, delete `git-local` from your `PATH`; for the
 macOS package, `sudo rm /usr/local/bin/git-local && sudo pkgutil --forget
 org.gitlocal.cli`.

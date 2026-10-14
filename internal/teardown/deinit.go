@@ -60,16 +60,22 @@ func Deinit(ctx context.Context, r *gitexec.Runner, cwd string, removeHistory bo
 	// belongs reports whether an identity file belongs to the state this
 	// deinit removes. Another worktree's git local init may build new state
 	// once the old one is set aside, and keeps its identity.
-	var belongs func(workspace.Identity) bool
-	if _, err := common.Lstat("gitlocal"); err == nil {
+	_, err = common.Lstat("gitlocal")
+	if err == nil {
+		// A git local init refused after an interrupted deinit can leave a
+		// private state directory holding only its lock: no live state.
+		var bare bool
+		if bare, err = removeBareState(ctx, common); err == nil && bare {
+			err = os.ErrNotExist
+		}
+	}
+	if err == nil {
 		if err := checkInitialized(w); err != nil {
 			return result, err
 		}
-		var repository workspace.Repository
-		if err := common.ReadJSON("gitlocal/repository.json", &repository); err != nil {
+		if err := checkIdentity(w, common); err != nil {
 			return result, err
 		}
-		belongs = func(id workspace.Identity) bool { return id.RepositoryID == repository.RepositoryID }
 		if err := checkRemovable(ctx, r, w, removeHistory); err != nil {
 			return result, err
 		}
@@ -93,7 +99,8 @@ func Deinit(ctx context.Context, r *gitexec.Runner, cwd string, removeHistory bo
 		}
 		// An overlay add interrupted before its manifest, whose directory was
 		// then deleted, leaves the filter with no overlay to remove.
-		leftovers, err := overlay.RemoveFilter(ctx, r, cwd)
+		leftovers, warnings, err := overlay.RemoveFilter(ctx, r, cwd)
+		result.Warnings = append(result.Warnings, warnings...)
 		if err != nil {
 			return result, err
 		}
@@ -136,17 +143,101 @@ func Deinit(ctx context.Context, r *gitexec.Runner, cwd string, removeHistory bo
 		for _, dir := range kept {
 			result.Warnings = append(result.Warnings, "the private state an earlier git local deinit set aside is in "+dir+"; delete it when you no longer need it")
 		}
-		var live workspace.Repository
-		if err := common.ReadJSON("gitlocal/repository.json", &live); err != nil && !os.IsNotExist(err) {
-			return result, err
-		}
-		belongs = func(id workspace.Identity) bool {
-			return live.RepositoryID == "" || id.RepositoryID != live.RepositoryID
-		}
 	}
 	beforeRemoveIdentities()
-	result.Identities, err = removeIdentities(common, w.Common, belongs)
+	// Identities that don't belong to the live state, which another
+	// worktree's git local init may have built meanwhile, are removed: the
+	// removed state's, and any of an older one an interrupted deinit left.
+	// The shared lock keeps an init from publishing a new state's identity
+	// meanwhile.
+	release, belongs, err := liveIdentities(ctx, common)
+	if err != nil {
+		return result, err
+	}
+	defer release()
+	result.Identities, err = removeIdentities(common, w.Common, func(id workspace.Identity) bool { return !belongs(id) })
 	return result, err
+}
+
+// liveIdentities reports which identity files belong to the live private
+// state, holding its lock until release; with no live state, none does.
+func liveIdentities(ctx context.Context, common *storage.Dir) (func(), func(workspace.Identity) bool, error) {
+	none := func(workspace.Identity) bool { return false }
+	if _, err := common.Lstat("gitlocal"); os.IsNotExist(err) {
+		return func() {}, none, nil
+	} else if err != nil {
+		return nil, nil, err
+	}
+	lock, err := common.LockExisting(ctx, "gitlocal/locks/repository.lock")
+	if err != nil {
+		return nil, nil, err
+	}
+	var live workspace.Repository
+	if err := common.ReadJSON("gitlocal/repository.json", &live); os.IsNotExist(err) {
+		return func() { lock.Close() }, none, nil
+	} else if err != nil {
+		lock.Close()
+		return nil, nil, err
+	}
+	return func() { lock.Close() }, func(id workspace.Identity) bool { return id.RepositoryID == live.RepositoryID }, nil
+}
+
+// removeBareState removes a private state directory that holds nothing but
+// its lock file (a git local init refused before writing anything leaves
+// one), under the exclusive lock, and reports whether it was one. A command
+// waiting for the lock meanwhile finds it removed and stops.
+func removeBareState(ctx context.Context, common *storage.Dir) (bool, error) {
+	bare := func() (bool, error) {
+		entries, err := common.ReadDir("gitlocal")
+		if err != nil {
+			return false, err
+		}
+		for _, entry := range entries {
+			if entry.Name() != "locks" || !entry.IsDir() {
+				return false, nil
+			}
+		}
+		locks, err := common.ReadDir("gitlocal/locks")
+		if err != nil {
+			return false, err
+		}
+		for _, entry := range locks {
+			if entry.Name() != "repository.lock" || !entry.Type().IsRegular() {
+				return false, nil
+			}
+		}
+		return true, nil
+	}
+	if ok, err := bare(); err != nil || !ok {
+		return false, err
+	}
+	if err := common.MkdirAll("gitlocal/locks"); err != nil {
+		return false, err
+	}
+	lock, err := common.Lock(ctx, "gitlocal/locks/repository.lock", false)
+	if err != nil {
+		return false, err
+	}
+	defer lock.Close()
+	if ok, err := bare(); err != nil || !ok {
+		return false, err
+	}
+	if runtime.GOOS == "windows" {
+		// Windows can't delete a file that is open.
+		lock.Close()
+	}
+	for _, name := range []string{"gitlocal/locks/repository.lock", "gitlocal/locks", "gitlocal"} {
+		var err error
+		if name == "gitlocal/locks/repository.lock" {
+			err = common.Remove(name)
+		} else {
+			err = common.RemoveDirectory(name)
+		}
+		if err != nil && !os.IsNotExist(err) {
+			return false, err
+		}
+	}
+	return true, nil
 }
 
 // beforeRemoveIdentities runs just before deinit removes the identity files;
@@ -290,6 +381,32 @@ func checkInitialized(w *workspace.Context) error {
 		where = strings.Join(roots, " or ")
 	}
 	return fmt.Errorf("%w: git local was never initialized in this worktree; run git local deinit from %s", storage.ErrConflict, where)
+}
+
+// checkIdentity refuses when this worktree's identity belongs to an earlier
+// private state than the live one, which another worktree's git local init
+// built after an interrupted deinit: deinit from here would remove a state
+// this worktree isn't part of.
+func checkIdentity(w *workspace.Context, common *storage.Dir) error {
+	var id workspace.Identity
+	var live workspace.Repository
+	if err := common.ReadJSON("gitlocal/repository.json", &live); os.IsNotExist(err) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	admin, err := storage.OpenDir(w.Admin)
+	if err != nil {
+		return err
+	}
+	defer admin.Close()
+	if err := admin.ReadJSON("gitlocal-workspace.json", &id); err != nil {
+		return err
+	}
+	if id.RepositoryID != live.RepositoryID {
+		return fmt.Errorf("%w: this worktree's git local identity (%s) belongs to an earlier private state, which an interrupted git local deinit leaves, not to the one in %s; delete that file, then run git local deinit from a worktree where git local init ran since", storage.ErrConflict, filepath.Join(w.Admin, "gitlocal-workspace.json"), filepath.Join(w.Common, "gitlocal"))
+	}
+	return nil
 }
 
 // mainRoot is the main worktree of the repository whose common directory is

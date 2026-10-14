@@ -37,3 +37,18 @@ func loadInstallation(d *storage.Dir) (installation, bool, error) {
 	}
 	return record, true, nil
 }
+
+// loadInstallationForDeinit is loadInstallation for git local deinit, which
+// removes the filter as installed by git-local when the record is missing:
+// a record it can't read (damaged, or from a newer release) is taken as
+// missing too, and problem says why (GL-121).
+func loadInstallationForDeinit(d *storage.Dir) (record installation, exists bool, problem string) {
+	record, exists, err := loadInstallation(d)
+	if err != nil {
+		return installation{}, false, "couldn't be read (" + err.Error() + ")"
+	}
+	if !exists {
+		return record, false, "was missing"
+	}
+	return record, true, ""
+}
