@@ -257,6 +257,12 @@ workspace UUID for another source, or `--paths` to copy a subset. Workspace
 bootstrap uses its existing
 initialization journal; selection, ignore rules, and copied files use one seed
 transaction, recoverable with `git local recover <id> --resume|--rollback`.
+A commit, `git update-ref` or another change to the worktree's HEAD or index
+during a seed stops it. Recovery checks the seed's files against the main
+index and HEAD as they are then: rollback refuses only when main now tracks a
+seeded file (it would remove it), and resume also when main tracks a path the
+seed's selection covers; the message names the path and the command that
+still works.
 
 ```sh
 git -C <new-worktree> local init --from main

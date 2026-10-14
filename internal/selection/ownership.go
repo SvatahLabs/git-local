@@ -7,6 +7,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -202,9 +204,25 @@ func (o Ownership) Revalidate(ctx context.Context, g GitReader, root, admin stri
 	}
 	sum := sha256.Sum256(b)
 	if h != o.Evidence.Head || hex.EncodeToString(sum[:]) != o.Evidence.IndexDigest {
-		return fmt.Errorf("%w: main HEAD or index changed; retry after Git operations finish", storage.ErrConflict)
+		// Waiting helps only while a Git command holds the index or HEAD.
+		if gitBusy(admin) {
+			return fmt.Errorf("%w: main HEAD or index changed; retry after Git operations finish", storage.ErrConflict)
+		}
+		return fmt.Errorf("%w: main HEAD or index changed", storage.ErrConflict)
 	}
 	return nil
+}
+
+// gitBusy reports whether a Git command is changing the index or HEAD of the
+// worktree whose administrative directory is admin: it holds their lock
+// files while it does.
+func gitBusy(admin string) bool {
+	for _, name := range []string{"index.lock", "HEAD.lock"} {
+		if _, err := os.Lstat(filepath.Join(admin, name)); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // Check compares aliases conservatively, while explicit exclusions can remove

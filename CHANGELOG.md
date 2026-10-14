@@ -115,7 +115,9 @@ About a hundred defects found in pre-release reviews, among them:
 - Recovery: every interrupted transaction (configuration, seed, restore,
   encryption migration, initialization) can be resumed, rolled back or
   abandoned without editing internal files, also a seed whose file list was
-  lost; the messages name what blocks recovery and the way out.
+  lost; the messages name what blocks recovery and the way out. A seed
+  stopped by a commit or another change to main in its worktree can be
+  resumed or rolled back (it could only be abandoned).
 - Scale: large index and tree listings, large snapshot metadata, long exclude
   patterns, per-commit process spawning in guards and doctor, and restore
   time, which grew with the square of the restored file count and is now

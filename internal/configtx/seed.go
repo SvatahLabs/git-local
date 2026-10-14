@@ -381,7 +381,7 @@ func seed(ctx context.Context, r *gitexec.Runner, cwd string, planner SeedPlanne
 	if err := point(ctx, f, "seed-journal"); err != nil {
 		return result, withRecovery(j.ID, err)
 	}
-	result.Warnings, err = s.runSeed(ctx, files, &j, f)
+	result.Warnings, err = s.runSeed(ctx, files, &j, f, false)
 	if err != nil {
 		return result, withRecovery(j.ID, err)
 	}
@@ -595,13 +595,22 @@ func (b *limitedSeedBuffer) Write(data []byte) (int, error) {
 	return b.Buffer.Write(data)
 }
 
-func (s *session) runSeed(ctx context.Context, files *storage.Dir, j *seedJournal, f fault) ([]string, error) {
+// runSeed applies or rolls back the seed journal j. A recovery (recovering)
+// checks main ownership as it is now rather than against the journal's
+// evidence: a commit or any other lasting change to main since the seed
+// stopped doesn't block it, only a seeded path or stage main owns now.
+func (s *session) runSeed(ctx context.Context, files *storage.Dir, j *seedJournal, f fault, recovering bool) ([]string, error) {
 	if err := s.recognize(j.Config); err != nil {
 		return nil, err
 	}
 	index, err := selection.IndexFile(ctx, s.r, s.w.Root, s.w.Admin)
 	if err != nil {
 		return nil, err
+	}
+	if recovering && j.Outcome == "" {
+		if err := s.replanOwnership(ctx, j); err != nil {
+			return nil, err
+		}
 	}
 	// revalidate checks main ownership against the journal's evidence. Listing
 	// the whole main index before each file made seeding cost the seeded files
@@ -879,6 +888,54 @@ func (s *session) rollbackSeed(ctx context.Context, files *storage.Dir, j *seedJ
 	return s.archiveSeed(*j)
 }
 
+// replanOwnership checks the seed's paths and stages, and for a resume its
+// selection, against main ownership as it is now, and records that as the
+// evidence later checks compare with (GL-125).
+func (s *session) replanOwnership(ctx context.Context, j *seedJournal) error {
+	owner, err := selection.InspectOwnership(ctx, s.r, s.w.Root, s.w.Admin)
+	if err != nil {
+		return err
+	}
+	paths := make([]string, 0, 2*len(j.Files))
+	for _, file := range j.Files {
+		paths = append(paths, file.Path, file.Stage)
+	}
+	// A seeded path or stage main owns now blocks both directions: rollback
+	// would remove it. A path only the selection covers blocks resume.
+	if err := owner.CheckPaths(paths); err != nil {
+		return &seedOwnedError{id: j.ID, err: err}
+	}
+	if j.Direction != "rollback" {
+		var next selection.State
+		if err := decode(j.Config.After.Data, &next); err != nil {
+			return err
+		}
+		if err := owner.Check(next); err != nil {
+			return &seedOwnedError{id: j.ID, resumeOnly: true, err: err}
+		}
+	}
+	j.Ownership = owner.Evidence
+	return nil
+}
+
+// seedOwnedError is a seed recovery refused because main now owns a path the
+// seed writes (both directions refuse) or only one its selection covers
+// (resume refuses).
+type seedOwnedError struct {
+	id         string
+	resumeOnly bool
+	err        error
+}
+
+func (e *seedOwnedError) Error() string {
+	if e.resumeOnly {
+		return fmt.Sprintf("seed transaction %s can't be resumed: %v; run git local recover %s --rollback to remove the seeded files, or git local recover %s --abandon to leave them as they are", e.id, e.err, e.id, e.id)
+	}
+	return fmt.Sprintf("seed transaction %s can't be resumed or rolled back: %v; run git local recover %s --abandon, which leaves the seeded files as they are", e.id, e.err, e.id)
+}
+
+func (e *seedOwnedError) Unwrap() error { return e.err }
+
 type SeedRecoveryValidator func(workspace.Context, string, string, selection.State, []SeedFile) error
 
 func RecoverSeed(ctx context.Context, r *gitexec.Runner, cwd, id string, rollback bool, validators ...SeedRecoveryValidator) (SeedResult, error) {
@@ -954,7 +1011,11 @@ func RecoverSeed(ctx context.Context, r *gitexec.Runner, cwd, id string, rollbac
 		return result, err
 	}
 	defer files.Close()
-	result.Warnings, err = s.runSeed(ctx, files, &j, nil)
+	result.Warnings, err = s.runSeed(ctx, files, &j, nil, true)
+	var owned *seedOwnedError
+	if errors.As(err, &owned) {
+		return result, err
+	}
 	if err != nil {
 		return result, withRecovery(id, err)
 	}

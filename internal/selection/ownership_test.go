@@ -4,10 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"gitlocal/internal/gitexec"
 	"gitlocal/internal/storage"
+	"gitlocal/internal/testutil"
 )
 
 func TestOwnershipParserAndAliasCollisions(t *testing.T) {
@@ -92,5 +96,42 @@ func TestCheckPathsFoldsEachOwnedPathOnce(t *testing.T) {
 	}
 	if err := (Ownership{Paths: owned}).CheckPaths(append(paths, "main")); !errors.Is(err, storage.ErrConflict) || !strings.Contains(err.Error(), `"main/file-00000"`) {
 		t.Fatalf("owned descendant not reported: %v", err)
+	}
+}
+
+// GL-125: after main changed, the message says to retry after Git operations
+// finish only while a Git command holds the index or HEAD; otherwise waiting
+// changes nothing.
+func TestRevalidateSuggestsWaitingOnlyWhileGitIsBusy(t *testing.T) {
+	t.Parallel()
+	repo := testutil.New(t)
+	repo.Commit()
+	r, err := gitexec.New(repo.RunnerEnv())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	ctx := context.Background()
+	admin := filepath.Join(repo.Root, ".git")
+	owner, err := InspectOwnership(ctx, r, repo.Root, admin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo.Git("commit", "-q", "--allow-empty", "-m", "moved")
+	err = owner.Revalidate(ctx, r, repo.Root, admin)
+	if err == nil || !strings.Contains(err.Error(), "main HEAD or index changed") || strings.Contains(err.Error(), "retry") {
+		t.Fatalf("revalidate after a commit: %v", err)
+	}
+	for _, lock := range []string{"index.lock", "HEAD.lock"} {
+		if err := os.WriteFile(filepath.Join(admin, lock), nil, 0600); err != nil {
+			t.Fatal(err)
+		}
+		err = owner.Revalidate(ctx, r, repo.Root, admin)
+		if err == nil || !strings.Contains(err.Error(), "retry after Git operations finish") {
+			t.Fatalf("revalidate while %s exists: %v", lock, err)
+		}
+		if err := os.Remove(filepath.Join(admin, lock)); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
