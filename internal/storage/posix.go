@@ -186,6 +186,7 @@ func (d *Dir) Rename(old, new string) error {
 	if err = unix.Renameat(a, base, b, target); err != nil {
 		return err
 	}
+	d.forget(old)
 	if err = syncDir(b); err != nil {
 		return err
 	}
@@ -198,6 +199,10 @@ func (d *Dir) Rename(old, new string) error {
 var flushedStages sync.Map
 
 func (d *Dir) flushed(name string) { flushedStages.Store(filepath.Join(d.name, name), true) }
+
+// forget drops a stage that was renamed or removed: its name may be reused
+// by another file, and a long seed would otherwise keep every name (GL-120).
+func (d *Dir) forget(name string) { flushedStages.Delete(filepath.Join(d.name, name)) }
 
 func (d *Dir) chmodStaged(name string, mode fs.FileMode) error {
 	f, err := d.open(name, os.O_WRONLY, 0)
@@ -232,6 +237,7 @@ func (d *Dir) RenameNoReplace(old, new string) error {
 	if err = renameNoReplace(a, base, b, target); err != nil {
 		return &os.LinkError{Op: "rename", Old: old, New: new, Err: err}
 	}
+	d.forget(old)
 	if err = syncDir(b); err != nil {
 		return err
 	}
@@ -252,6 +258,7 @@ func (d *Dir) Remove(name string) error {
 	if err = unix.Unlinkat(fd, base, 0); err != nil {
 		return &os.PathError{Op: "remove", Path: name, Err: err}
 	}
+	d.forget(name)
 	return syncDir(fd)
 }
 func tryLock(f *os.File, shared bool) (bool, error) {
@@ -347,24 +354,8 @@ func (d *Dir) RemoveDirectory(name string) error {
 // SyncStaged re-establishes durability after a process died before closing or
 // syncing a complete staging file. Symlink data is flushed through its parent.
 func (d *Dir) SyncStaged(name string) error {
-	fi, err := d.Lstat(name)
-	if err != nil {
+	if err := d.SyncStagedFile(name); err != nil {
 		return err
-	}
-	_, flushed := flushedStages.Load(filepath.Join(d.name, name))
-	if fi.Mode()&os.ModeSymlink == 0 && !flushed {
-		f, e := d.open(name, os.O_RDONLY, 0)
-		if e != nil {
-			return e
-		}
-		err = f.Sync()
-		closeErr := f.Close()
-		if err != nil {
-			return err
-		}
-		if closeErr != nil {
-			return closeErr
-		}
 	}
 	fd, _, err := d.parent(name)
 	if err != nil {
@@ -372,6 +363,29 @@ func (d *Dir) SyncStaged(name string) error {
 	}
 	defer unix.Close(fd)
 	return syncDir(fd)
+}
+
+// SyncStagedFile is SyncStaged without syncing the stage's directory, for a
+// stage published by a rename into the same directory, whose directory sync
+// covers both names; a stage lost in a crash is written again from its journal.
+func (d *Dir) SyncStagedFile(name string) error {
+	fi, err := d.Lstat(name)
+	if err != nil {
+		return err
+	}
+	_, flushed := flushedStages.Load(filepath.Join(d.name, name))
+	if fi.Mode()&os.ModeSymlink != 0 || flushed {
+		return nil
+	}
+	f, err := d.open(name, os.O_RDONLY, 0)
+	if err != nil {
+		return err
+	}
+	err = f.Sync()
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	return err
 }
 
 // holds reports whether the open file f is still the file at name.

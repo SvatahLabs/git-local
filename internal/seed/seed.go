@@ -141,19 +141,21 @@ func Run(ctx context.Context, r *gitexec.Runner, cwd, from string, paths []strin
 			return result, err
 		}
 		result.SourceWorkspace, result.SourceSnapshot, result.Selection = id, snapshot.ID, state
+		var encrypted []string
 		for p, file := range snapshot.Files {
 			if state.Selected(p) {
 				seedFile := configtx.SeedFile{Path: p, Mode: file.Mode, Blob: file.ID}
 				if snapshot.Metadata.EncryptedDigests[p] != "" {
-					e := history.VerifyEncryptedFileLocked(ctx, r, w, snapshot, p)
-					if e != nil {
-						return result, e
-					}
+					encrypted = append(encrypted, p)
 					seedFile.PlainDigest = snapshot.Metadata.EncryptedDigests[p]
 					result.KeyFingerprint = snapshot.Metadata.EncryptedKeyFingerprint
 				}
 				result.Files = append(result.Files, seedFile)
 			}
+		}
+		sort.Strings(encrypted)
+		if err := history.VerifyEncryptedFilesLocked(ctx, r, w, snapshot, encrypted); err != nil {
+			return result, err
 		}
 		sort.Slice(result.Files, func(i, j int) bool { return result.Files[i].Path < result.Files[j].Path })
 		return result, nil
@@ -202,19 +204,23 @@ func Recover(ctx context.Context, r *gitexec.Runner, cwd, id string, rollback bo
 		if len(expected) != len(files) {
 			return errors.New("seed files differ from source snapshot")
 		}
+		var encrypted []string
 		for _, file := range files {
 			original, ok := expected[file.Path]
 			if !ok || original.Mode != file.Mode || original.ID != file.Blob {
 				return errors.New("seed file differs from source snapshot")
 			}
 			if snapshot.Metadata.EncryptedDigests[file.Path] != "" {
-				err := history.VerifyEncryptedFileLocked(ctx, r, w, snapshot, file.Path)
-				if err != nil || snapshot.Metadata.EncryptedDigests[file.Path] != file.PlainDigest {
+				if snapshot.Metadata.EncryptedDigests[file.Path] != file.PlainDigest {
 					return fmt.Errorf("%w: encrypted seed file differs from source snapshot", storage.ErrConflict)
 				}
+				encrypted = append(encrypted, file.Path)
 			} else if file.PlainDigest != "" {
 				return errors.New("unexpected sensitive seed digest")
 			}
+		}
+		if err := history.VerifyEncryptedFilesLocked(ctx, r, w, snapshot, encrypted); err != nil {
+			return fmt.Errorf("%w: encrypted seed file differs from source snapshot", storage.ErrConflict)
 		}
 		return nil
 	}

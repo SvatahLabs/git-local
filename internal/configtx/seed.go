@@ -590,7 +590,7 @@ type limitedSeedBuffer struct{ bytes.Buffer }
 
 func (b *limitedSeedBuffer) Write(data []byte) (int, error) {
 	if len(data) > 1<<20-b.Len() {
-		return 0, errors.New("encrypted seed symlink target exceeds 1 MiB")
+		return 0, errors.New("seed symlink target exceeds 1 MiB")
 	}
 	return b.Buffer.Write(data)
 }
@@ -667,13 +667,27 @@ func (s *session) runSeed(ctx context.Context, files *storage.Dir, j *seedJourna
 			return warnings, e
 		}
 	}
-	// One cat-file process streams every plain file's blob (GL-117).
+	// One cat-file process streams every blob, plain, encrypted or a
+	// symlink's target (GL-117, GL-120).
 	var blobs *gitexec.BlobReader
 	defer func() {
 		if blobs != nil {
 			blobs.Close()
 		}
 	}()
+	// read writes file's content to dst, decrypted for a sensitive file.
+	read := func(file SeedFile, dst io.Writer, identity secureblob.Identity) error {
+		if blobs == nil {
+			var err error
+			if blobs, err = s.r.HistoryBlobs(ctx, s.w.Store); err != nil {
+				return err
+			}
+		}
+		if file.PlainDigest != "" {
+			return secureblob.DecryptBlob(blobs, file.Blob, dst, key, identity)
+		}
+		return blobs.Blob(file.Blob, dst)
+	}
 	for index, file := range j.Files {
 		identity := secureblob.Identity{RepositoryID: s.w.RepositoryID, WorkspaceID: j.Source, Path: file.Path, Mode: file.Mode}
 		if err := ctx.Err(); err != nil {
@@ -709,21 +723,11 @@ func (s *session) runSeed(ctx context.Context, files *storage.Dir, j *seedJourna
 		}
 		if !stageExists {
 			if file.Mode == "120000" {
-				var target string
-				if file.PlainDigest != "" {
-					var plain limitedSeedBuffer
-					if e := secureblob.DecryptGitBlob(ctx, s.r, s.w.Store, file.Blob, &plain, key, identity); e != nil {
-						return warnings, e
-					}
-					target = plain.String()
-				} else {
-					b, e := s.r.History(ctx, s.w.Store, nil, "cat-file", "blob", file.Blob)
-					if e != nil {
-						return warnings, e
-					}
-					target = string(b)
+				var target limitedSeedBuffer
+				if e := read(file, &target, identity); e != nil {
+					return warnings, e
 				}
-				e = files.StageNamedSymlink(file.Stage, target)
+				e = files.StageNamedSymlink(file.Stage, target.String())
 				if e != nil {
 					return warnings, e
 				}
@@ -733,17 +737,7 @@ func (s *session) runSeed(ctx context.Context, files *storage.Dir, j *seedJourna
 					mode = 0755
 				}
 				e = files.StageNamed(file.Stage, mode, func(out io.Writer) error {
-					writer := seedStageWriter{ctx: ctx, out: out, f: f, index: index}
-					if file.PlainDigest != "" {
-						return secureblob.DecryptGitBlob(ctx, s.r, s.w.Store, file.Blob, writer, key, identity)
-					}
-					if blobs == nil {
-						var err error
-						if blobs, err = s.r.HistoryBlobs(ctx, s.w.Store); err != nil {
-							return err
-						}
-					}
-					return blobs.Blob(file.Blob, writer)
+					return read(file, seedStageWriter{ctx: ctx, out: out, f: f, index: index}, identity)
 				})
 				if e != nil {
 					return warnings, e
@@ -759,7 +753,9 @@ func (s *session) runSeed(ctx context.Context, files *storage.Dir, j *seedJourna
 				return warnings, err
 			}
 		}
-		if err := files.SyncStaged(file.Stage); err != nil {
+		// The rename below syncs the stage's directory, which holds both
+		// names (GL-120).
+		if err := files.SyncStagedFile(file.Stage); err != nil {
 			return warnings, err
 		}
 		if _, match, e = fileMatches(files, file, file.Stage, key, identity); e != nil || !match {

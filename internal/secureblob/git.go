@@ -45,10 +45,20 @@ func EncryptGitBlob(ctx context.Context, r *gitexec.Runner, store string, src io
 // decryption. The caller must stage dst until this returns successfully because
 // earlier chunks can have been written before a later authentication failure.
 func DecryptGitBlob(ctx context.Context, r *gitexec.Runner, store, objectID string, dst io.Writer, key []byte, id Identity) error {
+	return decryptFrom(func(w io.Writer) error { return r.HistoryBlobTo(ctx, store, objectID, w) }, dst, key, id)
+}
+
+// DecryptBlob is DecryptGitBlob reading the ciphertext through blobs, so
+// many blobs share one Git process.
+func DecryptBlob(blobs *gitexec.BlobReader, objectID string, dst io.Writer, key []byte, id Identity) error {
+	return decryptFrom(func(w io.Writer) error { return blobs.Blob(objectID, w) }, dst, key, id)
+}
+
+func decryptFrom(read func(io.Writer) error, dst io.Writer, key []byte, id Identity) error {
 	reader, writer := io.Pipe()
 	done := make(chan error, 1)
 	go func() {
-		err := r.HistoryBlobTo(ctx, store, objectID, writer)
+		err := read(writer)
 		_ = writer.CloseWithError(err)
 		done <- err
 	}()

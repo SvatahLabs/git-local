@@ -94,17 +94,21 @@ func verifyEncryptedSnapshotLocked(ctx context.Context, r *gitexec.Runner, w wor
 	}
 	sort.Strings(paths)
 	for _, path := range paths {
-		if err := verifyEncryptedFile(ctx, r, source, snapshot, path, secure); err != nil {
+		if err := verifyEncryptedFile(ctx, r, source, snapshot, path, secure, nil); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// VerifyEncryptedFileLocked authenticates one encrypted snapshot blob against
-// its keyed metadata digest without computing or persisting a plain hash.
-// Seed planners use this before creating a recovery journal.
-func VerifyEncryptedFileLocked(ctx context.Context, r *gitexec.Runner, w workspace.Context, snapshot Snapshot, path string) error {
+// VerifyEncryptedFilesLocked authenticates the encrypted snapshot blobs of
+// paths against their keyed metadata digests without computing or persisting
+// a plain hash, reading them through one Git process (GL-120). Seed planners
+// use this before creating a recovery journal.
+func VerifyEncryptedFilesLocked(ctx context.Context, r *gitexec.Runner, w workspace.Context, snapshot Snapshot, paths []string) error {
+	if len(paths) == 0 {
+		return nil
+	}
 	secure, err := loadSecure(w)
 	if err != nil {
 		return err
@@ -114,17 +118,35 @@ func VerifyEncryptedFileLocked(ctx context.Context, r *gitexec.Runner, w workspa
 	}
 	source := w
 	source.WorkspaceID = snapshot.WorkspaceID
-	return verifyEncryptedFile(ctx, r, source, snapshot, path, secure)
+	blobs, err := r.HistoryBlobs(ctx, source.Store)
+	if err != nil {
+		return err
+	}
+	defer blobs.Close()
+	for _, path := range paths {
+		if err := verifyEncryptedFile(ctx, r, source, snapshot, path, secure, blobs); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-func verifyEncryptedFile(ctx context.Context, r *gitexec.Runner, source workspace.Context, snapshot Snapshot, path string, secure *secureState) error {
+// verifyEncryptedFile reads the blob through blobs, or with its own Git
+// process when blobs is nil.
+func verifyEncryptedFile(ctx context.Context, r *gitexec.Runner, source workspace.Context, snapshot Snapshot, path string, secure *secureState, blobs *gitexec.BlobReader) error {
 	file, ok := snapshot.Files[path]
 	expected := snapshot.Metadata.EncryptedDigests[path]
 	if !ok || !secure.covers(path) || !validDigest(expected) {
 		return fmt.Errorf("%w: encrypted snapshot metadata disagrees at %q", storage.ErrConflict, path)
 	}
 	identity := secure.identity(source, path, file.Mode)
-	actual, err := auditedBlobDigest(ctx, r, source.Store, file.ID, secure.key, identity)
+	var err error
+	var actual string
+	if blobs != nil {
+		actual, err = blobDigest(func(w io.Writer) error { return secureblob.DecryptBlob(blobs, file.ID, w, secure.key, identity) }, secure.key, identity)
+	} else {
+		actual, err = auditedBlobDigest(ctx, r, source.Store, file.ID, secure.key, identity)
+	}
 	if err != nil {
 		return fmt.Errorf("encrypted file %q: %w", path, err)
 	}
@@ -135,10 +157,15 @@ func verifyEncryptedFile(ctx context.Context, r *gitexec.Runner, source workspac
 }
 
 func auditedBlobDigest(ctx context.Context, r *gitexec.Runner, store, blob string, key []byte, identity secureblob.Identity) (string, error) {
+	return blobDigest(func(w io.Writer) error { return secureblob.DecryptGitBlob(ctx, r, store, blob, w, key, identity) }, key, identity)
+}
+
+// blobDigest is the keyed digest of the plaintext decrypt writes.
+func blobDigest(decrypt func(io.Writer) error, key []byte, identity secureblob.Identity) (string, error) {
 	reader, writer := io.Pipe()
 	done := make(chan error, 1)
 	go func() {
-		err := secureblob.DecryptGitBlob(ctx, r, store, blob, writer, key, identity)
+		err := decrypt(writer)
 		_ = writer.CloseWithError(err)
 		done <- err
 	}()

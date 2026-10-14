@@ -200,9 +200,13 @@ func (d *Dir) Rename(old, new string) error {
 		return err
 	}
 	// MoveFileEx refuses to replace a read-only destination.
-	return d.writable(new, true, func() error {
+	err = d.writable(new, true, func() error {
 		return windows.MoveFileEx(src, dst, windows.MOVEFILE_REPLACE_EXISTING|windows.MOVEFILE_WRITE_THROUGH)
 	})
+	if err == nil {
+		d.forget(old)
+	}
+	return err
 }
 
 // RenameNoReplace renames like Rename, but fails with an error matching
@@ -229,6 +233,7 @@ func (d *Dir) RenameNoReplace(old, new string) error {
 	if err := windows.MoveFileEx(src, dst, windows.MOVEFILE_WRITE_THROUGH); err != nil {
 		return &os.LinkError{Op: "rename", Old: old, New: new, Err: err}
 	}
+	d.forget(old)
 	return nil
 }
 func (d *Dir) Remove(name string) error {
@@ -238,7 +243,11 @@ func (d *Dir) Remove(name string) error {
 	}
 	defer done()
 	// DeleteFile refuses a read-only file.
-	return d.writable(name, false, func() error { return d.root.Remove(name) })
+	err = d.writable(name, false, func() error { return d.root.Remove(name) })
+	if err == nil {
+		d.forget(name)
+	}
+	return err
 }
 func tryLock(f *os.File, shared bool) (bool, error) {
 	flags := uint32(windows.LOCKFILE_FAIL_IMMEDIATELY)
@@ -315,6 +324,12 @@ func (d *Dir) StageNamedSymlink(name, target string) error {
 var flushedStages sync.Map
 
 func (d *Dir) flushed(name string) { flushedStages.Store(filepath.Join(d.name, name), true) }
+
+// forget drops a stage that was renamed or removed (GL-120).
+func (d *Dir) forget(name string) { flushedStages.Delete(filepath.Join(d.name, name)) }
+
+// SyncStagedFile is SyncStaged; Windows syncs no directories.
+func (d *Dir) SyncStagedFile(name string) error { return d.SyncStaged(name) }
 
 // SyncStaged flushes a stage a dead process may have left unflushed. A
 // read-only one is made writable for the flush and read-only again.
