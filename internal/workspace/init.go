@@ -49,6 +49,12 @@ type initJournal struct {
 	Outcome string `json:"outcome,omitempty"`
 }
 
+// IdentityLock is the lock, in the common Git directory, that init holds
+// while it publishes a worktree identity and deinit holds while it removes
+// them. Unlike the repository lock it is outside the private state
+// directory, which deinit sets aside; deinit removes it last.
+const IdentityLock = "gitlocal-identity.lock"
+
 // Init is idempotent, and resumes only its own validated initialization journal.
 func Init(ctx context.Context, r *gitexec.Runner, cwd string) (*Context, error) {
 	return initialize(ctx, r, cwd, nil)
@@ -66,6 +72,14 @@ func initialize(ctx context.Context, r *gitexec.Runner, cwd string, fault func(s
 		return nil, err
 	}
 	defer common.Close()
+	// Held until the identity is published, so deinit, which removes the
+	// identities that don't belong to the live state under the same lock,
+	// either sees this state or runs before it exists (GL-129).
+	identities, err := common.Lock(ctx, IdentityLock, false)
+	if err != nil {
+		return nil, err
+	}
+	defer identities.Close()
 	// An identity left by an interrupted git local deinit, in this worktree
 	// or another, names a state that no longer exists. Refuse before
 	// creating anything: a private state directory left behind would block

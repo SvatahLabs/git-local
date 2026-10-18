@@ -149,20 +149,36 @@ func Deinit(ctx context.Context, r *gitexec.Runner, cwd string, removeHistory bo
 	// Identities that don't belong to the live state, which another
 	// worktree's git local init may have built meanwhile, are removed: the
 	// removed state's, and any of an older one an interrupted deinit left.
-	// When a private state directory exists, the shared lock keeps an init
-	// from publishing a new state's identity meanwhile. When none exists (the
-	// usual case once the state is set aside) no lock is taken: an init in a
-	// worktree without an identity that creates a state after the check
-	// below, and publishes its identity before removeIdentities reaches that
-	// worktree, loses the identity file. init refuses while another worktree
-	// still holds an identity, which narrows that window but doesn't close it.
+	// init holds the identity lock until it has published its identity, and
+	// that lock, unlike the repository lock, exists whether or not a private
+	// state directory does: an init either finished before the live state is
+	// read below, and its identity belongs to it, or waits until the
+	// identities are removed and then stops (GL-129).
+	identities, err := common.Lock(ctx, workspace.IdentityLock, false)
+	if err != nil {
+		return result, err
+	}
+	defer identities.Close()
 	release, belongs, err := liveIdentities(ctx, common)
 	if err != nil {
 		return result, err
 	}
 	defer release()
-	result.Identities, err = removeIdentities(common, w.Common, func(id workspace.Identity) bool { return !belongs(id) })
-	return result, err
+	identitiesListed()
+	if result.Identities, err = removeIdentities(common, w.Common, func(id workspace.Identity) bool { return !belongs(id) }); err != nil {
+		return result, err
+	}
+	// The lock file is removed while held, so an init waiting for it stops
+	// and is run again. Windows can't delete a file that is open: an init
+	// that takes the lock in between keeps the file, and the next deinit
+	// removes it.
+	if runtime.GOOS == "windows" {
+		identities.Close()
+	}
+	if err := common.Remove(workspace.IdentityLock); err != nil && !os.IsNotExist(err) && runtime.GOOS != "windows" {
+		return result, err
+	}
+	return result, nil
 }
 
 // liveIdentities reports which identity files belong to the live private
@@ -255,6 +271,11 @@ func removeBareState(ctx context.Context, common *storage.Dir) (bool, error) {
 // beforeRemoveIdentities runs just before deinit removes the identity files;
 // tests replace it to run git local init meanwhile.
 var beforeRemoveIdentities = func() {}
+
+// identitiesListed runs once deinit has read which identities belong to the
+// live state, just before it removes the others; tests replace it to run git
+// local init meanwhile.
+var identitiesListed = func() {}
 
 // beforeSetAside runs just before deinit takes the lock to set the private
 // state aside; tests replace it to install something meanwhile.

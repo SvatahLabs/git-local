@@ -132,6 +132,11 @@ About a hundred defects found in pre-release reviews, among them:
   lost; the messages name what blocks recovery and the way out. A seed
   stopped by a commit or another change to main in its worktree can be
   resumed or rolled back (it could only be abandoned).
+- A `git local init` in another worktree while `deinit` removed the
+  identity files that don't belong to the live state could lose its new
+  identity once the private state was set aside. Init and deinit now take
+  `<common-git-dir>/gitlocal-identity.lock` for that step; deinit removes it
+  last, and an init that waited for it stops and is run again.
 - Scale: large index and tree listings, large snapshot metadata, long exclude
   patterns, per-commit process spawning in guards and doctor, and restore
   time, which grew with the square of the restored file count and is now
@@ -182,6 +187,9 @@ About a hundred defects found in pre-release reviews, among them:
   change; and keys created by earlier releases are refused on load with no fix
   offered. Until these are fixed, Windows isn't supported for sensitive-file
   or backup keys.
+  A command that waits for the repository lock while `deinit` removes the
+  private state takes the lock and goes on instead of stopping, and `deinit`
+  then fails; a rerun finishes it.
 - **Restore** takes about a fifth of a second per restored file on a lightly
   loaded machine (it runs about a dozen Git processes per file, hashing and
   reading each file's content), also in a repository whose main index holds
