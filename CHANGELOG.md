@@ -111,7 +111,9 @@ The first release meant for general use. It replaces the 0.1.4 test builds.
 - `overlay remove --workspace <uuid>` for overlays of retired worktrees.
 - `hook install --allow-shared-hooks-dir` and
   `auto install --allow-shared-hooks-dir` install into a hooks directory
-  outside the repository, such as a global `core.hooksPath`.
+  outside the repository, such as a global `core.hooksPath`. A checkout in a
+  repository git-local isn't initialized in is then silent; before, every
+  checkout there warned "automatic event failed".
 - Shell completion completes `git local …` as well as `git-local …` in bash,
   and in zsh with zsh's bundled `_git` completion or Git's own
   `git-completion.zsh`.

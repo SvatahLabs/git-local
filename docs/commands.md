@@ -113,6 +113,8 @@ interruption is resumed or rolled back with `recover` from that destination.
 With `auto install`, a new linked worktree's first post-checkout event snapshots
 the primary checkout before invoking this seed operation. A worktree created
 with `--no-checkout` needs a later checkout event or manual `init --from main`.
+In a repository without git-local state (a hooks directory shared with other
+repositories), the post-checkout event does nothing.
 `workspace remove <path>` snapshots selected files before asking Git to remove
 an available linked worktree, then retires its record. Its warnings include the
 snapshot's; if the snapshot is refused, the worktree is kept, even with

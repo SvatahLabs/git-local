@@ -72,6 +72,14 @@ func Event(ctx context.Context, r *gitexec.Runner, cwd, event string) ([]string,
 		if err != nil {
 			return nil, err
 		}
+		// A repository git-local was never initialized in (the condition
+		// configtx.ErrNoState reports) has nothing to seed from; a shared
+		// hooks directory runs this event in such repositories too.
+		if _, err := os.Lstat(filepath.Join(w.Common, "gitlocal")); os.IsNotExist(err) {
+			return nil, nil
+		} else if err != nil {
+			return nil, err
+		}
 		if bare, err := workspace.Bare(ctx, r, w); err != nil {
 			return nil, err
 		} else if bare {
