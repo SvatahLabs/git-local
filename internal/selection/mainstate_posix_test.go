@@ -18,7 +18,8 @@ func TestRacyTimestamps(t *testing.T) {
 		mtime time.Time
 		racy  bool
 	}{
-		{hashed.Add(-time.Millisecond), false},
+		{hashed.Add(-RacyMargin - time.Millisecond), false},
+		{hashed.Add(-time.Millisecond), true}, // within the margin
 		{hashed, true},
 		{hashed.Add(time.Second), true},
 		{time.Date(2026, 10, 11, 12, 0, 9, 0, time.UTC), true},  // whole second within 2 s
@@ -27,6 +28,31 @@ func TestRacyTimestamps(t *testing.T) {
 		if got := Racy(fakeInfo{c.mtime}, hashed); got != c.racy {
 			t.Errorf("mtime %v: racy %v, want %v", c.mtime, got, c.racy)
 		}
+	}
+}
+
+// GL-128: Linux stamps files from a coarse kernel clock whose stamps still
+// have nanoseconds. Modeled with a 4 ms tick: a file written at w is stamped
+// with w's tick and read 1 ms later; a same-size rewrite 1 ms after that gets
+// the same stamp, so the reading must count as racy. Before, only a stamp
+// with no sub-second part was taken for a coarse one, and a stamp earlier
+// than the reading was trusted. A stamp older than the margin still is.
+func TestRacyTimestampsFromACoarseTick(t *testing.T) {
+	const tick = 4 * time.Millisecond
+	written := time.Date(2026, 10, 18, 12, 0, 10, 401_500_000, time.UTC)
+	stamp := written.Truncate(tick)
+	if stamp.Nanosecond() == 0 {
+		t.Fatal("the modeled stamp must have a sub-second part")
+	}
+	read := written.Add(time.Millisecond)
+	if rewritten := read.Add(time.Millisecond).Truncate(tick); !rewritten.Equal(stamp) {
+		t.Fatalf("the modeled rewrite isn't in the same tick: %v, %v", rewritten, stamp)
+	}
+	if !Racy(fakeInfo{stamp}, read) {
+		t.Fatal("a stamp from the tick the file was read in is trusted")
+	}
+	if Racy(fakeInfo{stamp}, stamp.Add(RacyMargin+tick)) {
+		t.Fatal("a stamp older than the margin isn't trusted")
 	}
 }
 

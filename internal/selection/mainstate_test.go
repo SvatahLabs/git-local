@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"gitlocal/internal/testutil"
 )
@@ -36,6 +37,7 @@ func TestMainStateReadsReftableRepositories(t *testing.T) {
 			}
 			return s
 		}
+		time.Sleep(RacyMargin)
 		before := read()
 		if !before.Same(read()) || !before.Settled() {
 			t.Fatalf("%s: unchanged state differs or isn't settled", c.name)
@@ -121,6 +123,8 @@ func TestMainStateShowsHeadAndIndexChanges(t *testing.T) {
 			repo.Git("update-index", "--add", "--cacheinfo", "100644,"+strings.TrimSpace(string(repo.Git("hash-object", "-w", "app.txt")))+",new.txt")
 		}},
 	} {
+		// The previous change is settled once it is RacyMargin old.
+		time.Sleep(RacyMargin)
 		before := read()
 		if !before.Same(read()) || !before.Settled() {
 			t.Fatalf("%s: unchanged state differs or isn't settled", change.name)

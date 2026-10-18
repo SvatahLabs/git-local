@@ -158,6 +158,11 @@ About a hundred defects found in pre-release reviews, among them:
   host checks canonicalize addresses, and a failed push or fetch names its
   cause (certificate, authentication, connection or proxy, or the remote's
   refusal) instead of one generic message, without printing credentials.
+- Restore and seeding trust a file's unchanged stat only once its timestamp
+  is at least 20 ms older than when it was read. Linux stamps files from a
+  coarse kernel clock, so a same-size rewrite within the same tick (of
+  `selection.json`, HEAD or the index) could go unseen until the next full
+  check.
 - Output limits: a Git command whose output passes its limit is stopped
   instead of running to the end, and `check-ignore` keeps a long ignore rule
   once rather than once per matching path.
