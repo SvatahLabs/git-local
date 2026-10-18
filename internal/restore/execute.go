@@ -268,27 +268,18 @@ type guard struct {
 	// images caches each path's last hashed images, by identity, with the
 	// Lstat they were hashed under; see inspect.
 	images map[string]map[string]cachedImage
-	// index is the main index file; checked is the cheap global state seen at
-	// the start of the last check of ownership, or nil when the next check
-	// must be full; parents indexes the plan's parent directories and created the
-	// directories it creates. See recognizeScope.
+	// index is the main index file; checked is the main state (HEAD, the
+	// branch, the configuration and the index file) seen at the start of the
+	// last check of ownership and the branch, or nil when the next check must
+	// be full; heads is the private store's ref files seen at the start of the
+	// last check of both workspace heads; parents indexes the plan's parent
+	// directories and created the directories it creates. See recognizeScope.
 	index   string
-	checked *globalState
+	checked *selection.MainState
+	heads   *selection.RefFiles
 	parents map[string]Parent
 	created map[string]bool
 }
-
-// globalState is what can change the plan's preconditions outside the
-// restored paths and is cheap to read: the main HEAD and index file
-// (selection.MainState) and the branch. settled is false when a later
-// reading might not show a change (see MainState.Settled).
-type globalState struct {
-	main    selection.MainState
-	branch  string
-	settled bool
-}
-
-func (s globalState) same(o globalState) bool { return s.branch == o.branch && s.main.Same(o.main) }
 
 type cachedImage struct {
 	info   fs.FileInfo // nil when the path didn't exist
@@ -456,13 +447,16 @@ func (g *guard) recognize(ctx context.Context) error { return g.recognizeScope(c
 // checked, with the configuration, both workspace heads and the cheap global
 // state. Paths elsewhere can't be overwritten unchecked: each is checked again
 // at its own operation, and a change to one already restored is found by the
-// full check at the next phase boundary and at the end. Ownership can change
-// only through HEAD or the index, so whenever the cheap global state differs
-// from the last check of it, ownership (HEAD and the index listing) and the
-// branch are checked again; a tool that rewrites the index without changing
-// its entries then costs a listing, not every operation's image. The callers
-// run a full check before the first change, at each phase boundary and at the
-// end.
+// full check at the next phase boundary and at the end. Ownership and the
+// branch can change only through HEAD, the configuration or the index, so
+// they are checked again (HEAD, the index listing and the branch, with Git)
+// whenever the main state differs from the last check of it or wasn't
+// settled; a tool that rewrites the index without changing its entries then
+// costs a listing, not every operation's image. Likewise both workspace heads
+// are read with Git only when the private store's ref files changed (GL-127):
+// otherwise each step ran about thirty Git processes. The callers run a full
+// check before the first change, at each phase boundary and at the end; a
+// full check reads everything with Git.
 func (g *guard) recognizeScope(ctx context.Context, op int, dir string) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -472,12 +466,18 @@ func (g *guard) recognizeScope(ctx context.Context, op int, dir string) error {
 	}
 	m := g.journal.Manifest
 	p := m.Plan
-	state, err := g.global(ctx)
+	// Both are read before the checks they stamp, so a change made during
+	// one shows at the next step.
+	state, err := selection.ReadMainState(g.w.Admin, g.w.Common, g.index)
+	if err != nil {
+		return err
+	}
+	heads, err := selection.ReadRefFiles(g.w.Store, history.Ref(p.SourceWorkspaceID), history.Ref(p.DestinationWorkspaceID))
 	if err != nil {
 		return err
 	}
 	full := op < 0 && dir == "" || g.checked == nil
-	owned := full || !g.checked.settled || !state.same(*g.checked)
+	owned := full || !g.checked.Settled() || !state.Same(*g.checked)
 	if full {
 		g.checked = nil
 	}
@@ -485,18 +485,26 @@ func (g *guard) recognizeScope(ctx context.Context, op int, dir string) error {
 		if err = (selection.Ownership{Evidence: g.evidence}).Revalidate(ctx, g.r, g.w.Root, g.w.Admin); err != nil {
 			return err
 		}
-		if state.branch != g.branch {
-			return fmt.Errorf("%w: main branch changed", storage.ErrConflict)
-		}
-	}
-	for _, entry := range []struct{ id, head string }{{p.SourceWorkspaceID, p.SourceHead}, {p.DestinationWorkspaceID, p.DestinationBaseline}} {
-		head, e := history.WorkspaceHeadLocked(ctx, g.r, g.w, entry.id)
+		branch, e := mainBranch(ctx, g.r, g.w)
 		if e != nil {
 			return e
 		}
-		if head != entry.head {
-			return fmt.Errorf("%w: user snapshot head changed", storage.ErrConflict)
+		if branch != g.branch {
+			return fmt.Errorf("%w: main branch changed", storage.ErrConflict)
 		}
+	}
+	if full || g.heads == nil || !g.heads.Settled() || !heads.Same(*g.heads) {
+		g.heads = nil
+		for _, entry := range []struct{ id, head string }{{p.SourceWorkspaceID, p.SourceHead}, {p.DestinationWorkspaceID, p.DestinationBaseline}} {
+			head, e := history.WorkspaceHeadLocked(ctx, g.r, g.w, entry.id)
+			if e != nil {
+				return e
+			}
+			if head != entry.head {
+				return fmt.Errorf("%w: user snapshot head changed", storage.ErrConflict)
+			}
+		}
+		g.heads = &heads
 	}
 	if full {
 		// One pass reads each directory once (see CheckRestorePaths).
@@ -550,22 +558,9 @@ func (g *guard) recognizeScope(ctx context.Context, op int, dir string) error {
 	// without its stat showing it, so the next step reads ownership again;
 	// it still checks only its own operation, or restore turns quadratic.
 	if owned {
-		state.settled = state.main.Settled()
 		g.checked = &state
 	}
 	return nil
-}
-
-// global reads the cheap global state. It is read before the checks it
-// stamps, so a change made during a full check shows at the next one.
-func (g *guard) global(ctx context.Context) (globalState, error) {
-	main, err := selection.ReadMainState(g.w.Admin, g.w.Common, g.index)
-	if err != nil {
-		return globalState{}, err
-	}
-	state := globalState{main: main}
-	state.branch, err = mainBranch(ctx, g.r, g.w)
-	return state, err
 }
 
 // recognizeOperation checks operation i's path, image and stages. A full

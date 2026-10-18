@@ -1,6 +1,7 @@
 package selection
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -81,7 +82,8 @@ func TestMainStateDoesntTrustHeadsItDoesntFollow(t *testing.T) {
 
 // MainState starts no Git process, yet shows every way Git moves HEAD or
 // changes the index: a commit, update-ref of a loose or packed ref, a
-// detached HEAD, a branch switch, and an index rewrite.
+// detached HEAD, a branch switch, a configuration edit (it can change the ref
+// backend), and an index rewrite.
 func TestMainStateShowsHeadAndIndexChanges(t *testing.T) {
 	repo := testutil.New(t)
 	repo.Commit()
@@ -114,6 +116,7 @@ func TestMainStateShowsHeadAndIndexChanges(t *testing.T) {
 		{"detach", func() { repo.Git("checkout", "-q", "--detach") }},
 		{"detached move", func() { repo.Git("update-ref", "--no-deref", "HEAD", commit()) }},
 		{"switch", func() { repo.Git("checkout", "-q", "-b", "other") }},
+		{"config", func() { repo.Git("config", "gitlocal.test", "true") }},
 		{"index", func() {
 			repo.Git("update-index", "--add", "--cacheinfo", "100644,"+strings.TrimSpace(string(repo.Git("hash-object", "-w", "app.txt")))+",new.txt")
 		}},
@@ -126,5 +129,53 @@ func TestMainStateShowsHeadAndIndexChanges(t *testing.T) {
 		if read().Same(before) {
 			t.Fatalf("%s: change unseen", change.name)
 		}
+	}
+}
+
+// RefFiles starts no Git process, yet shows every way Git changes a ref of a
+// directory no worktree checks out: update-ref of a loose or packed ref,
+// packing, deletion and a configuration edit; a ref holding a symbolic ref is
+// never the same as another reading (GL-127).
+func TestRefFilesShowRefChanges(t *testing.T) {
+	repo := testutil.New(t)
+	repo.Commit()
+	git := filepath.Join(repo.Root, ".git")
+	read := func() RefFiles {
+		t.Helper()
+		s, err := ReadRefFiles(git, "refs/heads/kept", "refs/heads/other")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	n := 0
+	commit := func() string {
+		n++
+		return strings.TrimSpace(string(repo.Git("commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", fmt.Sprintf("next %d", n))))
+	}
+	repo.Git("branch", "kept")
+	for _, change := range []struct {
+		name string
+		run  func()
+	}{
+		{"update-ref", func() { repo.Git("update-ref", "refs/heads/kept", commit()) }},
+		{"create", func() { repo.Git("update-ref", "refs/heads/other", commit()) }},
+		{"pack", func() { repo.Git("pack-refs", "--all") }},
+		{"packed update-ref", func() { repo.Git("update-ref", "--no-deref", "refs/heads/other", commit()) }},
+		{"delete", func() { repo.Git("update-ref", "-d", "refs/heads/other") }},
+		{"config", func() { repo.Git("config", "gitlocal.test", "true") }},
+		{"symbolic", func() { repo.Git("symbolic-ref", "refs/heads/other", "refs/heads/kept") }},
+	} {
+		before := read()
+		if !before.Same(read()) {
+			t.Fatalf("%s: unchanged state differs", change.name)
+		}
+		change.run()
+		if read().Same(before) {
+			t.Fatalf("%s: change unseen", change.name)
+		}
+	}
+	if s := read(); s.Same(s) || s.Settled() {
+		t.Fatal("a symbolic ref is trusted")
 	}
 }

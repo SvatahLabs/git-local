@@ -6,13 +6,16 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gitlocal/internal/history"
+	"gitlocal/internal/testutil"
 )
 
-// restoreProcesses restores n changed files and returns the Git processes the
-// restore ran.
-func restoreProcesses(t *testing.T, n int) uint64 {
+// restoreProcesses restores n changed files in a repository from newRepo and
+// returns the Git processes the restore ran.
+func restoreProcesses(t *testing.T, n int, newRepo func(testing.TB) *testutil.Repo) uint64 {
 	t.Helper()
-	repo, r, _ := fixture(t)
+	repo, r, _ := fixtureFrom(t, newRepo(t))
 	root := repo.Root
 	for i := 0; i < n; i++ {
 		write(t, root, fmt.Sprintf("notes/file-%03d", i), "source")
@@ -42,10 +45,33 @@ func restoreProcesses(t *testing.T, n int) uint64 {
 // the processes by about sixteen.
 func TestRestoreGitProcessesGrowLinearly(t *testing.T) {
 	t.Parallel()
-	small, large := restoreProcesses(t, 10), restoreProcesses(t, 40)
+	small, large := restoreProcesses(t, 10, testutil.New), restoreProcesses(t, 40, testutil.New)
 	t.Logf("Git processes: 10 files %d, 40 files %d", small, large)
 	if large > 6*small {
 		t.Fatalf("restoring 4x the files ran %.1fx the Git processes (%d vs %d)", float64(large)/float64(small), large, small)
+	}
+}
+
+// Between full checks a step reads the branch and both workspace heads with
+// Git only when a file that can change them changed (GL-127), so each restored
+// file costs only its own hashing and blob reads (13 Git processes), not Git
+// processes per check. Before, every step ran the branch's and both heads' Git
+// commands: 29 Git processes per file.
+func TestRestoreGitProcessesPerFileStayConstant(t *testing.T) {
+	for _, backend := range []string{"files", "reftable"} {
+		t.Run(backend, func(t *testing.T) {
+			t.Parallel()
+			newRepo := testutil.New
+			if backend == "reftable" {
+				newRepo = testutil.NewReftable
+			}
+			small, large := restoreProcesses(t, 10, newRepo), restoreProcesses(t, 40, newRepo)
+			perFile := float64(large-small) / 30
+			t.Logf("Git processes: 10 files %d, 40 files %d, %.1f per file", small, large, perFile)
+			if perFile > 16 {
+				t.Fatalf("each restored file ran %.1f Git processes (10 files %d, 40 files %d)", perFile, small, large)
+			}
+		})
 	}
 }
 
@@ -57,7 +83,7 @@ func restoreWork(t *testing.T, n int) (int, int) {
 	pathChecked = func(string) { checks++ }
 	journalWritten = func(n int) { written += n }
 	defer func() { pathChecked, journalWritten = func(string) {}, func(int) {} }()
-	restoreProcesses(t, n)
+	restoreProcesses(t, n, testutil.New)
 	return checks, written
 }
 
@@ -145,5 +171,58 @@ func TestRestoreDetectsChangesBetweenFullChecks(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// The branch and the workspace heads are read with Git only when a file that
+// can change them changed, so moving one between full checks must still stop
+// the restore at the next operation: a workspace head moved in the private
+// store, the main branch switched at the same commit, and HEAD detached at it,
+// in a files and a reftable repository.
+func TestRestoreDetectsHeadAndBranchMovesBetweenFullChecks(t *testing.T) {
+	for _, backend := range []string{"files", "reftable"} {
+		for _, kind := range []string{"workspace-head", "branch", "detached"} {
+			t.Run(backend+"/"+kind, func(t *testing.T) {
+				t.Parallel()
+				newRepo := testutil.New
+				if backend == "reftable" {
+					newRepo = testutil.NewReftable
+				}
+				repo, r, w := fixtureFrom(t, newRepo(t))
+				root := repo.Root
+				for _, name := range []string{"a", "b", "c"} {
+					write(t, root, "notes/"+name, "source")
+				}
+				track(t, r, root, true, "notes")
+				source := save(t, r, root)
+				for _, name := range []string{"a", "b", "c"} {
+					write(t, root, "notes/"+name, "baseline")
+				}
+				save(t, r, root)
+				repo.Git("branch", "other")
+				_, err := execute(ctx, r, root, "", source, []string{"notes"}, false, func(at string) error {
+					if at != "progress:0" {
+						return nil
+					}
+					switch kind {
+					case "workspace-head":
+						repo.Git("--git-dir="+w.Store, "update-ref", history.Ref(w.WorkspaceID), source)
+					case "branch":
+						repo.Git("symbolic-ref", "HEAD", "refs/heads/other")
+					case "detached":
+						repo.Git("checkout", "--quiet", "--detach")
+					}
+					return nil
+				})
+				if err == nil || !strings.Contains(err.Error(), "restore transaction") {
+					t.Fatalf("restore accepted a %s move between full checks: %v", kind, err)
+				}
+				for name, value := range map[string]string{"a": "source", "b": "baseline", "c": "baseline"} {
+					if b, e := os.ReadFile(filepath.Join(root, "notes", name)); e != nil || string(b) != value {
+						t.Fatalf("notes/%s: %q %v, want %q", name, b, e, value)
+					}
+				}
+			})
+		}
 	}
 }

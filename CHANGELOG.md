@@ -136,7 +136,9 @@ About a hundred defects found in pre-release reviews, among them:
   linear: each file's step re-checks that file and the cheap global state
   (main HEAD, branch and index file), everything is re-checked at each
   phase boundary and at the end, and main ownership whenever that state
-  changed. Restore and seeding no longer check each file against every path
+  changed. The branch and both snapshot heads are read with Git only when a
+  file that can change them changed (HEAD, the refs, the configuration, the
+  private store's refs), which halves the Git processes per restored file. Restore and seeding no longer check each file against every path
   in the main index, so their time per file doesn't grow with the size of
   the mainline repository. Seeding no longer lists the main index and starts
   Git processes for each file, sensitive files and symlinks included, syncs
@@ -173,9 +175,10 @@ About a hundred defects found in pre-release reviews, among them:
   change; and keys created by earlier releases are refused on load with no fix
   offered. Until these are fixed, Windows isn't supported for sensitive-file
   or backup keys.
-- **Restore** takes about a fifth of a second per restored file on a busy
-  machine (it runs several Git processes per file), also in a repository
-  whose main index holds 90,000 paths.
+- **Restore** takes about a fifth of a second per restored file on a lightly
+  loaded machine (it runs about a dozen Git processes per file, hashing and
+  reading each file's content), also in a repository whose main index holds
+  90,000 paths.
 - **Seeding** a worktree takes about 12 ms per seeded file on a busy machine,
   most of it spent making each file durable.
 - **Maintenance:** snapshots pack loose objects; run `git local maintenance`
