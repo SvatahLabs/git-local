@@ -134,9 +134,14 @@ About a hundred defects found in pre-release reviews, among them:
   resumed or rolled back (it could only be abandoned).
 - A `git local init` in another worktree while `deinit` removed the
   identity files that don't belong to the live state could lose its new
-  identity once the private state was set aside. Init and deinit now take
-  `<common-git-dir>/gitlocal-identity.lock` for that step; deinit removes it
-  last, and an init that waited for it stops and is run again.
+  identity once the private state was set aside, and so could a backup
+  restore or `backup recover`. Init, backup restore and recover, and deinit
+  now take `<common-git-dir>/gitlocal-identity.lock` for that step; deinit
+  removes it last, and a command that waited for it stops and is run again
+  (on POSIX; see Known limitations for Windows).
+- `git local deinit --remove-history` left
+  `<common-git-dir>/gitlocal-backup-restore.lock` in a repository restored
+  from a backup. Deinit now removes it with the identity lock.
 - Scale: large index and tree listings, large snapshot metadata, long exclude
   patterns, per-commit process spawning in guards and doctor, and restore
   time, which grew with the square of the restored file count and is now
@@ -164,7 +169,8 @@ About a hundred defects found in pre-release reviews, among them:
   cause (certificate, authentication, connection or proxy, or the remote's
   refusal) instead of one generic message, without printing credentials.
 - Restore and seeding trust a file's unchanged stat only once its timestamp
-  is at least 20 ms older than when it was read. Linux stamps files from a
+  is at least 50 ms older than when it was read (2 s plus that margin for a
+  timestamp with no sub-second part, as on FAT). Linux stamps files from a
   coarse kernel clock, so a same-size rewrite within the same tick (of
   `selection.json`, HEAD or the index) could go unseen until the next full
   check.
@@ -189,7 +195,15 @@ About a hundred defects found in pre-release reviews, among them:
   or backup keys.
   A command that waits for the repository lock while `deinit` removes the
   private state takes the lock and goes on instead of stopping, and `deinit`
-  then fails; a rerun finishes it.
+  then fails; a rerun finishes it. The same holds for an `init` that waits
+  for the identity lock while `deinit` removes identities: it goes on (its
+  identity is kept), and `<common-git-dir>/gitlocal-identity.lock` can be left
+  behind; a rerun of `deinit` removes it.
+- **Clock skew:** git-local trusts a file's unchanged timestamps only when
+  they are more than a moment older than the local clock. On a filesystem
+  whose clock runs behind this machine's (a network share, a WSL2 `/mnt/c`
+  path, a Docker Desktop bind mount), a same-size rewrite made within one
+  timestamp tick of an earlier reading can go unnoticed by restore's checks.
 - **Restore** takes about a fifth of a second per restored file on a lightly
   loaded machine (it runs about a dozen Git processes per file, hashing and
   reading each file's content), also in a repository whose main index holds

@@ -22,6 +22,10 @@ import (
 
 const restoreJournalName = "gitlocal-backup-restore.json"
 
+// RestoreLock is the lock, in the common Git directory, that backup restore
+// and its recovery hold, after the identity lock.
+const RestoreLock = "gitlocal-backup-restore.lock"
+
 type restoreJournal struct {
 	SchemaVersion    int                `json:"schemaVersion"`
 	RepositoryID     string             `json:"repositoryId"`
@@ -55,7 +59,17 @@ func adoptStaged(ctx context.Context, r *gitexec.Runner, cwd, stage string, faul
 		return empty, err
 	}
 	defer common.Close()
-	lock, err := common.Lock(ctx, "gitlocal-backup-restore.lock", false)
+	// Restore publishes the private state and the main identity, so it
+	// holds the identity lock as git local init does, taken in the same
+	// order before the others: git local deinit, which removes the
+	// identities that don't belong to the live state, either sees the
+	// restored state or runs before it exists.
+	identities, err := common.Lock(ctx, workspace.IdentityLock, false)
+	if err != nil {
+		return empty, err
+	}
+	defer identities.Close()
+	lock, err := common.Lock(ctx, RestoreLock, false)
 	if err != nil {
 		return empty, err
 	}
@@ -316,7 +330,13 @@ func RecoverRestore(ctx context.Context, r *gitexec.Runner, cwd string) (StagedI
 		return empty, err
 	}
 	defer common.Close()
-	lock, err := common.Lock(ctx, "gitlocal-backup-restore.lock", false)
+	// Held for the same reason as in adoptStaged.
+	identities, err := common.Lock(ctx, workspace.IdentityLock, false)
+	if err != nil {
+		return empty, err
+	}
+	defer identities.Close()
+	lock, err := common.Lock(ctx, RestoreLock, false)
 	if err != nil {
 		return empty, err
 	}

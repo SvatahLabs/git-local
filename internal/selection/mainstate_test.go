@@ -84,8 +84,8 @@ func TestMainStateDoesntTrustHeadsItDoesntFollow(t *testing.T) {
 
 // MainState starts no Git process, yet shows every way Git moves HEAD or
 // changes the index: a commit, update-ref of a loose or packed ref, a
-// detached HEAD, a branch switch, a configuration edit (it can change the ref
-// backend), and an index rewrite.
+// detached HEAD, a branch switch, an edit of the configuration (it can change
+// the ref backend) or of the worktree's own, and an index rewrite.
 func TestMainStateShowsHeadAndIndexChanges(t *testing.T) {
 	repo := testutil.New(t)
 	repo.Commit()
@@ -101,6 +101,7 @@ func TestMainStateShowsHeadAndIndexChanges(t *testing.T) {
 	commit := func() string {
 		return strings.TrimSpace(string(repo.Git("commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "next")))
 	}
+	repo.Git("config", "extensions.worktreeConfig", "true")
 	for _, change := range []struct {
 		name string
 		run  func()
@@ -119,6 +120,8 @@ func TestMainStateShowsHeadAndIndexChanges(t *testing.T) {
 		{"detached move", func() { repo.Git("update-ref", "--no-deref", "HEAD", commit()) }},
 		{"switch", func() { repo.Git("checkout", "-q", "-b", "other") }},
 		{"config", func() { repo.Git("config", "gitlocal.test", "true") }},
+		// Only config.worktree changes once per-worktree configuration is on.
+		{"config.worktree", func() { repo.Git("config", "--worktree", "gitlocal.test", "true") }},
 		{"index", func() {
 			repo.Git("update-index", "--add", "--cacheinfo", "100644,"+strings.TrimSpace(string(repo.Git("hash-object", "-w", "app.txt")))+",new.txt")
 		}},
@@ -138,7 +141,7 @@ func TestMainStateShowsHeadAndIndexChanges(t *testing.T) {
 
 // RefFiles starts no Git process, yet shows every way Git changes a ref of a
 // directory no worktree checks out: update-ref of a loose or packed ref,
-// packing, deletion and a configuration edit; a ref holding a symbolic ref is
+// packing, deletion of a loose or a packed ref and a configuration edit; a ref holding a symbolic ref is
 // never the same as another reading (GL-127).
 func TestRefFilesShowRefChanges(t *testing.T) {
 	repo := testutil.New(t)
@@ -165,6 +168,8 @@ func TestRefFilesShowRefChanges(t *testing.T) {
 		{"update-ref", func() { repo.Git("update-ref", "refs/heads/kept", commit()) }},
 		{"create", func() { repo.Git("update-ref", "refs/heads/other", commit()) }},
 		{"pack", func() { repo.Git("pack-refs", "--all") }},
+		// Deleting a ref that is only packed rewrites packed-refs alone.
+		{"packed delete", func() { repo.Git("update-ref", "-d", "refs/heads/other") }},
 		{"packed update-ref", func() { repo.Git("update-ref", "--no-deref", "refs/heads/other", commit()) }},
 		{"delete", func() { repo.Git("update-ref", "-d", "refs/heads/other") }},
 		{"config", func() { repo.Git("config", "gitlocal.test", "true") }},

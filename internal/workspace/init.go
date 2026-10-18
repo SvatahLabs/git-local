@@ -49,9 +49,9 @@ type initJournal struct {
 	Outcome string `json:"outcome,omitempty"`
 }
 
-// IdentityLock is the lock, in the common Git directory, that init holds
-// while it publishes a worktree identity and deinit holds while it removes
-// them. Unlike the repository lock it is outside the private state
+// IdentityLock is the lock, in the common Git directory, that init and
+// backup restore hold while they publish a worktree identity and deinit
+// holds while it removes them. Unlike the repository lock it is outside the private state
 // directory, which deinit sets aside; deinit removes it last.
 const IdentityLock = "gitlocal-identity.lock"
 

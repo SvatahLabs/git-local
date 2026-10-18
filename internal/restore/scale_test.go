@@ -56,7 +56,9 @@ func TestRestoreGitProcessesGrowLinearly(t *testing.T) {
 // Git only when a file that can change them changed (GL-127), so each restored
 // file costs only its own hashing and blob reads (13 Git processes), not Git
 // processes per check. Before, every step ran the branch's and both heads' Git
-// commands: 29 Git processes per file.
+// commands: 29 Git processes per file. A file restored within RacyMargin of
+// the next step's check is hashed again, so the total moves with timing; the
+// reads themselves are counted exactly below.
 func TestRestoreGitProcessesPerFileStayConstant(t *testing.T) {
 	for _, backend := range []string{"files", "reftable"} {
 		t.Run(backend, func(t *testing.T) {
@@ -72,6 +74,27 @@ func TestRestoreGitProcessesPerFileStayConstant(t *testing.T) {
 				t.Fatalf("each restored file ran %.1f Git processes (10 files %d, 40 files %d)", perFile, small, large)
 			}
 		})
+	}
+}
+
+// Wave 9 review: the per-file bound above leaves room for the branch read
+// (2 Git processes) to come back on every step. Counted directly, the branch
+// and workspace heads are read with Git only at the full checks, whose number
+// doesn't depend on the files restored.
+func TestRestoreReadsBranchAndHeadsOnlyAtFullChecks(t *testing.T) {
+	reads := func(n int) map[string]int {
+		counts := map[string]int{}
+		stateRead = func(what string) { counts[what]++ }
+		defer func() { stateRead = func(string) {} }()
+		restoreProcesses(t, n, testutil.New)
+		return counts
+	}
+	small, large := reads(10), reads(40)
+	t.Logf("Git reads: 10 files %v, 40 files %v", small, large)
+	for _, what := range []string{"branch", "heads"} {
+		if small[what] == 0 || large[what] > small[what]+2 {
+			t.Fatalf("%s read with Git %d times for 10 files and %d for 40", what, small[what], large[what])
+		}
 	}
 }
 
@@ -178,7 +201,9 @@ func TestRestoreDetectsChangesBetweenFullChecks(t *testing.T) {
 // can change them changed, so moving one between full checks must still stop
 // the restore at the next operation: a workspace head moved in the private
 // store, the main branch switched at the same commit, and HEAD detached at it,
-// in a files and a reftable repository.
+// in a files and a reftable main repository. The private store is always a
+// files repository, so its workspace-head move takes the loose-ref path either
+// way; RefFiles' reftable stats are never reached here.
 func TestRestoreDetectsHeadAndBranchMovesBetweenFullChecks(t *testing.T) {
 	for _, backend := range []string{"files", "reftable"} {
 		for _, kind := range []string{"workspace-head", "branch", "detached"} {

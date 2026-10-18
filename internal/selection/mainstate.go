@@ -226,15 +226,20 @@ func (s RefFiles) Settled() bool { return !s.unknown && settledFiles(s.Files, s.
 // sub-second part still counts as racy. Linux stamps files from a coarse
 // kernel clock (a 1 to 10 ms tick) whose stamps still have nanoseconds, so
 // a stamp a little earlier than the fine-grained time it was read at can
-// share its tick with a later same-size rewrite (GL-128).
-const RacyMargin = 20 * time.Millisecond
+// share its tick with a later same-size rewrite (GL-128). exFAT truncates
+// that clock to 10 ms on top of a 10 ms tick, and a delayed tick (a
+// preempted VM, a stalled NO_HZ tick) lags further, so the margin leaves
+// room beyond 20 ms.
+const RacyMargin = 50 * time.Millisecond
 
 // Racy reports whether a file's timestamps are too close to when it was read
 // or hashed for a later Lstat to show a change, as Git's racy-clean rule: a
 // same-size rewrite within the same timestamp tick would leave every field
 // equal. A timestamp within RacyMargin of that time is racy whatever its
 // sub-second part; one with no sub-second part may come from a filesystem
-// with up to two-second granularity (HFS+, FAT).
+// with up to two-second granularity (HFS+, FAT), whose stamps Linux also
+// truncates from the lagging coarse clock, so it is racy for two seconds and
+// the margin.
 func Racy(info fs.FileInfo, hashed time.Time) bool {
 	for _, t := range []time.Time{info.ModTime(), ChangeTime(info)} {
 		if t.IsZero() {
@@ -242,7 +247,7 @@ func Racy(info fs.FileInfo, hashed time.Time) bool {
 		}
 		limit := hashed.Add(-RacyMargin)
 		if t.Nanosecond() == 0 {
-			limit = hashed.Add(-2 * time.Second)
+			limit = hashed.Add(-2*time.Second - RacyMargin)
 		}
 		if !t.Before(limit) {
 			return true

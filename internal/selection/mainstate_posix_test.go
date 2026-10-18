@@ -23,10 +23,32 @@ func TestRacyTimestamps(t *testing.T) {
 		{hashed, true},
 		{hashed.Add(time.Second), true},
 		{time.Date(2026, 10, 11, 12, 0, 9, 0, time.UTC), true},  // whole second within 2 s
-		{time.Date(2026, 10, 11, 12, 0, 8, 0, time.UTC), false}, // whole second, 2 s before
+		{time.Date(2026, 10, 11, 12, 0, 8, 0, time.UTC), true},  // whole second, within 2 s and the margin
+		{time.Date(2026, 10, 11, 12, 0, 7, 0, time.UTC), false}, // whole second, 3 s before
 	} {
 		if got := Racy(fakeInfo{c.mtime}, hashed); got != c.racy {
 			t.Errorf("mtime %v: racy %v, want %v", c.mtime, got, c.racy)
+		}
+	}
+}
+
+// Wave 9 review: Linux exFAT truncates the coarse clock's stamps to 10 ms,
+// and a delayed tick lags further, so a stamp 30 ms before the reading can
+// still share its slot with a later rewrite; and vfat truncates the lagging
+// coarse clock to 2 s, so a stamp with no sub-second part 2.03 s before the
+// reading can too. Both are racy; with a 20 ms margin and a bare 2 s window
+// both were trusted.
+func TestRacyTimestampsFromALaggingClock(t *testing.T) {
+	hashed := time.Date(2026, 10, 18, 12, 0, 10, 30_000_500, time.UTC)
+	for _, c := range []struct {
+		name  string
+		mtime time.Time
+	}{
+		{"exFAT", hashed.Add(-30 * time.Millisecond)},
+		{"vfat", time.Date(2026, 10, 18, 12, 0, 8, 0, time.UTC)},
+	} {
+		if !Racy(fakeInfo{c.mtime}, hashed) {
+			t.Errorf("%s: a stamp %v before the reading is trusted", c.name, hashed.Sub(c.mtime))
 		}
 	}
 }

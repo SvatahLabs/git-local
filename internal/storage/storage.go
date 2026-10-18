@@ -300,9 +300,19 @@ type Lock struct{ file *os.File }
 func (d *Dir) Lock(ctx context.Context, name string, shared bool) (*Lock, error) {
 	// Elect a single creator, then open the existing inode without O_CREATE.
 	// Concurrent nonexclusive creation can fail on supported local filesystems.
-	f, err := d.open(name, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0600)
-	if os.IsExist(err) {
-		f, err = d.open(name, os.O_RDWR, 0600)
+	// git local deinit may remove the existing file in between, so the
+	// election is run again; a few attempts suffice.
+	var f *os.File
+	var err error
+	for attempt := 0; attempt < 3; attempt++ {
+		f, err = d.open(name, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0600)
+		if !os.IsExist(err) {
+			break
+		}
+		lockCreateLost(name)
+		if f, err = d.open(name, os.O_RDWR, 0600); !os.IsNotExist(err) {
+			break
+		}
 	}
 	if err != nil {
 		return nil, err
@@ -310,6 +320,10 @@ func (d *Dir) Lock(ctx context.Context, name string, shared bool) (*Lock, error)
 	l, err := lockFile(ctx, f, shared)
 	return d.locked(name, l, err)
 }
+
+// lockCreateLost runs when Lock finds the lock file already exists, just
+// before it opens that file; tests replace it to remove the file meanwhile.
+var lockCreateLost = func(string) {}
 
 // LockExisting acquires a shared read lock without creating or rewriting state.
 func (d *Dir) LockExisting(ctx context.Context, name string) (*Lock, error) {

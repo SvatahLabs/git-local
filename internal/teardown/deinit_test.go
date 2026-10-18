@@ -2,6 +2,8 @@ package teardown_test
 
 import (
 	"bytes"
+	"context"
+	"crypto/rand"
 	"io"
 	"os"
 	"os/exec"
@@ -11,7 +13,12 @@ import (
 	"testing"
 	"time"
 
+	"gitlocal/internal/backup"
+	"gitlocal/internal/configtx"
+	"gitlocal/internal/gitexec"
+	"gitlocal/internal/selection"
 	"gitlocal/internal/testutil"
+	"gitlocal/internal/workspace"
 )
 
 func testBinary(t *testing.T) string {
@@ -115,6 +122,39 @@ func (f *fixture) git(env []string, dir string, args ...string) string {
 		f.t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
 	return out
+}
+
+// backupStage packs the private state of repo's main checkout into an
+// encrypted backup and decrypts it into a staged restore.
+func backupStage(t *testing.T, repo *testutil.Repo) string {
+	t.Helper()
+	ctx := context.Background()
+	r, err := gitexec.New(repo.RunnerEnv())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		t.Fatal(err)
+	}
+	var encrypted bytes.Buffer
+	var ref string
+	if err := configtx.ReadSelection(ctx, r, repo.Root, func(w workspace.Context, _ selection.State, _ []string, recheck func() error) error {
+		ref = "refs/gitlocal/backups/" + w.RepositoryID + "/20260101T000000Z-00000000-0000-4000-8000-000000000001"
+		if err := backup.PackEncrypted(ctx, filepath.Join(w.Common, "gitlocal"), w.Admin, &encrypted, key, ref); err != nil {
+			return err
+		}
+		return recheck()
+	}); err != nil {
+		t.Fatal(err)
+	}
+	stage, err := backup.DecryptStaged(ctx, bytes.NewReader(encrypted.Bytes()), key, ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(stage) })
+	return stage
 }
 
 func write(t *testing.T, path, content string) {
@@ -286,12 +326,30 @@ func TestDeinitRemoveHistoryRefusesRecoveryRefs(t *testing.T) {
 	write(t, filepath.Join(root, "notes.local"), "v1\n")
 	g.gl(root, "track", "notes.local")
 	g.gl(root, "commit", "-m", "v1")
+	stage := backupStage(t, g.repo)
 	g.gl(root, "deinit", "--remove-history")
 	if leftovers, _ := filepath.Glob(filepath.Join(root, ".git", "gitlocal*")); len(leftovers) != 0 {
 		t.Fatalf("--remove-history left %q", leftovers)
 	}
 	if status := g.git(g.plain, root, "status", "--porcelain"); status != "?? notes.local\n" {
 		t.Fatalf("status after deinit --remove-history:\n%s", status)
+	}
+	// Nor in a repository restored from a backup, whose restore lock is in
+	// the common Git directory.
+	r, err := gitexec.New(g.repo.RunnerEnv())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if _, err := backup.AdoptStaged(context.Background(), r, root, stage); err != nil {
+		t.Fatalf("backup restore: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".git", "gitlocal-backup-restore.lock")); err != nil {
+		t.Fatalf("backup restore left no lock: %v", err)
+	}
+	g.gl(root, "deinit", "--remove-history")
+	if leftovers, _ := filepath.Glob(filepath.Join(root, ".git", "gitlocal*")); len(leftovers) != 0 {
+		t.Fatalf("--remove-history after a backup restore left %q", leftovers)
 	}
 
 	// A retired worktree's history is the only copy of its files.

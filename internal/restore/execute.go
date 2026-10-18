@@ -357,6 +357,10 @@ func (g *guard) close() { g.engine.Close() }
 // count the checks.
 var pathChecked = func(string) {}
 
+// stateRead is called each time a guard reads the main branch ("branch") or
+// the workspace heads ("heads") with Git; tests replace it to count the reads.
+var stateRead = func(string) {}
+
 // inspect returns path's current image. A full check re-checks every path,
 // so it reuses an earlier hash while Lstat still shows the same file (same
 // file identity, size, mode and modification time): a full check then costs
@@ -485,6 +489,7 @@ func (g *guard) recognizeScope(ctx context.Context, op int, dir string) error {
 		if err = (selection.Ownership{Evidence: g.evidence}).Revalidate(ctx, g.r, g.w.Root, g.w.Admin); err != nil {
 			return err
 		}
+		stateRead("branch")
 		branch, e := mainBranch(ctx, g.r, g.w)
 		if e != nil {
 			return e
@@ -495,6 +500,7 @@ func (g *guard) recognizeScope(ctx context.Context, op int, dir string) error {
 	}
 	if full || g.heads == nil || !g.heads.Settled() || !heads.Same(*g.heads) {
 		g.heads = nil
+		stateRead("heads")
 		for _, entry := range []struct{ id, head string }{{p.SourceWorkspaceID, p.SourceHead}, {p.DestinationWorkspaceID, p.DestinationBaseline}} {
 			head, e := history.WorkspaceHeadLocked(ctx, g.r, g.w, entry.id)
 			if e != nil {

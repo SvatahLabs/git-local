@@ -63,3 +63,39 @@ func TestLockReportsStateMovedWhileWaiting(t *testing.T) {
 	}
 	held.Close()
 }
+
+// GL-129 review: git local deinit removes the identity lock file while it
+// holds it. A command that found the file existing and has not opened it yet
+// creates it again, instead of failing with a bare "no such file or
+// directory". Not parallel: it replaces lockCreateLost.
+func TestLockCreatesAgainWhenFileRemovedBeforeOpen(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	d, err := OpenDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	const name = "gitlocal-identity.lock"
+	if err := os.WriteFile(filepath.Join(root, name), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	removed := 0
+	lockCreateLost = func(string) {
+		if removed == 0 {
+			if err := os.Remove(filepath.Join(root, name)); err != nil {
+				t.Error(err)
+			}
+		}
+		removed++
+	}
+	t.Cleanup(func() { lockCreateLost = func(string) {} })
+	l, err := d.Lock(ctx, name, false)
+	if err != nil {
+		t.Fatalf("lock after the file was removed before its open: %v", err)
+	}
+	l.Close()
+	if removed != 1 {
+		t.Fatalf("lock lost the creation %d times, want 1", removed)
+	}
+}

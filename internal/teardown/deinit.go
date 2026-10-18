@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 
+	"gitlocal/internal/backup"
 	"gitlocal/internal/configtx"
 	"gitlocal/internal/exclude"
 	"gitlocal/internal/gitexec"
@@ -149,11 +150,12 @@ func Deinit(ctx context.Context, r *gitexec.Runner, cwd string, removeHistory bo
 	// Identities that don't belong to the live state, which another
 	// worktree's git local init may have built meanwhile, are removed: the
 	// removed state's, and any of an older one an interrupted deinit left.
-	// init holds the identity lock until it has published its identity, and
-	// that lock, unlike the repository lock, exists whether or not a private
-	// state directory does: an init either finished before the live state is
-	// read below, and its identity belongs to it, or waits until the
-	// identities are removed and then stops (GL-129).
+	// init, like backup restore, holds the identity lock until it has
+	// published its identity, and that lock, unlike the repository lock,
+	// exists whether or not a private state directory does: an init either
+	// finished before the live state is read below, and its identity belongs
+	// to it, or waits until the identities are removed and then stops
+	// (GL-129).
 	identities, err := common.Lock(ctx, workspace.IdentityLock, false)
 	if err != nil {
 		return result, err
@@ -166,6 +168,11 @@ func Deinit(ctx context.Context, r *gitexec.Runner, cwd string, removeHistory bo
 	defer release()
 	identitiesListed()
 	if result.Identities, err = removeIdentities(common, w.Common, func(id workspace.Identity) bool { return !belongs(id) }); err != nil {
+		return result, err
+	}
+	// Backup restore takes its own lock only while it holds the identity
+	// lock, so nothing holds or waits for the lock it leaves behind.
+	if err := common.Remove(backup.RestoreLock); err != nil && !os.IsNotExist(err) {
 		return result, err
 	}
 	// The lock file is removed while held, so an init waiting for it stops
