@@ -164,13 +164,14 @@ func TestEveryRestoreFaultIsResolvable(t *testing.T) {
 				// way out instead: partial bytes of an interrupted stage
 				// write are preserved (they could hold an edit) until the
 				// staging file is moved aside, and a restore that committed
-				// can only be resumed.
+				// can only be resumed. Each is accepted only at its own
+				// points, so a regression that hits it elsewhere fails.
 				how := "resume"
 				if rollback {
 					how = "rollback"
 				}
 				_, err = Recover(ctx, r, root, result.TransactionID, rollback)
-				if err != nil && strings.Contains(err.Error(), "staging file, which Git ignores") {
+				if err != nil && strings.HasPrefix(point, "before-stage-write:") && strings.Contains(err.Error(), "staging file, which Git ignores") {
 					stages, _ := filepath.Glob(filepath.Join(root, "notes", "*", ".gitlocal-tmp-*"))
 					more, _ := filepath.Glob(filepath.Join(root, "notes", ".gitlocal-tmp-*"))
 					stages = append(stages, more...)
@@ -185,7 +186,7 @@ func TestEveryRestoreFaultIsResolvable(t *testing.T) {
 					}
 					how += " after moving the staging file aside"
 					_, err = Recover(ctx, r, root, result.TransactionID, rollback)
-				} else if err != nil && rollback && strings.Contains(err.Error(), "already completed with a different outcome") {
+				} else if err != nil && rollback && (point == "outcome" || point == "before-archive") && strings.Contains(err.Error(), "already completed with a different outcome") {
 					how = "resume"
 					_, err = Recover(ctx, r, root, result.TransactionID, false)
 				}

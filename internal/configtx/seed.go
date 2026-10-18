@@ -586,14 +586,19 @@ func (w seedStageWriter) Write(b []byte) (int, error) {
 	return n, point(w.ctx, w.f, fmt.Sprintf("seed-stage-write:%d", w.index))
 }
 
-type limitedSeedBuffer struct{ bytes.Buffer }
+// limitedSeedBuffer holds a symlink target of at most 1 MiB. The buffer is a
+// named field, not embedded: an embedded bytes.Buffer would promote ReadFrom,
+// which io.Copy prefers to Write, and so bypass the limit.
+type limitedSeedBuffer struct{ buf bytes.Buffer }
 
 func (b *limitedSeedBuffer) Write(data []byte) (int, error) {
-	if len(data) > 1<<20-b.Len() {
+	if len(data) > 1<<20-b.buf.Len() {
 		return 0, errors.New("seed symlink target exceeds 1 MiB")
 	}
-	return b.Buffer.Write(data)
+	return b.buf.Write(data)
 }
+
+func (b *limitedSeedBuffer) String() string { return b.buf.String() }
 
 // runSeed applies or rolls back the seed journal j. A recovery (recovering)
 // checks main ownership as it is now rather than against the journal's
@@ -603,11 +608,17 @@ func (s *session) runSeed(ctx context.Context, files *storage.Dir, j *seedJourna
 	if err := s.recognize(j.Config); err != nil {
 		return nil, err
 	}
+	if j.Outcome != "" {
+		// The seed already committed or rolled back and only its archiving
+		// is left: that is bookkeeping, so main changing since (the evidence
+		// is the seed's, not main's as it is now) doesn't block it.
+		return nil, s.archiveSeed(*j)
+	}
 	index, err := selection.IndexFile(ctx, s.r, s.w.Root, s.w.Admin)
 	if err != nil {
 		return nil, err
 	}
-	if recovering && j.Outcome == "" {
+	if recovering {
 		if err := s.replanOwnership(ctx, j); err != nil {
 			return nil, err
 		}
@@ -627,7 +638,7 @@ func (s *session) runSeed(ctx context.Context, files *storage.Dir, j *seedJourna
 			return nil
 		}
 		checked = nil
-		if err := (selection.Ownership{Evidence: j.Ownership}).Revalidate(ctx, s.r, s.w.Root, s.w.Admin); err != nil {
+		if err := (selection.Ownership{Evidence: j.Ownership}).RevalidateRecorded(ctx, s.r, s.w.Root, s.w.Admin); err != nil {
 			return err
 		}
 		if state.Settled() {
@@ -637,9 +648,6 @@ func (s *session) runSeed(ctx context.Context, files *storage.Dir, j *seedJourna
 	}
 	if err := revalidate(true); err != nil {
 		return nil, err
-	}
-	if j.Outcome != "" {
-		return nil, s.archiveSeed(*j)
 	}
 	key, err := s.seedKey(*j)
 	if err != nil {
@@ -928,10 +936,18 @@ type seedOwnedError struct {
 }
 
 func (e *seedOwnedError) Error() string {
-	if e.resumeOnly {
-		return fmt.Sprintf("seed transaction %s can't be resumed: %v; run git local recover %s --rollback to remove the seeded files, or git local recover %s --abandon to leave them as they are", e.id, e.err, e.id, e.id)
+	// The owned-path refusal's own advice (untrack or exclude the path)
+	// is refused while the seed is pending, so only the recovery advice is
+	// given.
+	reason := e.err.Error()
+	var owned *selection.OwnedError
+	if errors.As(e.err, &owned) {
+		reason = owned.Fact()
 	}
-	return fmt.Sprintf("seed transaction %s can't be resumed or rolled back: %v; run git local recover %s --abandon, which leaves the seeded files as they are", e.id, e.err, e.id)
+	if e.resumeOnly {
+		return fmt.Sprintf("seed transaction %s can't be resumed: %s; run git local recover %s --rollback to remove the seeded files, or git local recover %s --abandon to leave them as they are", e.id, reason, e.id, e.id)
+	}
+	return fmt.Sprintf("seed transaction %s can't be resumed or rolled back: %s; run git local recover %s --abandon, which leaves the seeded files as they are", e.id, reason, e.id)
 }
 
 func (e *seedOwnedError) Unwrap() error { return e.err }

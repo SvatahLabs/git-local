@@ -4,6 +4,7 @@ package teardown
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -70,7 +71,7 @@ func Deinit(ctx context.Context, r *gitexec.Runner, cwd string, removeHistory bo
 		}
 	}
 	if err == nil {
-		if err := checkInitialized(w); err != nil {
+		if err := checkInitialized(w, common); err != nil {
 			return result, err
 		}
 		if err := checkIdentity(w, common); err != nil {
@@ -148,8 +149,13 @@ func Deinit(ctx context.Context, r *gitexec.Runner, cwd string, removeHistory bo
 	// Identities that don't belong to the live state, which another
 	// worktree's git local init may have built meanwhile, are removed: the
 	// removed state's, and any of an older one an interrupted deinit left.
-	// The shared lock keeps an init from publishing a new state's identity
-	// meanwhile.
+	// When a private state directory exists, the shared lock keeps an init
+	// from publishing a new state's identity meanwhile. When none exists (the
+	// usual case once the state is set aside) no lock is taken: an init in a
+	// worktree without an identity that creates a state after the check
+	// below, and publishes its identity before removeIdentities reaches that
+	// worktree, loses the identity file. init refuses while another worktree
+	// still holds an identity, which narrows that window but doesn't close it.
 	release, belongs, err := liveIdentities(ctx, common)
 	if err != nil {
 		return result, err
@@ -184,8 +190,12 @@ func liveIdentities(ctx context.Context, common *storage.Dir) (func(), func(work
 
 // removeBareState removes a private state directory that holds nothing but
 // its lock file (a git local init refused before writing anything leaves
-// one), under the exclusive lock, and reports whether it was one. A command
-// waiting for the lock meanwhile finds it removed and stops.
+// one), or nothing (a deinit interrupted between its last two removals leaves
+// that), under the exclusive lock, and reports whether it was one. On POSIX
+// systems a command waiting for the lock meanwhile finds it removed and
+// stops. On Windows the lock is closed before the file is deleted, so a
+// waiter may take it and go on; deinit then fails because the file is in use
+// (or its directory isn't empty), and running it again finishes.
 func removeBareState(ctx context.Context, common *storage.Dir) (bool, error) {
 	bare := func() (bool, error) {
 		entries, err := common.ReadDir("gitlocal")
@@ -198,7 +208,9 @@ func removeBareState(ctx context.Context, common *storage.Dir) (bool, error) {
 			}
 		}
 		locks, err := common.ReadDir("gitlocal/locks")
-		if err != nil {
+		if os.IsNotExist(err) {
+			return true, nil
+		} else if err != nil {
 			return false, err
 		}
 		for _, entry := range locks {
@@ -253,8 +265,10 @@ var beforeSetAside = func() {}
 // step took the lock on its own, so another git local command (overlay add,
 // hook install, auto install, track) may have run since; the final check
 // refuses then, leaving everything in place, and a rerun removes what it
-// installed. Commands that wait for the lock meanwhile find no private state
-// afterwards and stop.
+// installed. On POSIX systems, commands that wait for the lock meanwhile find
+// no private state afterwards and stop. On Windows the lock is closed before
+// the rename, so a waiter may take it and go on; the rename then fails because
+// a file in the directory is in use, and deinit can be run again.
 func setAside(ctx context.Context, r *gitexec.Runner, w *workspace.Context, common *storage.Dir, removeHistory bool) (string, bool, error) {
 	beforeSetAside()
 	lock, err := common.Lock(ctx, "gitlocal/locks/repository.lock", false)
@@ -349,12 +363,27 @@ func finalCheck(ctx context.Context, r *gitexec.Runner, w *workspace.Context, co
 // checkInitialized refuses in a worktree that git local init never ran in,
 // where the steps that need a workspace would fail after earlier ones made
 // changes, and names the worktrees to run deinit from instead.
-func checkInitialized(w *workspace.Context) error {
+func checkInitialized(w *workspace.Context, common *storage.Dir) error {
 	if _, err := os.Stat(filepath.Join(w.Admin, "gitlocal-workspace.json")); err == nil || !os.IsNotExist(err) {
 		return err
 	}
+	return fmt.Errorf("%w: git local was never initialized in this worktree; run git local deinit from %s", storage.ErrConflict, deinitRoots(w, common))
+}
+
+// deinitRoots names the other worktrees deinit can run from: those whose
+// identity file can be read and belongs to the live state (checkIdentity
+// refuses in the others).
+func deinitRoots(w *workspace.Context, common *storage.Dir) string {
+	var live workspace.Repository
+	_ = common.ReadJSON("gitlocal/repository.json", &live)
+	// usable reports whether the identity file named (relative to the
+	// common directory) can be read and belongs to the live state.
+	usable := func(name string) bool {
+		var id workspace.Identity
+		return common.ReadJSON(name, &id) == nil && (live.RepositoryID == "" || id.RepositoryID == live.RepositoryID)
+	}
 	var roots []string
-	if _, err := os.Stat(filepath.Join(w.Common, "gitlocal-workspace.json")); err == nil {
+	if filepath.Clean(w.Admin) != filepath.Clean(w.Common) && usable("gitlocal-workspace.json") {
 		if root := mainRoot(w.Common); root != "" {
 			roots = append(roots, root)
 		}
@@ -365,6 +394,9 @@ func checkInitialized(w *workspace.Context) error {
 	linked, _ := filepath.Glob(filepath.Join(w.Common, "worktrees", "*", "gitlocal-workspace.json"))
 	for _, identity := range linked {
 		admin := filepath.Dir(identity)
+		if filepath.Clean(admin) == filepath.Clean(w.Admin) || !usable(filepath.Join("worktrees", filepath.Base(admin), "gitlocal-workspace.json")) {
+			continue
+		}
 		gitdir, err := os.ReadFile(filepath.Join(admin, "gitdir"))
 		if err != nil {
 			continue
@@ -376,17 +408,17 @@ func checkInitialized(w *workspace.Context) error {
 		roots = append(roots, filepath.Dir(filepath.Clean(dotgit)))
 	}
 	sort.Strings(roots)
-	where := "a worktree where git local init ran"
-	if len(roots) > 0 {
-		where = strings.Join(roots, " or ")
+	if len(roots) == 0 {
+		return "a worktree where git local init ran"
 	}
-	return fmt.Errorf("%w: git local was never initialized in this worktree; run git local deinit from %s", storage.ErrConflict, where)
+	return strings.Join(roots, " or ")
 }
 
 // checkIdentity refuses when this worktree's identity belongs to an earlier
 // private state than the live one, which another worktree's git local init
 // built after an interrupted deinit: deinit from here would remove a state
-// this worktree isn't part of.
+// this worktree isn't part of. It also refuses, naming the way out, when the
+// identity can't be read: the steps that open the workspace need it.
 func checkIdentity(w *workspace.Context, common *storage.Dir) error {
 	var id workspace.Identity
 	var live workspace.Repository
@@ -400,13 +432,37 @@ func checkIdentity(w *workspace.Context, common *storage.Dir) error {
 		return err
 	}
 	defer admin.Close()
-	if err := admin.ReadJSON("gitlocal-workspace.json", &id); err != nil {
+	name := filepath.Join(w.Admin, "gitlocal-workspace.json")
+	if err := admin.ReadJSON("gitlocal-workspace.json", &id); os.IsNotExist(err) {
 		return err
+	} else if err != nil {
+		way := "run git local deinit from " + deinitRoots(w, common) + ", which removes it too"
+		if workspaceID := recordedWorkspace(common, w.Admin); workspaceID != "" {
+			content, _ := json.Marshal(workspace.Identity{SchemaVersion: workspace.SchemaVersion, RepositoryID: live.RepositoryID, WorkspaceID: workspaceID})
+			way = "replace its content with " + string(content) + " (the workspace the private state records for this worktree) and run git local deinit again, or " + way
+		}
+		return fmt.Errorf("%w: this worktree's git local identity (%s) can't be read (%v), and deinit needs it here; %s", storage.ErrConflict, name, err, way)
 	}
 	if id.RepositoryID != live.RepositoryID {
-		return fmt.Errorf("%w: this worktree's git local identity (%s) belongs to an earlier private state, which an interrupted git local deinit leaves, not to the one in %s; delete that file, then run git local deinit from a worktree where git local init ran since", storage.ErrConflict, filepath.Join(w.Admin, "gitlocal-workspace.json"), filepath.Join(w.Common, "gitlocal"))
+		return fmt.Errorf("%w: this worktree's git local identity (%s) belongs to an earlier private state, which an interrupted git local deinit leaves, not to the one in %s; delete that file, then run git local deinit from a worktree where git local init ran since", storage.ErrConflict, name, filepath.Join(w.Common, "gitlocal"))
 	}
 	return nil
+}
+
+// recordedWorkspace is the ID of the active workspace the private state
+// records for the worktree whose administrative directory is admin, or "".
+func recordedWorkspace(common *storage.Dir, admin string) string {
+	entries, _ := common.ReadDir("gitlocal/workspaces")
+	for _, entry := range entries {
+		var record workspace.Record
+		if !entry.IsDir() || !storage.ValidUUID(entry.Name()) || common.ReadJSON(filepath.Join("gitlocal", "workspaces", entry.Name(), "workspace.json"), &record) != nil {
+			continue
+		}
+		if record.State == "active" && filepath.Clean(record.Admin) == filepath.Clean(admin) {
+			return entry.Name()
+		}
+	}
+	return ""
 }
 
 // mainRoot is the main worktree of the repository whose common directory is

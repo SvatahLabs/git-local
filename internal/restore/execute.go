@@ -1147,6 +1147,9 @@ func Abandon(ctx context.Context, r *gitexec.Runner, cwd, id string) (configtx.A
 		}
 		result.Quarantine = q.Directory(w.Common)
 		j.Outcome = configtx.OutcomeAbandoned
+		// Earlier releases decode completed journals strictly and don't know
+		// the field; abandoning resolves the stop.
+		j.Stopped = nil
 		if err := writeJournal(meta, j); err != nil {
 			return err
 		}

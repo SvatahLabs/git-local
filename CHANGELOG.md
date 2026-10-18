@@ -90,7 +90,8 @@ The first release meant for general use. It replaces the 0.1.4 test builds.
   workspace identities) and keeps the private history unless you pass
   `--remove-history`. Every check that can refuse runs before its first
   change, and a rerun finishes an interrupted one; until it has, `init` in a
-  worktree still holding an old identity refuses without creating anything.
+  worktree still holding an old identity refuses without creating anything
+  and names `deinit`.
 - `git local maintenance` packs the private history store and deletes objects
   no snapshot or recovery ref uses; `doctor` reports the store's size.
 - `git local encrypt migrate` corrects an existing sensitive-file policy with

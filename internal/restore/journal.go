@@ -94,7 +94,7 @@ func stopped(meta *storage.Dir, j *journal, err error) error {
 		_ = writeJournal(meta, *j)
 	}
 	// Resume and rollback both refuse while the edit or the bytes are there.
-	return fmt.Errorf("%w: restore transaction %s stopped (%v); %s", storage.ErrConflict, id, err, stop.Advice(id, ""))
+	return fmt.Errorf("%w: restore transaction %s stopped (%v); %s", storage.ErrConflict, id, err, stop.Advice(id, "", j.Direction == "rollback"))
 }
 
 // externalEdit is a pending path that changed outside the restore; the

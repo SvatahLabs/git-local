@@ -193,7 +193,23 @@ func InspectOwnership(ctx context.Context, g GitReader, root, admin string) (Own
 	}
 	return o, nil
 }
+
+// Revalidate checks that main's HEAD and index still match o's evidence,
+// which the same command captured moments earlier: a mismatch means a Git
+// command ran meanwhile, so running the command again is the fix.
 func (o Ownership) Revalidate(ctx context.Context, g GitReader, root, admin string) error {
+	return o.revalidate(ctx, g, root, admin, false)
+}
+
+// RevalidateRecorded is Revalidate for evidence a journal records, as a seed
+// does: a mismatch is usually a lasting change since then, which the
+// journal's recovery resolves, so it says to retry only while a Git command
+// holds the index or HEAD.
+func (o Ownership) RevalidateRecorded(ctx context.Context, g GitReader, root, admin string) error {
+	return o.revalidate(ctx, g, root, admin, true)
+}
+
+func (o Ownership) revalidate(ctx context.Context, g GitReader, root, admin string, recorded bool) error {
 	h, err := head(ctx, g, root, admin)
 	if err != nil {
 		return err
@@ -205,7 +221,7 @@ func (o Ownership) Revalidate(ctx context.Context, g GitReader, root, admin stri
 	sum := sha256.Sum256(b)
 	if h != o.Evidence.Head || hex.EncodeToString(sum[:]) != o.Evidence.IndexDigest {
 		// Waiting helps only while a Git command holds the index or HEAD.
-		if gitBusy(admin) {
+		if !recorded || gitBusy(admin) {
 			return fmt.Errorf("%w: main HEAD or index changed; retry after Git operations finish", storage.ErrConflict)
 		}
 		return fmt.Errorf("%w: main HEAD or index changed", storage.ErrConflict)
@@ -260,8 +276,22 @@ func (o Ownership) Check(s State) error {
 // count the folds.
 var FoldOwned = storage.AliasKey
 
+// OwnedError is the refusal of a selected path main owns. Its message
+// suggests untracking or excluding the path; Fact is the message without
+// that advice, for a caller (a pending seed's recovery) where neither works.
+type OwnedError struct{ Path string }
+
+func (e *OwnedError) Error() string { return e.Fact() + "; untrack or exclude it" }
+
+// Fact states the conflict without advice.
+func (e *OwnedError) Fact() string {
+	return fmt.Sprintf("%v: selected path %q is owned by the main index or HEAD", storage.ErrConflict, e.Path)
+}
+
+func (e *OwnedError) Unwrap() error { return storage.ErrConflict }
+
 func ownedError(path string) error {
-	return fmt.Errorf("%w: selected path %q is owned by the main index or HEAD; untrack or exclude it", storage.ErrConflict, path)
+	return &OwnedError{Path: path}
 }
 func ownedAncestorError(path string) error {
 	return fmt.Errorf("%w: main-owned ancestor %q blocks selection", storage.ErrConflict, path)

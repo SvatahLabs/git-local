@@ -291,18 +291,24 @@ type RestoreStop struct {
 }
 
 // Advice is the way out of restore transaction id stopped at s; from names
-// where to run the commands (" from <root>"), or is empty.
-func (s RestoreStop) Advice(id, from string) string {
+// where to run the commands (" from <root>"), or is empty. Once a rollback
+// has started, resume refuses, so the advice names only --rollback.
+func (s RestoreStop) Advice(id, from string, rollback bool) string {
 	recover := "git local recover " + id
+	finish := recover + " --resume or --rollback" + from
+	if rollback {
+		finish = recover + " --rollback" + from
+	}
+	abandon := recover + " --abandon" + from
 	switch {
 	case s.Kind == "stage":
-		return fmt.Sprintf("move %s aside (it is a staging file, which Git ignores), then run %s --resume or --rollback%s; or run %s --abandon%s, which moves it into the quarantine", s.Path, recover, from, recover, from)
+		return fmt.Sprintf("move %s aside (it is a staging file, which Git ignores), then run %s; or run %s, which moves it into the quarantine", s.Path, finish, abandon)
 	case s.Aside:
-		return fmt.Sprintf("move %s aside to keep the edit, then run %s --resume or --rollback%s; or run %s --abandon%s to leave every file as it is", s.Path, recover, from, recover, from)
+		return fmt.Sprintf("move %s aside to keep the edit, then run %s; or run %s to leave every file as it is", s.Path, finish, abandon)
 	}
 	// The path exists both before and after the restore, so a file moved
 	// aside would be a change too.
-	return fmt.Sprintf("to keep the edit, run %s --abandon%s, which leaves every file as it is; or undo the edit, then run %s --resume or --rollback%s", recover, from, recover, from)
+	return fmt.Sprintf("to keep the edit, run %s, which leaves every file as it is; or undo the edit, then run %s", abandon, finish)
 }
 
 // state describes the stop for doctor and recover --list.
@@ -339,8 +345,16 @@ func (p PendingJournal) Next() (string, string) {
 	case p.Kind == "encrypt":
 		return "Run git local encrypt recover " + p.ID + " --resume or --rollback. If both fail, run " + abandon + ".", "encryption migration stopped before its policy was published"
 	case p.Kind == "restore" && p.Stopped != nil && p.Outcome == "":
-		advice := p.Stopped.Advice(p.ID, from)
-		return strings.ToUpper(advice[:1]) + advice[1:] + ".", p.Stopped.state()
+		advice := p.Stopped.Advice(p.ID, from, p.Direction == "rollback")
+		state := p.Stopped.state()
+		if p.Direction == "rollback" {
+			state += " during its rollback"
+		}
+		return strings.ToUpper(advice[:1]) + advice[1:] + ".", state
+	case p.Outcome == OutcomeAbandoned:
+		// A crash between abandon's journal write and its archive; abandon
+		// accepts the journal again and finishes it.
+		return "Run " + abandon + " to finish it.", "abandon has started and only bookkeeping remains"
 	case p.Outcome == "committed":
 		return "Run git local recover " + p.ID + " --resume" + from + ".", "the transaction committed and only bookkeeping remains"
 	case p.Outcome == "rolledback" || p.Direction == "rollback":

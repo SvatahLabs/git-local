@@ -66,9 +66,10 @@ func initialize(ctx context.Context, r *gitexec.Runner, cwd string, fault func(s
 		return nil, err
 	}
 	defer common.Close()
-	// An identity left by an interrupted git local deinit names a state that
-	// no longer exists. Refuse before creating anything: a private state
-	// directory left behind would block deinit and init in every worktree.
+	// An identity left by an interrupted git local deinit, in this worktree
+	// or another, names a state that no longer exists. Refuse before
+	// creating anything: a private state directory left behind would block
+	// deinit and init in every worktree.
 	if _, err := common.Lstat("gitlocal"); os.IsNotExist(err) {
 		if err := staleIdentity(w); err != nil {
 			return nil, err
@@ -536,6 +537,12 @@ func checkDuplicates(ctx context.Context, r *gitexec.Runner, w *Context) error {
 			return e
 		}
 		if id.SchemaVersion != SchemaVersion || id.RepositoryID != w.RepositoryID || !storage.ValidUUID(id.WorkspaceID) {
+			// Without a live state, it is what an interrupted git local
+			// deinit left (an init of an earlier release refused there
+			// may have left a directory holding only its lock).
+			if _, re := os.Lstat(filepath.Join(w.Common, "gitlocal", "repository.json")); os.IsNotExist(re) {
+				return fmt.Errorf("%w: the git local identity %s belongs to a private state that no longer exists, which an interrupted git local deinit leaves; run git local deinit to remove it, then git local init", storage.ErrConflict, filepath.Join(adminPath, "gitlocal-workspace.json"))
+			}
 			return fmt.Errorf("%w: inconsistent identity at %s", storage.ErrConflict, adminPath)
 		}
 		if prev, ok := seen[id.WorkspaceID]; ok && prev != adminPath {
@@ -546,15 +553,54 @@ func checkDuplicates(ctx context.Context, r *gitexec.Runner, w *Context) error {
 	return nil
 }
 
-// staleIdentity refuses when the worktree w holds an identity file while no
-// private state exists.
+// staleIdentity refuses when the worktree w, or another worktree of its
+// repository that is present, holds an identity file while no private state
+// exists: git local deinit, from any worktree, removes them all. A worktree
+// that is away keeps its identity, as checkDuplicates skips it, and the new
+// state's deinit removes that.
 func staleIdentity(w *Context) error {
-	if _, err := os.Lstat(filepath.Join(w.Admin, "gitlocal-workspace.json")); os.IsNotExist(err) {
-		return nil
-	} else if err != nil {
+	if _, err := os.Lstat(filepath.Join(w.Admin, "gitlocal-workspace.json")); err == nil {
+		return staleIdentityError(w, false)
+	} else if !os.IsNotExist(err) {
 		return err
 	}
-	return staleIdentityError(w, false)
+	var others []string
+	// The main worktree of a separate Git directory may be away; checkDuplicates
+	// checks it where it is.
+	if filepath.Base(w.Common) == ".git" {
+		if _, err := os.Lstat(filepath.Join(w.Common, "gitlocal-workspace.json")); err == nil {
+			others = append(others, filepath.Join(w.Common, "gitlocal-workspace.json"))
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+	}
+	linked, err := filepath.Glob(filepath.Join(w.Common, "worktrees", "*", "gitlocal-workspace.json"))
+	if err != nil {
+		return err
+	}
+	for _, identity := range linked {
+		// A linked worktree's gitdir file names its .git file, which is
+		// missing while the worktree is away; Git may write it relative to
+		// the administrative directory.
+		admin := filepath.Dir(identity)
+		gitdir, err := os.ReadFile(filepath.Join(admin, "gitdir"))
+		if err != nil {
+			continue
+		}
+		dotgit := strings.TrimSpace(string(gitdir))
+		if !filepath.IsAbs(dotgit) {
+			dotgit = filepath.Join(admin, dotgit)
+		}
+		if _, err := os.Lstat(dotgit); err == nil {
+			others = append(others, identity)
+		}
+	}
+	if len(others) == 1 {
+		return fmt.Errorf("%w: the git local identity %s belongs to a private state that no longer exists, which an interrupted git local deinit leaves; run git local deinit to remove it, then git local init", storage.ErrConflict, others[0])
+	} else if len(others) > 1 {
+		return fmt.Errorf("%w: the git local identities %s belong to a private state that no longer exists, which an interrupted git local deinit leaves; run git local deinit to remove them, then git local init", storage.ErrConflict, strings.Join(others, ", "))
+	}
+	return nil
 }
 
 // staleIdentityError names the way out for an identity file of a private

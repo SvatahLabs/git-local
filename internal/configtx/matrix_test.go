@@ -37,8 +37,9 @@ func stopAt(point string) fault {
 // journal and unblock the guards; it doesn't fall back to abandon, so a
 // resume or rollback that always fails fails the matrix (GL-123). Only a
 // transaction that already committed refuses rollback, naming resume, which
-// must then finish it.
-func resolveMatrix(t *testing.T, g *gitexec.Runner, root, id string, rollback bool, recover func(bool) error) string {
+// must then finish it; committed holds the points after the commit, where
+// that refusal is accepted.
+func resolveMatrix(t *testing.T, g *gitexec.Runner, root, id, point string, committed map[string]bool, rollback bool, recover func(bool) error) string {
 	t.Helper()
 	ctx := context.Background()
 	pending, err := Pending(ctx, g, root)
@@ -56,7 +57,7 @@ func resolveMatrix(t *testing.T, g *gitexec.Runner, root, id string, rollback bo
 		how = "rollback"
 	}
 	if err := recover(rollback); err != nil {
-		if !rollback || !strings.Contains(err.Error(), "already committed; use --resume") {
+		if !rollback || !committed[point] || !strings.Contains(err.Error(), "already committed; use --resume") {
 			t.Fatalf("%s failed: %v", how, err)
 		}
 		how = "resume"
@@ -89,7 +90,7 @@ func TestEveryConfigurationFaultIsResolvable(t *testing.T) {
 				if err == nil {
 					t.Fatalf("fault %s missed", point)
 				}
-				how := resolveMatrix(t, g, r.Root, result.TransactionID, rollback, func(back bool) error {
+				how := resolveMatrix(t, g, r.Root, result.TransactionID, point, map[string]bool{"committed": true, "before-archive": true}, rollback, func(back bool) error {
 					_, err := Recover(ctx, g, r.Root, result.TransactionID, back)
 					return err
 				})
@@ -138,7 +139,8 @@ func TestEverySeedFaultIsResolvable(t *testing.T) {
 				if err == nil {
 					t.Fatalf("fault %s missed", point)
 				}
-				how := resolveMatrix(t, r, linked, result.TransactionID, rollback, func(back bool) error {
+				// No seed fault point follows the commit, so none may refuse rollback.
+				how := resolveMatrix(t, r, linked, result.TransactionID, point, nil, rollback, func(back bool) error {
 					_, err := RecoverSeed(ctx, r, linked, result.TransactionID, back)
 					return err
 				})

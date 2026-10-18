@@ -566,13 +566,16 @@ while an overlay's file holds changes the overlay doesn't or the overlay no
 longer applies to the file, for an overlay of a worktree that is missing
 (prune it first), for a hand-edited managed block in `.git/info/exclude`, and in
 a worktree where git local was never initialized (it names the worktrees to run
-it from), and for a damaged hook record; each of these refusals comes before it
+it from), in one whose identity file is damaged (it names the content to restore,
+or the worktrees to run it from instead), and for a damaged hook record; each of these refusals comes before it
 changes anything. It also removes the overlay filter an interrupted
 `overlay add` left behind, unless you added your own lines inside its managed
 block in `.git/info/attributes` (move them out first). If the overlay
 installation record is missing or can't be read, deinit still removes the
 filter and says what it removed. A git local command waiting for the repository lock while deinit
-sets the private state aside stops with a message saying so, and a
+sets the private state aside stops with a message saying so (on Windows the
+waiting command may go on instead, and deinit fails because the lock file is in
+use; run it again), and a
 `git local init` run in another worktree at that moment keeps the new state it
 creates. It sets the
 private state aside under the repository lock, after checking that no other git
@@ -585,8 +588,9 @@ kept nowhere else: a quarantine, a restore recovery ref (the previous file
 versions of an earlier restore) or a retired worktree's history. Encryption
 keys outside the repository are never touched. An interrupted `deinit`
 finishes when run again, and a rerun names any state an earlier run set aside.
-Until it has, `git local init` in a worktree that still holds the old
-identity refuses before creating anything and says to run deinit there. If a
+Until it has, `git local init` refuses before creating anything and says to
+run deinit, both in a worktree that still holds the old identity and in one
+without an identity while another worktree holds one. If a
 worktree was away (on a disk that wasn't mounted, say) while another worktree
 was initialized again, it keeps the identity of the earlier state: init there
 names the identity file to delete, deinit there refuses rather than remove the

@@ -99,9 +99,9 @@ func TestCheckPathsFoldsEachOwnedPathOnce(t *testing.T) {
 	}
 }
 
-// GL-125: after main changed, the message says to retry after Git operations
-// finish only while a Git command holds the index or HEAD; otherwise waiting
-// changes nothing.
+// GL-125: after main changed since evidence a journal recorded, the message
+// says to retry after Git operations finish only while a Git command holds
+// the index or HEAD; otherwise waiting changes nothing.
 func TestRevalidateSuggestsWaitingOnlyWhileGitIsBusy(t *testing.T) {
 	t.Parallel()
 	repo := testutil.New(t)
@@ -118,7 +118,7 @@ func TestRevalidateSuggestsWaitingOnlyWhileGitIsBusy(t *testing.T) {
 		t.Fatal(err)
 	}
 	repo.Git("commit", "-q", "--allow-empty", "-m", "moved")
-	err = owner.Revalidate(ctx, r, repo.Root, admin)
+	err = owner.RevalidateRecorded(ctx, r, repo.Root, admin)
 	if err == nil || !strings.Contains(err.Error(), "main HEAD or index changed") || strings.Contains(err.Error(), "retry") {
 		t.Fatalf("revalidate after a commit: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestRevalidateSuggestsWaitingOnlyWhileGitIsBusy(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(admin, lock), nil, 0600); err != nil {
 			t.Fatal(err)
 		}
-		err = owner.Revalidate(ctx, r, repo.Root, admin)
+		err = owner.RevalidateRecorded(ctx, r, repo.Root, admin)
 		if err == nil || !strings.Contains(err.Error(), "retry after Git operations finish") {
 			t.Fatalf("revalidate while %s exists: %v", lock, err)
 		}
