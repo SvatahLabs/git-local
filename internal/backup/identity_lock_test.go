@@ -81,8 +81,23 @@ func TestRestoreWaitsForIdentityLock(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		locking := make(chan struct{}, 1)
+		identityLocking = func() {
+			select {
+			case locking <- struct{}{}:
+			default:
+			}
+		}
+		defer func() { identityLocking = func() {} }()
 		done := make(chan error, 1)
 		go func() { done <- restore() }()
+		select {
+		case err := <-done:
+			held.Close()
+			t.Fatalf("%s didn't reach the identity lock: %v", what, err)
+		case <-locking:
+		}
+		// The lock is taken right after the hook; give it time to block.
 		select {
 		case err := <-done:
 			held.Close()

@@ -26,6 +26,10 @@ const restoreJournalName = "gitlocal-backup-restore.json"
 // and its recovery hold, after the identity lock.
 const RestoreLock = "gitlocal-backup-restore.lock"
 
+// identityLocking runs just before restore and its recovery take the
+// identity lock; tests replace it to know when they wait for it.
+var identityLocking = func() {}
+
 type restoreJournal struct {
 	SchemaVersion    int                `json:"schemaVersion"`
 	RepositoryID     string             `json:"repositoryId"`
@@ -64,6 +68,7 @@ func adoptStaged(ctx context.Context, r *gitexec.Runner, cwd, stage string, faul
 	// order before the others: git local deinit, which removes the
 	// identities that don't belong to the live state, either sees the
 	// restored state or runs before it exists.
+	identityLocking()
 	identities, err := common.Lock(ctx, workspace.IdentityLock, false)
 	if err != nil {
 		return empty, err
@@ -331,6 +336,7 @@ func RecoverRestore(ctx context.Context, r *gitexec.Runner, cwd string) (StagedI
 	}
 	defer common.Close()
 	// Held for the same reason as in adoptStaged.
+	identityLocking()
 	identities, err := common.Lock(ctx, workspace.IdentityLock, false)
 	if err != nil {
 		return empty, err
