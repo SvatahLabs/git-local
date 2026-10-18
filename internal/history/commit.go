@@ -23,6 +23,7 @@ type Result struct {
 	Changed      bool
 	Warnings     []string
 	Subprocesses uint64
+	store        string
 }
 type fault func(string) error
 
@@ -45,10 +46,14 @@ func ValidateMessage(message string) error {
 	return nil
 }
 func Commit(ctx context.Context, r *gitexec.Runner, cwd, message string) (Result, error) {
-	return commitWithOptions(ctx, r, cwd, message, "", nil, nil)
+	return CommitWithWriter(ctx, r, cwd, message, "")
 }
 func CommitWithWriter(ctx context.Context, r *gitexec.Runner, cwd, message, writer string) (Result, error) {
-	return commitWithOptions(ctx, r, cwd, message, writer, nil, nil)
+	result, err := commitWithOptions(ctx, r, cwd, message, writer, nil, nil)
+	if err == nil {
+		autoMaintain(ctx, r, cwd, &result)
+	}
+	return result, err
 }
 func commit(ctx context.Context, r *gitexec.Runner, cwd, message string, f fault) (result Result, err error) {
 	return commitWithOptions(ctx, r, cwd, message, "", nil, f)
@@ -61,7 +66,11 @@ func CommitScoped(ctx context.Context, r *gitexec.Runner, cwd, message, writer s
 	if len(paths) == 0 {
 		return Result{}, errors.New("scoped commit requires at least one path")
 	}
-	return commitWithOptions(ctx, r, cwd, message, writer, paths, nil)
+	result, err := commitWithOptions(ctx, r, cwd, message, writer, paths, nil)
+	if err == nil {
+		autoMaintain(ctx, r, cwd, &result)
+	}
+	return result, err
 }
 
 func commitWithOptions(ctx context.Context, r *gitexec.Runner, cwd, message, writer string, requested []string, f fault) (result Result, err error) {
@@ -74,6 +83,7 @@ func commitWithOptions(ctx context.Context, r *gitexec.Runner, cwd, message, wri
 		return result, err
 	}
 	result.Warnings, err = configtx.WithSelection(ctx, r, cwd, func(w workspace.Context, state selection.State, recheck func() error) error {
+		result.store = w.Store
 		secure, e := loadSecure(w)
 		if e != nil {
 			return e
@@ -144,7 +154,10 @@ func commitWithOptions(ctx context.Context, r *gitexec.Runner, cwd, message, wri
 		nextDigests := map[string]string{}
 		if scope != nil {
 			for path, file := range oldFiles {
-				if !inScope(scope, path) {
+				// A path the owner has since untracked or excluded is
+				// dropped, as a full snapshot would drop it; earlier
+				// snapshots keep its bytes (GL-137).
+				if !inScope(scope, path) && state.Selected(path) {
 					nextFiles[path] = file
 					if digest := old.EncryptedDigests[path]; digest != "" {
 						nextDigests[path] = digest
@@ -173,6 +186,13 @@ func commitWithOptions(ctx context.Context, r *gitexec.Runner, cwd, message, wri
 				return e
 			}
 			defer batch.close()
+		}
+		// Blobs of the previous snapshot are in the store already: a file
+		// whose content hashes (in process) to one of them is recorded
+		// without copying it or starting Git (GL-135).
+		known := map[string]bool{}
+		for _, file := range oldFiles {
+			known[file.ID] = true
 		}
 		flush := func() error {
 			if batch != nil {
@@ -270,8 +290,30 @@ func commitWithOptions(ctx context.Context, r *gitexec.Runner, cwd, message, wri
 				if target != entry.LinkTarget {
 					return fmt.Errorf("%w: link changed at %q", storage.ErrConflict, entry.Path)
 				}
-				id, e = hash(ctx, r, w.Store, strings.NewReader(target))
+				if id = blobIDString(target); !known[id] {
+					id, e = hash(ctx, r, w.Store, strings.NewReader(target))
+				}
 			} else {
+				var computed string
+				hashed, err := files.StreamStableSize(entry.Path, func(size int64, input io.Reader) error {
+					var err error
+					computed, err = blobID(size, input)
+					return err
+				})
+				if err != nil {
+					return err
+				}
+				if hashed.Mode() != entry.Mode {
+					return fmt.Errorf("%w: mode changed at %q", storage.ErrConflict, entry.Path)
+				}
+				if known[computed] {
+					observations[entry.Path] = hashed
+					nextFiles[entry.Path] = fileValue{mode, computed}
+					if e = checkpoint(ctx, f, "file"); e != nil {
+						return e
+					}
+					continue
+				}
 				if batch != nil {
 					observation, err := batch.stage(files, entry.Path, mode, entry.Mode)
 					if err == nil {
@@ -320,7 +362,7 @@ func commitWithOptions(ctx context.Context, r *gitexec.Runner, cwd, message, wri
 		for path, file := range nextFiles {
 			root.add(path, file.Mode, file.ID)
 		}
-		filesTree, e := root.write(ctx, r, w.Store)
+		filesTree, e := root.writeExcept(ctx, r, w.Store, previousTree)
 		if e != nil {
 			return e
 		}

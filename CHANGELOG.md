@@ -52,6 +52,14 @@ The first release meant for general use. It replaces the 0.1.4 test builds.
 
 ### Behavior changes
 
+- `status` and snapshots hash files in process and skip files whose content
+  the previous snapshot already holds, instead of starting a Git process per
+  selected file: `status` on 20,000 files went from about 400 s to seconds.
+- A scoped snapshot (`commit -- <paths>`) after an `untrack` or `exclude`
+  drops the no-longer-selected saved files instead of refusing until a full
+  snapshot; earlier snapshots keep them. Older builds refuse to read such a
+  snapshot, so upgrade every worktree together.
+
 - `overlay add` and `doctor` refuse `core.autocrlf=input` as well as `true`
   (common as a macOS global setting), and `git local reset --hard` refuses in
   a repository with overlays while it is set; run
@@ -93,7 +101,9 @@ The first release meant for general use. It replaces the 0.1.4 test builds.
   worktree still holding an old identity refuses without creating anything
   and names `deinit`.
 - `git local maintenance` packs the private history store and deletes objects
-  no snapshot or recovery ref uses; `doctor` reports the store's size.
+  no snapshot or recovery ref uses; `doctor` reports the store's size. A
+  snapshot also packs the store once it holds 6,700 loose objects or 256 MiB
+  of them, so it no longer grows until every command slows down.
 - `git local encrypt migrate` corrects an existing sensitive-file policy with
   the same key.
 - `git local recover <id> --abandon` gives up a transaction that can neither
@@ -168,7 +178,8 @@ About a hundred defects found in pre-release reviews, among them:
   whose main index holds 90,000 paths.
 - **Seeding** a worktree takes about 12 ms per seeded file on a busy machine,
   most of it spent making each file durable.
-- **Maintenance** isn't automatic: run `git local maintenance` now and then.
+- **Maintenance:** snapshots pack loose objects; run `git local maintenance`
+  now and then to repack the store fully.
 - **Limits:** see [docs/limits.md](docs/limits.md); among them managed ignore
   rules up to 256 KiB, restore and encryption-migration journals up to 16 MiB,
   configuration and seed journals up to 1 MiB (a seed's file list up to

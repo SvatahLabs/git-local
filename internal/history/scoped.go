@@ -114,6 +114,8 @@ func changedPaths(before, after map[string]fileValue) []string {
 
 func validateMergedFiles(files map[string]fileValue, state selection.State) error {
 	aliases := map[string]string{}
+	// A directory shared by many files is checked once.
+	checked := map[string]bool{}
 	for path := range files {
 		if err := storage.ValidateSelectionPath(path); err != nil {
 			return err
@@ -124,6 +126,10 @@ func validateMergedFiles(files map[string]fileValue, state selection.State) erro
 		parts := strings.Split(path, "/")
 		for i := range parts {
 			component := strings.Join(parts[:i+1], "/")
+			if checked[component] {
+				continue
+			}
+			checked[component] = true
 			key := storage.AliasKey(component)
 			if other, ok := aliases[key]; ok && other != component {
 				return fmt.Errorf("%w: ambiguous scoped snapshot paths %q and %q", storage.ErrConflict, other, component)

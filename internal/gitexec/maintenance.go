@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -94,5 +96,63 @@ func (r *Runner) CheckStore(ctx context.Context, store string) error {
 		return err
 	}
 	_, err := r.run(ctx, store, true, nil, []string{"--git-dir=" + store}, nil, "fsck", "--full", "--strict", "--no-reflogs", "--no-progress", "--no-dangling")
+	return err
+}
+
+// LooseObjects counts a store's loose objects and their bytes by listing its
+// object directories, without starting Git.
+func LooseObjects(store string) (count, size int64, err error) {
+	objects := filepath.Join(store, "objects")
+	dirs, err := os.ReadDir(objects)
+	if err != nil {
+		return 0, 0, err
+	}
+	for _, dir := range dirs {
+		if len(dir.Name()) != 2 || !isHex(dir.Name()) || !dir.IsDir() {
+			continue
+		}
+		entries, err := os.ReadDir(filepath.Join(objects, dir.Name()))
+		if err != nil {
+			return 0, 0, err
+		}
+		for _, entry := range entries {
+			if !entry.Type().IsRegular() || !isHex(entry.Name()) {
+				continue
+			}
+			info, err := entry.Info()
+			if err != nil {
+				return 0, 0, err
+			}
+			count++
+			size += info.Size()
+		}
+	}
+	return count, size, nil
+}
+
+func isHex(s string) bool {
+	for _, c := range s {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return s != ""
+}
+
+// PackLoose packs the loose objects the store's refs reach into one new pack,
+// leaving existing packs alone, and deletes the loose objects that remain.
+// MaintainStore's rules for the caller apply.
+func (r *Runner) PackLoose(ctx context.Context, store string) error {
+	if err := r.CheckCapabilities(ctx); err != nil {
+		return err
+	}
+	if err := r.checkStore(store); err != nil {
+		return err
+	}
+	prefix := []string{"--git-dir=" + store, "-c", "core.fsync=loose-object,reference,pack,pack-metadata", "-c", "repack.writeBitmaps=false"}
+	if _, err := r.run(ctx, store, true, nil, prefix, nil, "repack", "-d", "-q", "-n"); err != nil {
+		return err
+	}
+	_, err := r.run(ctx, store, true, nil, prefix, nil, "prune", "--expire=now")
 	return err
 }

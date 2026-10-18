@@ -193,20 +193,67 @@ func (d *directory) add(path, mode, id string) {
 	d.files = append(d.files, treeEntry{mode, "blob", id, parts[len(parts)-1]})
 }
 func (d *directory) write(ctx context.Context, r historyGit, store string) (string, error) {
+	return d.writeExcept(ctx, r, store, "")
+}
+
+type treeRecord struct {
+	id      string
+	entries []treeEntry
+}
+
+// plan appends d's trees, children first, with the IDs Git gives them.
+func (d *directory) plan(records *[]treeRecord) (string, error) {
 	entries := append([]treeEntry{}, d.files...)
-	names := []string{}
-	for name := range d.dirs {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	for _, name := range names {
-		id, err := d.dirs[name].write(ctx, r, store)
+	for name, child := range d.dirs {
+		id, err := child.plan(records)
 		if err != nil {
 			return "", err
 		}
 		entries = append(entries, treeEntry{"040000", "tree", id, name})
 	}
-	return tree(ctx, r, store, entries)
+	id, err := treeID(entries)
+	if err != nil {
+		return "", err
+	}
+	*records = append(*records, treeRecord{id, entries})
+	return id, nil
+}
+
+// writeExcept writes d's trees in one Git process, or none when d's tree is
+// known: an existing tree's subtrees exist too (GL-135).
+func (d *directory) writeExcept(ctx context.Context, r historyGit, store, known string) (string, error) {
+	var records []treeRecord
+	root, err := d.plan(&records)
+	if err != nil {
+		return "", err
+	}
+	if root == known {
+		return root, nil
+	}
+	if len(records) == 1 && len(records[0].entries) == 0 {
+		return tree(ctx, r, store, nil)
+	}
+	var input bytes.Buffer
+	for _, record := range records {
+		for _, e := range record.entries {
+			fmt.Fprintf(&input, "%s %s %s\t%s%c", e.mode, e.kind, e.id, e.name, 0)
+		}
+		input.WriteByte(0)
+	}
+	output, err := r.History(ctx, store, &input, "mktree", "-z", "--batch")
+	if err != nil {
+		return "", err
+	}
+	ids := strings.Split(string(output), "\n")
+	if len(ids) != len(records)+1 || ids[len(records)] != "" {
+		return "", errors.New("invalid batched tree IDs")
+	}
+	for i, record := range records {
+		if ids[i] != record.id {
+			return "", fmt.Errorf("git wrote tree %s where %s was expected", ids[i], record.id)
+		}
+	}
+	return root, nil
 }
 func head(ctx context.Context, r historyGit, store, ref string) (string, error) {
 	// Symbolic history heads are not part of the snapshot schema.
@@ -339,7 +386,9 @@ func readPrevious(ctx context.Context, r *gitexec.Runner, store, id, repo, works
 		if i > 0 && m.ChangedPaths[i-1] >= path {
 			return "", m, errors.New("invalid changed-path ordering")
 		}
-		if len(m.Scope) != 0 && !inScope(m.Scope, path) {
+		// Outside its scope a scoped snapshot only drops paths its own
+		// selection no longer holds (GL-137).
+		if len(m.Scope) != 0 && !inScope(m.Scope, path) && m.Selection.Selected(path) {
 			return "", m, errors.New("scoped snapshot changed a path outside its scope")
 		}
 	}

@@ -34,8 +34,9 @@ clear error rather than truncating or guessing.
   suite hasn't run on an Intel Mac.
 - Only APFS and a Linux container's overlay filesystem have been tested. Other
   local filesystems are untested, and network filesystems aren't qualified.
-- The private store isn't packed or pruned automatically; run
-  `git local maintenance` (`doctor` reports the store's size).
+- A snapshot packs the private store once it holds 6,700 loose objects or
+  256 MiB of them; `git local maintenance` repacks it fully (`doctor`
+  reports the store's size).
 - Mixed `core.ignorecase` settings across worktrees can over-ignore paths
   (never leak them).
 

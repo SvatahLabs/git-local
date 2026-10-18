@@ -2,14 +2,11 @@ package history
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
-
-	"gitlocal/internal/storage"
 )
 
 func TestScopedSnapshotsPreserveParallelWriterEditsAndProvenance(t *testing.T) {
@@ -119,8 +116,13 @@ func TestScopedCommitRejectsOutsideScopeAndChangedSelection(t *testing.T) {
 		t.Fatal("newly selected out-of-scope file was captured")
 	}
 	change(t, g, repo.Root, false, "notes/b")
-	if _, err := CommitScoped(context.Background(), g, repo.Root, "selection removed", "session-a", []string{"notes/a"}); !errors.Is(err, storage.ErrConflict) {
-		t.Fatalf("scoped commit carried an unselected saved file: %v", err)
+	// GL-137: the removed selection's saved file is dropped, not carried.
+	removed, err := CommitScoped(context.Background(), g, repo.Root, "selection removed", "session-a", []string{"notes/a"})
+	if err != nil || !removed.Changed {
+		t.Fatalf("scoped commit after a removed selection: %+v %v", removed, err)
+	}
+	if _, err := g.History(context.Background(), w.Store, nil, "cat-file", "-e", removed.ID+":files/notes/b"); err == nil {
+		t.Fatal("scoped commit carried an unselected saved file")
 	}
 	if _, err := Commit(context.Background(), g, repo.Root, "full selection update"); err != nil {
 		t.Fatal(err)

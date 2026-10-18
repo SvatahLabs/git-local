@@ -68,9 +68,9 @@ directory. Each path must be within the current selection; a directory path
 includes its selected descendants. The snapshot retains previously saved bytes
 outside the requested paths, even when those working files have newer unsaved
 edits. Deletions within the scope are recorded. Adding a new selection can be
-recorded without capturing its out-of-scope file bytes; removing a selection
-that has saved files outside the requested scope requires a broader scope or a
-full snapshot. `--writer` is a caller-supplied
+recorded without capturing its out-of-scope file bytes; saved files that are
+no longer selected (untracked or excluded since) are dropped from the new
+snapshot, as a full snapshot would drop them, and earlier snapshots keep them. `--writer` is a caller-supplied
 session/process label, not a filesystem authorship attestation; omit it when
 the writer is unknown. New snapshots store the exact paths whose recorded
 bytes or modes changed. `log --writer` filters by that label; `log --path`

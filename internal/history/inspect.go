@@ -94,6 +94,8 @@ func readFiles(ctx context.Context, r *gitexec.Runner, store, treeID string) (ma
 		return nil, errors.New("unterminated snapshot files tree")
 	}
 	aliases := map[string]string{}
+	// A directory shared by many files is checked once.
+	checked := map[string]bool{}
 	for _, record := range bytes.Split(data, []byte{0}) {
 		if len(record) == 0 {
 			continue
@@ -109,6 +111,10 @@ func readFiles(ctx context.Context, r *gitexec.Runner, store, treeID string) (ma
 		parts := strings.Split(path, "/")
 		for i := range parts {
 			p := strings.Join(parts[:i+1], "/")
+			if checked[p] {
+				continue
+			}
+			checked[p] = true
 			key := storage.AliasKey(p)
 			if prev, ok := aliases[key]; ok && prev != p {
 				return nil, errors.New("ambiguous snapshot file aliases")
@@ -156,10 +162,24 @@ func captureRead(ctx context.Context, g historyGit, store string, files *storage
 				return nil, nil, fmt.Errorf("%w: symlink changed during inspection", storage.ErrConflict)
 			}
 			mode = "120000"
-			id, err = hashRead(ctx, g, store, strings.NewReader(target), write)
+			if write {
+				id, err = hashRead(ctx, g, store, strings.NewReader(target), write)
+			} else {
+				id = blobIDString(target)
+			}
 		} else {
 			var observation storage.Observation
-			observation, err = files.StreamStable(entry.Path, func(input io.Reader) error { var e error; id, e = hashRead(ctx, g, store, input, write); return e })
+			// Without a write, hash in process: one Git process per file
+			// dominated status on large selections (GL-135).
+			observation, err = files.StreamStableSize(entry.Path, func(size int64, input io.Reader) error {
+				var e error
+				if write {
+					id, e = hashRead(ctx, g, store, input, write)
+				} else {
+					id, e = blobID(size, input)
+				}
+				return e
+			})
 			if err == nil {
 				if observation.Mode() != entry.Mode {
 					return nil, nil, fmt.Errorf("%w: file mode changed during inspection", storage.ErrConflict)
