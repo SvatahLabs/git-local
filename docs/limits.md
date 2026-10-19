@@ -26,10 +26,13 @@ clear error rather than truncating or guessing.
   content filter on the file.
 - `git archive` applies active overlays; see the
   [user guide](guide.md#overlays) for the command that exports without them.
-- Windows isn't qualified: it hasn't run on native hardware or CI. 8.3-style
-  short names (`PROGRA~1`) can't be selected there. Its key-file protection has
-  known defects, so sensitive-file and backup keys aren't supported on Windows
-  until they are fixed.
+- Windows is experimental: it hasn't run on native hardware or CI. 8.3-style
+  short names (`PROGRA~1`) can't be selected there, but the guards don't
+  resolve them in staged paths. Its key-file protection has known defects, so
+  sensitive-file and backup keys aren't supported on Windows until they are
+  fixed. A command that waits for the repository lock while `deinit` runs
+  goes on instead of stopping; rerun `deinit`. See the
+  [changelog](../CHANGELOG.md#known-limitations).
 - The Intel macOS build has only run under Rosetta on Apple silicon; the test
   suite hasn't run on an Intel Mac.
 - Only APFS and a Linux container's overlay filesystem have been tested. Other

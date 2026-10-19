@@ -25,8 +25,9 @@ Licensed under Apache-2.0; the Go module path is
   Windows is configured but hasn't run yet.
 - The Intel macOS build has only run under Rosetta on Apple silicon; the test
   suite hasn't run on an Intel Mac.
-- Windows isn't qualified: it has never run natively, and whether it stays in
-  1.0 is still to be decided. See Known limitations.
+- Windows is **experimental**: its builds are published but unqualified (they
+  have never run natively), and the defects under Known limitations don't
+  block the release. Don't rely on it for sensitive-file or backup keys.
 
 ### Upgrading from 0.1.4
 
@@ -224,8 +225,12 @@ About a hundred defects found in pre-release reviews, among them:
   `refs/heads/.invalid` and the commits are left dangling. `git local init`
   then fails in `git symbolic-ref`. Don't move a reftable repository's Git
   directory that way.
-- **Windows** isn't qualified: it has never run on native hardware or CI.
-  Read-only targets and 8.3 short names are implemented but unverified.
+- **Windows** is experimental: it has never run on native hardware or CI.
+  Restoring over or rolling back a read-only file, and refusing 8.3 short
+  names (`PROGRA~1`, `NAME~1.EXT`) in selections and restore paths, are
+  implemented but unverified there. The guards don't resolve short names in
+  staged paths: on NTFS with 8.3 names enabled, `git add NOTES~1/secret` can
+  stage a selected `notes-long/secret` past `guard staged` and `guard push`.
   Key-file protection has known defects: a new key file is restricted only
   after it is created, so another user can open it in between; loading doesn't
   refuse a key that other users can write or whose access list they can

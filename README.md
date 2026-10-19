@@ -17,8 +17,10 @@ backed up to a separate remote.
 recovery, worktrees, guards and automatic snapshots, overlays, encryption at
 rest, encrypted backups, maintenance and removal are implemented and tested on
 macOS on Apple silicon. CI for Linux, macOS and Windows is configured but hasn't
-run yet. The Intel macOS build has only run under Rosetta, and Windows has
-never run natively, so neither is qualified.
+run yet. The Intel macOS build has only run under Rosetta, so it isn't
+qualified. **Windows is experimental:** its builds are published but have never
+run natively, it has known defects (among them key-file protection, so don't
+keep sensitive-file or backup keys there), and it isn't supported for 1.0.
 See the [changelog](CHANGELOG.md) for what changed and the known limitations.
 
 ## For coding agents
