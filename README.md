@@ -54,7 +54,7 @@ git local doctor
 
 ## Development
 
-Requires Go 1.26 or later and Git 2.50.1 or later. Initialization checks
+Requires Go 1.26.9 or later and Git 2.50.1 or later. Initialization checks
 required Git behavior using disposable local fixtures; it performs no external
 network operations.
 

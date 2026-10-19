@@ -173,22 +173,76 @@ func TestManagedBlockIgnoresStagesAndAcceptsLegacyBlock(t *testing.T) {
 	}
 }
 
-// GL-130: Kept leaves the block's patterns, without StagePattern, as ordinary
-// lines where the block was, adds them only once, and leaves nothing for a
-// block with no patterns.
+// GL-130: Kept leaves the block's patterns, with StagePattern, as ordinary
+// lines between KeptHeader and KeptEnd where the block was, adds them only
+// once, and leaves nothing for a legacy block with no patterns.
 func TestKeptLinesReplaceTheBlock(t *testing.T) {
 	patterns := []byte("/private/\n/.env.local\n")
-	kept := KeptHeader + string(patterns)
+	kept := KeptHeader + StagePattern + "\n" + string(patterns) + KeptEnd
 	if got := string(Kept(Render([]byte("/mine/\n!/private/x\n"), patterns))); got != kept+"/mine/\n!/private/x\n" {
 		t.Fatalf("kept lines: %q", got)
 	}
 	if got := string(Kept(Render([]byte(kept+"/mine/\n"), patterns))); got != kept+"/mine/\n" {
 		t.Fatalf("kept lines added twice: %q", got)
 	}
-	if got := string(Kept(append(legacyBlock(patterns), "/mine/\n"...))); got != kept+"/mine/\n" {
+	if got := string(Kept(append(legacyBlock(patterns), "/mine/\n"...))); got != KeptHeader+string(patterns)+KeptEnd+"/mine/\n" {
 		t.Fatalf("kept lines of a legacy block: %q", got)
 	}
-	if got := string(Kept(Render([]byte("/mine/\n"), nil))); got != "/mine/\n" {
+	if got := string(Kept(Render([]byte("/mine/\n"), nil))); got != KeptHeader+StagePattern+"\n"+KeptEnd+"/mine/\n" {
 		t.Fatalf("kept lines of an empty block: %q", got)
+	}
+}
+
+// GL-130 review: WithoutKept removes exactly the sections Kept wrote, every
+// one of them, and nothing a user wrote: a header without its end line, or
+// with a comment or blank line before it, isn't a section.
+func TestWithoutKeptRemovesExactSections(t *testing.T) {
+	kept := string(Kept(Render([]byte("/mine/\n"), []byte("/private/\n"))))
+	other := KeptHeader + "/a\n/b\n" + KeptEnd
+	data := "/first\n" + other + kept + "/last\n"
+	if got, removed := WithoutKept([]byte(data)); !removed || string(got) != "/first\n/mine/\n/last\n" {
+		t.Fatalf("WithoutKept(%q) = %q, %v", data, got, removed)
+	}
+	for _, data := range []string{
+		"/mine/\n",
+		KeptHeader + "/a\n",
+		KeptHeader + "/a\n# mine\n" + KeptEnd,
+		KeptHeader + "/a\n\n" + KeptEnd,
+		KeptHeader + "/a\n" + Begin + KeptEnd,
+		"x" + KeptHeader + "/a\n" + KeptEnd,
+		KeptHeader + "/a\nx" + KeptEnd,
+	} {
+		if got, removed := WithoutKept([]byte(data)); removed || string(got) != data {
+			t.Fatalf("WithoutKept(%q) = %q, %v", data, got, removed)
+		}
+	}
+	if got, removed := WithoutKept([]byte(KeptHeader + "/a\n" + KeptHeader + "/b\n" + KeptEnd)); !removed || string(got) != KeptHeader+"/a\n" {
+		t.Fatalf("a header without its end line: %q, %v", got, removed)
+	}
+}
+
+// GL-130 review: Render drops from kept sections the lines its block holds,
+// and a section left empty, and keeps every other kept line, so a path never
+// selected again stays ignored.
+func TestRenderTakesBackCoveredKeptLines(t *testing.T) {
+	section := KeptHeader + StagePattern + "\n/.env\n/private/\n" + KeptEnd
+	user := "/first\n" + section + "/mine/\n"
+	if got := string(Render([]byte(user), nil)); got != string(Block(nil))+"/first\n"+KeptHeader+"/.env\n/private/\n"+KeptEnd+"/mine/\n" {
+		t.Fatalf("an empty block: %q", got)
+	}
+	if got := string(Render([]byte(user), []byte("/private/\n"))); got != string(Block([]byte("/private/\n")))+"/first\n"+KeptHeader+"/.env\n"+KeptEnd+"/mine/\n" {
+		t.Fatalf("a block holding one kept line: %q", got)
+	}
+	if got := string(Render([]byte(user), []byte("/.env\n/private/\n"))); got != string(Block([]byte("/.env\n/private/\n")))+"/first\n/mine/\n" {
+		t.Fatalf("a block holding every kept line: %q", got)
+	}
+	if _, removed := Covered([]byte(user), Block(nil)); len(removed) != 0 {
+		t.Fatalf("Covered reports the stage pattern: %q", removed)
+	}
+	if _, removed := Covered([]byte(user), Block([]byte("/.env\n"))); len(removed) != 1 || removed[0] != "/.env" {
+		t.Fatalf("Covered reports %q", removed)
+	}
+	if got := string(Render([]byte("/.env\n"), []byte("/.env\n"))); got != string(Block([]byte("/.env\n")))+"/.env\n" {
+		t.Fatalf("Render dropped a user line: %q", got)
 	}
 }

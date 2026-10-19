@@ -25,9 +25,10 @@ var (
 
 // NeedsPacking reports whether a store's loose objects passed the limits at
 // which a snapshot packs it. It starts no Git; commands that don't write use
-// it for a hint instead of packing (GL-139).
+// it for a hint instead of packing (GL-139). Counting stops at the limits, so
+// the check costs at most about autoPackObjects directory entries.
 func NeedsPacking(store string) bool {
-	count, size, err := gitexec.LooseObjects(store)
+	count, size, err := gitexec.LooseObjectsUpTo(store, autoPackObjects, autoPackBytes)
 	return err == nil && (count >= autoPackObjects || size >= autoPackBytes)
 }
 

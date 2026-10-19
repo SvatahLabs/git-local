@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -102,32 +103,69 @@ func (r *Runner) CheckStore(ctx context.Context, store string) error {
 // LooseObjects counts a store's loose objects and their bytes by listing its
 // object directories, without starting Git.
 func LooseObjects(store string) (count, size int64, err error) {
+	return LooseObjectsUpTo(store, 0, 0)
+}
+
+// LooseObjectsUpTo is LooseObjects that stops as soon as the count reaches
+// maxCount or the bytes reach maxBytes (a limit of 0 or less is no limit), so
+// a check against a threshold costs at most about maxCount entries however
+// many loose objects the store holds. Either limit is reached exactly when a
+// full count would reach it (GL-139).
+func LooseObjectsUpTo(store string, maxCount, maxBytes int64) (count, size int64, err error) {
 	objects := filepath.Join(store, "objects")
 	dirs, err := os.ReadDir(objects)
 	if err != nil {
 		return 0, 0, err
 	}
+	reached := func() bool {
+		return maxCount > 0 && count >= maxCount || maxBytes > 0 && size >= maxBytes
+	}
 	for _, dir := range dirs {
 		if len(dir.Name()) != 2 || !isHex(dir.Name()) || !dir.IsDir() {
 			continue
 		}
-		entries, err := os.ReadDir(filepath.Join(objects, dir.Name()))
+		done, err := countLooseDir(filepath.Join(objects, dir.Name()), &count, &size, reached)
 		if err != nil {
 			return 0, 0, err
 		}
+		if done {
+			break
+		}
+	}
+	return count, size, nil
+}
+
+// countLooseDir adds one fanout directory's loose objects to count and size,
+// reading it in batches so that it stops early once reached reports true.
+func countLooseDir(dir string, count, size *int64, reached func() bool) (bool, error) {
+	f, err := os.Open(dir)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+	for {
+		entries, err := f.ReadDir(256)
 		for _, entry := range entries {
 			if !entry.Type().IsRegular() || !isHex(entry.Name()) {
 				continue
 			}
 			info, err := entry.Info()
 			if err != nil {
-				return 0, 0, err
+				return false, err
 			}
-			count++
-			size += info.Size()
+			*count++
+			*size += info.Size()
+			if reached() {
+				return true, nil
+			}
+		}
+		if errors.Is(err, io.EOF) || err == nil && len(entries) == 0 {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
 		}
 	}
-	return count, size, nil
 }
 
 func isHex(s string) bool {

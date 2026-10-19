@@ -123,10 +123,12 @@ func Run(ctx context.Context, r *gitexec.Runner, cwd string) (Report, error) {
 				}
 			}
 			result.add("workspaces", "ok", fmt.Sprintf("%d workspace records inspected", len(d.Workspaces)), "")
-			if message, err := ignoreCaseMismatch(ctx, r, d.Workspaces); err != nil {
-				result.add("core.ignorecase", "error", err.Error(), "Inspect the worktrees' Git configuration.")
-			} else if message != "" {
-				result.add("core.ignorecase", "warning", message, "Set core.ignorecase to the same value in every worktree (git config --worktree core.ignorecase), or leave it: the block never ignores less than a worktree needs.")
+			message, unreadable := ignoreCaseMismatch(ctx, r, d.Workspaces)
+			for _, problem := range unreadable {
+				result.add("core.ignorecase", "warning", problem, "Check that Git can read that worktree's configuration (git -C <worktree> config --get core.ignorecase); doctor compared the other worktrees without it.")
+			}
+			if message != "" {
+				result.add("core.ignorecase", "warning", message, "If a worktree overrides core.ignorecase, remove the override (git config --worktree --unset core.ignorecase, or the includeIf that sets it) or set the same value everywhere. Worktrees on case-sensitive and case-insensitive volumes legitimately differ: Git chose each value for its filesystem, so leave those alone; the block never ignores fewer files than a worktree selects.")
 			}
 		}
 		reportPending()
@@ -398,7 +400,10 @@ func sensitiveKindMismatches(w workspace.Context) ([]string, string, error) {
 // values when they disagree, and is empty when they agree. They share one
 // managed ignore block, compiled for the setting of the worktree that last
 // wrote it, so the others may ignore more than their selections (GL-131).
-func ignoreCaseMismatch(ctx context.Context, r *gitexec.Runner, workspaces []configtx.WorkspaceInfo) (string, error) {
+// A worktree whose value can't be read is left out of the comparison and
+// described in unreadable, naming it; the finding is advisory, so that never
+// stops the check or fails doctor.
+func ignoreCaseMismatch(ctx context.Context, r *gitexec.Runner, workspaces []configtx.WorkspaceInfo) (message string, unreadable []string) {
 	var values []string
 	seen := map[bool]bool{}
 	for _, w := range workspaces {
@@ -407,16 +412,17 @@ func ignoreCaseMismatch(ctx context.Context, r *gitexec.Runner, workspaces []con
 		}
 		ignoreCase, err := r.IgnoreCase(ctx, w.Root, w.Admin)
 		if err != nil {
-			return "", err
+			unreadable = append(unreadable, fmt.Sprintf("could not read core.ignorecase in worktree %s: %v", w.Root, err))
+			continue
 		}
 		seen[ignoreCase] = true
 		values = append(values, fmt.Sprintf("%s: %t", w.Root, ignoreCase))
 	}
 	if len(seen) < 2 {
-		return "", nil
+		return "", unreadable
 	}
 	slices.Sort(values)
-	return "worktrees disagree on core.ignorecase (" + strings.Join(values, ", ") + "); they share one managed ignore block compiled for one setting, which in the others can ignore more files than are selected, never fewer", nil
+	return "worktrees disagree on core.ignorecase (" + strings.Join(values, ", ") + "); they share one managed ignore block compiled for one setting, which in the others can ignore more files than are selected, never fewer", unreadable
 }
 
 func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'" }

@@ -306,7 +306,9 @@ func TestBareRepositoryWorktreesRetire(t *testing.T) {
 		t.Fatal(err)
 	}
 	bare := filepath.Join(dir, "repo.git")
-	seed.Git("clone", "-q", "--bare", seed.Root, bare)
+	// git clone doesn't take the source's ref format.
+	seed.Git(append([]string{"clone", "-q", "--bare"}, append(testutil.RefFormatArgs(), seed.Root, bare)...)...)
+	seed.CheckRefFormat(bare)
 	add := func(name string, args ...string) string {
 		path := filepath.Join(dir, name)
 		seed.At(bare, append([]string{"worktree", "add", "-q"}, append(args, path)...)...)

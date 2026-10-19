@@ -42,7 +42,7 @@ identifier `org.gitlocal.cli`). Use `git-local --help` for help: Git may route
 
 ## Build from source
 
-With Go 1.26 or later, from a checkout:
+With Go 1.26.9 or later, from a checkout:
 
 ```sh
 go build -o bin/git-local ./cmd/git-local
@@ -84,8 +84,9 @@ the guard and snapshot hooks, the overlay filter and its include, the managed
 blocks in `.git/info/attributes` and `.git/info/exclude`, and each worktree's
 identity file. Afterwards Git behaves as if git-local was never installed,
 even without the executable, except that the selected files stay ignored by
-ordinary `.git/info/exclude` lines under `# kept by git local deinit`; delete
-them, or run `deinit --unignore` instead, to have Git see those files.
+ordinary `.git/info/exclude` lines between `# kept by git local deinit` and
+`# end of lines kept by git local deinit`; delete them, or run
+`deinit --unignore` (also after an earlier deinit), to have Git see those files.
 
 It keeps the private history and state as
 `<git-common-dir>/gitlocal-removed-<id>`; delete that directory when you no

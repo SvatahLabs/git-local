@@ -199,7 +199,7 @@ func commitWithOptions(ctx context.Context, r *gitexec.Runner, cwd, message, wri
 		cache := loadStatCache(w, secure.cacheable)
 		defer cache.close()
 		if scope != nil {
-			cache.retain(func(path string) bool { return !inScope(scope, path) })
+			cache.retain(func(path string) bool { return !inScope(scope, path) && state.Selected(path) })
 		}
 		flush := func() error {
 			if batch != nil {
@@ -313,7 +313,7 @@ func commitWithOptions(ctx context.Context, r *gitexec.Runner, cwd, message, wri
 					if err != nil {
 						return err
 					}
-					cache.store(files, entry.Path, probe, computed)
+					cache.store(entry.Path, probe, hashed, computed)
 				}
 				if hashed.Mode() != entry.Mode {
 					return fmt.Errorf("%w: mode changed at %q", storage.ErrConflict, entry.Path)

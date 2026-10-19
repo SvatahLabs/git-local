@@ -31,6 +31,7 @@ type Result struct {
 	Hooks       []string `json:"hooks"`
 	Exclude     bool     `json:"excludeBlockRemoved"`
 	KeptIgnored bool     `json:"keptIgnored"`
+	KeptRemoved bool     `json:"keptLinesRemoved"`
 	Identities  []string `json:"identities"`
 	Archive     string   `json:"archive,omitempty"`
 	Removed     bool     `json:"historyRemoved"`
@@ -52,6 +53,9 @@ type Result struct {
 // lost.
 func Deinit(ctx context.Context, r *gitexec.Runner, cwd string, removeHistory, unignore bool) (Result, error) {
 	result := Result{Overlays: []string{}, Hooks: []string{}, Identities: []string{}, Warnings: []string{}}
+	// unkeep: with the state already set aside, unignore still removes the
+	// lines an earlier deinit kept, once the locks below are held.
+	unkeep := false
 	w, err := workspace.Discover(ctx, r, cwd)
 	if err != nil {
 		return result, err
@@ -122,17 +126,11 @@ func Deinit(ctx context.Context, r *gitexec.Runner, cwd string, removeHistory, u
 				return result, err
 			}
 		}
-		if result.Exclude, err = configtx.RemoveExcludeBlock(ctx, r, cwd, !unignore); err != nil {
+		if result.Exclude, result.KeptRemoved, err = configtx.RemoveExcludeBlock(ctx, r, cwd, !unignore); err != nil {
 			return result, err
 		}
 		result.KeptIgnored = result.Exclude && !unignore
-		if result.Exclude && unignore && len(policy.Sensitive) > 0 {
-			var paths []string
-			for _, rule := range policy.Sensitive {
-				paths = append(paths, rule.Path)
-			}
-			result.Warnings = append(result.Warnings, "sensitive paths "+strings.Join(paths, ", ")+" are no longer ignored or guarded: git add -A would stage them and git clean -fd would delete them; add them to .git/info/exclude if Git should keep ignoring them")
-		}
+		result.Warnings = append(result.Warnings, sensitiveWarnings(result, policy)...)
 		if result.Archive, result.Removed, err = setAside(ctx, r, w, common, removeHistory); err != nil {
 			return result, err
 		}
@@ -148,6 +146,7 @@ func Deinit(ctx context.Context, r *gitexec.Runner, cwd string, removeHistory, u
 		for _, dir := range kept {
 			result.Warnings = append(result.Warnings, "the private state an earlier git local deinit set aside is in "+dir+"; delete it when you no longer need it")
 		}
+		unkeep = unignore
 	}
 	beforeRemoveIdentities()
 	// Identities that don't belong to the live state, which another
@@ -170,6 +169,17 @@ func Deinit(ctx context.Context, r *gitexec.Runner, cwd string, removeHistory, u
 	}
 	defer release()
 	identitiesListed()
+	// The identity lock keeps an init from building new state meanwhile, and
+	// a state another worktree's init already built is locked by
+	// liveIdentities, so this write races neither's ignore block.
+	if unkeep {
+		if result.KeptRemoved, err = removeKept(common); err != nil {
+			return result, err
+		}
+		if result.KeptRemoved {
+			result.Warnings = append(result.Warnings, sensitiveWarnings(result, archivedPolicy(common))...)
+		}
+	}
 	if result.Identities, err = removeIdentities(common, w.Common, func(id workspace.Identity) bool { return !belongs(id) }); err != nil {
 		return result, err
 	}
@@ -189,6 +199,69 @@ func Deinit(ctx context.Context, r *gitexec.Runner, cwd string, removeHistory, u
 		return result, err
 	}
 	return result, nil
+}
+
+// sensitiveWarnings says what happened to the sensitive paths' protection:
+// with the kept lines they stay ignored but lose the pre-commit guard; with
+// the ignore lines removed they lose both.
+func sensitiveWarnings(result Result, policy secureblob.Policy) []string {
+	if len(policy.Sensitive) == 0 || !result.KeptIgnored && !result.Exclude && !result.KeptRemoved {
+		return nil
+	}
+	var paths []string
+	seen := map[string]bool{}
+	for _, rule := range policy.Sensitive {
+		if !seen[rule.Path] {
+			seen[rule.Path] = true
+			paths = append(paths, rule.Path)
+		}
+	}
+	if result.KeptIgnored {
+		return []string{"sensitive paths " + strings.Join(paths, ", ") + " stay ignored but are no longer guarded: the pre-commit hook no longer refuses them, so git add -f and git commit would commit them"}
+	}
+	return []string{"sensitive paths " + strings.Join(paths, ", ") + " are no longer ignored or guarded: git add -A would stage them and git clean -fd would delete them; add them to .git/info/exclude if Git should keep ignoring them"}
+}
+
+// removeKept removes the lines an earlier keep-mode deinit left in
+// info/exclude (exclude.WithoutKept) and reports whether there were any.
+func removeKept(common *storage.Dir) (bool, error) {
+	data, err := common.ReadFile("info/exclude", 1<<20)
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	info, err := common.Lstat("info/exclude")
+	if err != nil {
+		return false, err
+	}
+	user, removed := exclude.WithoutKept(data)
+	if !removed {
+		return false, nil
+	}
+	return true, common.AtomicWrite("info/exclude", user, info.Mode().Perm())
+}
+
+// archivedPolicy is the encryption policy of every private state an earlier
+// deinit set aside, so a rerun with unignore names the sensitive paths too.
+// An unreadable one adds nothing: the warning is advice.
+func archivedPolicy(common *storage.Dir) secureblob.Policy {
+	var all secureblob.Policy
+	entries, err := common.ReadDir("")
+	if err != nil {
+		return all
+	}
+	for _, entry := range entries {
+		if !strings.HasPrefix(entry.Name(), "gitlocal-removed-") {
+			continue
+		}
+		var policy secureblob.Policy
+		if common.ReadJSON(entry.Name()+"/"+strings.TrimPrefix(secureblob.PolicyFile, "gitlocal/"), &policy) == nil {
+			all.Sensitive = append(all.Sensitive, policy.Sensitive...)
+		}
+	}
+	return all
 }
 
 // liveIdentities reports which identity files belong to the live private

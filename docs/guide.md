@@ -565,12 +565,16 @@ worktrees: it removes every overlay (each file keeps its local content, now an
 ordinary change that `git status` shows), the guard and snapshot hooks, the
 required filter and the managed `info/attributes` and `info/exclude` blocks,
 and each worktree's identity. Selected files stay ignored: deinit leaves the
-block's patterns in `.git/info/exclude` as ordinary lines under
-`# kept by git local deinit`, so `git add -A` doesn't stage them and
-`git clean -fd` doesn't delete them; delete those lines when Git should see the
-files. `git local deinit --unignore` removes them instead: selected files then
-show as untracked, nothing keeps them out of `git add -A`, and `git clean -fd`
-would delete them (deinit names the sensitive paths among them). It refuses while a transaction is pending,
+block's patterns in `.git/info/exclude` as ordinary lines between
+`# kept by git local deinit` and `# end of lines kept by git local deinit`, so
+`git add -A` doesn't stage them and `git clean -fd` doesn't delete them; delete
+those lines when Git should see the files. Sensitive paths among them stay
+ignored but are no longer guarded against `git add -f`. After a later
+`git local init`, tracking a path again moves its kept lines back into the
+managed block; the others stay. `git local deinit --unignore` removes them
+instead, also after an earlier deinit: selected files then show as untracked,
+nothing keeps them out of `git add -A`, and `git clean -fd` would delete them
+(deinit names the sensitive paths among them). It refuses while a transaction is pending,
 while an overlay's file holds changes the overlay doesn't or the overlay no
 longer applies to the file, for an overlay of a worktree that is missing
 (prune it first), for a hand-edited managed block in `.git/info/exclude`, and in

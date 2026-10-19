@@ -51,7 +51,7 @@ jobs:
         with:
           go-version: ${{ matrix.go }}
       - run: git --version
-      - run: go test -race -parallel 4 -timeout 20m ./...
+      - run: go test -race -parallel 4 -timeout 30m ./...
       - run: go vet ./...
       - run: go build -o bin/ ./cmd/git-local
         env:
@@ -90,7 +90,7 @@ jobs:
           make -C "$RUNNER_TEMP/git-$version" -j2 prefix="$RUNNER_TEMP/git-selected" NO_RUST=YesPlease NO_GETTEXT=YesPlease NO_TCLTK=YesPlease NO_CURL=YesPlease NO_PERL=YesPlease install
           echo "$RUNNER_TEMP/git-selected/bin" >> "$GITHUB_PATH"
       - run: git --version
-      - run: go test -parallel 4 -timeout 20m ./...
+      - run: go test -parallel 4 -timeout 30m ./...
       - name: Smoke-test release binary against selected Git
         run: go run ./scripts/release-binaries.go -host-only -out dist/ci-git-${{ matrix.gitVersion }}
   macos-current-git:
@@ -109,6 +109,6 @@ jobs:
           make -C "$RUNNER_TEMP/git-2.56.0" -j2 prefix="$RUNNER_TEMP/git-current" NO_RUST=YesPlease NO_GETTEXT=YesPlease NO_TCLTK=YesPlease NO_CURL=YesPlease NO_PERL=YesPlease install
           echo "$RUNNER_TEMP/git-current/bin" >> "$GITHUB_PATH"
       - run: git --version
-      - run: go test -race -parallel 4 -timeout 20m ./...
+      - run: go test -race -parallel 4 -timeout 30m ./...
       - name: Smoke-test release binary against current Git
         run: go run ./scripts/release-binaries.go -host-only -out dist/ci-macos-current

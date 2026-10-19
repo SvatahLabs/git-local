@@ -10,6 +10,7 @@ import (
 
 	"gitlocal/internal/configtx"
 	"gitlocal/internal/gitexec"
+	"gitlocal/internal/history"
 	"gitlocal/internal/keymaterial"
 	"gitlocal/internal/secureblob"
 	"gitlocal/internal/selection"
@@ -76,6 +77,16 @@ func EnableFresh(ctx context.Context, r *gitexec.Runner, cwd, keyFile string, pa
 			return err
 		}
 		if err := recheck(); err != nil {
+			return err
+		}
+		// The stat caches may hold plaintext blob IDs, hashed by status, of
+		// the paths this policy makes sensitive (GL-138).
+		meta, err := storage.OpenDir(filepath.Join(w.Common, "gitlocal"))
+		if err != nil {
+			return err
+		}
+		defer meta.Close()
+		if err := history.DropStatCaches(meta); err != nil {
 			return err
 		}
 		// There are no old objects to migrate. Atomic policy publication is

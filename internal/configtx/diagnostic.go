@@ -207,8 +207,9 @@ func journalName(name string) (string, string, bool) {
 // RefreshIgnore rewrites a valid managed ignore block that an earlier release
 // wrote (without StagePattern, or compiled for the other core.ignorecase
 // setting) as the current block for the same selections, keeping the bytes
-// outside it. It reports whether it rewrote the block, and undoes a rewrite
-// that fails verification.
+// outside it except the lines an earlier git local deinit kept that the block
+// now holds (exclude.Render). It reports whether it rewrote the block, and
+// undoes a rewrite that fails verification.
 func RefreshIgnore(ctx context.Context, r *gitexec.Runner, cwd string) (bool, []string, error) {
 	s, err := open(ctx, r, cwd)
 	if err != nil {
@@ -241,6 +242,8 @@ func RefreshIgnore(ctx context.Context, r *gitexec.Runner, cwd string) (bool, []
 	if err != nil {
 		return false, nil, err
 	}
+	// Render drops the lines an earlier deinit kept that the block holds.
+	_, unkept := exclude.Covered(user, exclude.Block(patterns))
 	mode := os.FileMode(current.Mode)
 	if !current.Exists {
 		// A repository with no selections from an earlier release, or one
@@ -263,6 +266,9 @@ func RefreshIgnore(ctx context.Context, r *gitexec.Runner, cwd string) (bool, []
 			return false, warnings, fmt.Errorf("%w; restoring info/exclude also failed: %v", err, undo)
 		}
 		return false, warnings, err
+	}
+	if len(unkept) > 0 {
+		warnings = append(warnings, "removed lines an earlier git local deinit kept in .git/info/exclude that the managed block now holds: "+strings.Join(unkept, ", "))
 	}
 	return true, warnings, nil
 }

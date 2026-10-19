@@ -40,8 +40,13 @@ clear error rather than truncating or guessing.
 - On Linux and macOS, `status` and snapshots skip reading a selected file
   whose stat fields match the stat cache in `.git/gitlocal/statcache/`. Like
   Git's index, it misses a change that leaves the size, mtime, ctime, inode
-  and device all equal, which takes setting the clock back. Sensitive files,
-  and every file on Windows, are always read.
+  and device all equal, which takes setting the clock back, a write through
+  a memory mapping that doesn't update the timestamps, or a filesystem that
+  synthesizes inode numbers or change times (some FUSE and SMB mounts); the
+  edit shows once the file's metadata changes. Sensitive files, and every
+  file on Windows, are always read. The cache is rewritten by `status`, so a
+  `sudo git local status` can leave it owned by root: remove
+  `.git/gitlocal/statcache` then.
 - Mixed `core.ignorecase` settings across worktrees can over-ignore paths
   (never leak them); `git local doctor` warns, naming each worktree and its
   value.

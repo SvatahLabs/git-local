@@ -312,28 +312,140 @@ func userBytes(data, expected []byte) ([]byte, error) {
 	result := append([]byte{}, data[:start]...)
 	return append(result, data[stop:]...), nil
 }
-func Render(user, patterns []byte) []byte { b := Block(patterns); return append(b, user...) }
 
-// KeptHeader introduces the lines git local deinit leaves in place of the
-// managed block, so the files that were selected stay ignored.
-const KeptHeader = "# kept by git local deinit: paths git local selected; delete these lines to stop ignoring them\n"
+// Render puts the managed block for patterns before user. A line an earlier
+// git local deinit kept that the block now holds goes (Covered): the block
+// decides that path again, so a later untrack or exclude isn't overridden by
+// the kept line, and a later deinit doesn't keep it twice.
+func Render(user, patterns []byte) []byte {
+	b := Block(patterns)
+	user, _ = Covered(user, b)
+	return append(b, user...)
+}
+
+// KeptHeader and KeptEnd enclose the lines git local deinit leaves in place
+// of the managed block, so the files that were selected stay ignored. The end
+// line lets deinit --unignore and a later init remove exactly those lines.
+const (
+	KeptHeader = "# kept by git local deinit: paths git local selected; delete these lines to stop ignoring them\n"
+	KeptEnd    = "# end of lines kept by git local deinit\n"
+)
 
 // Kept replaces the managed block in data, which UserBytes verified, by its
-// patterns as ordinary lines under KeptHeader, where the block was, so later
-// user lines keep their precedence. StagePattern isn't kept: deinit runs
-// with no transaction pending. Lines an earlier deinit kept aren't added again.
+// patterns as ordinary lines between KeptHeader and KeptEnd, where the block
+// was, so later user lines keep their precedence. StagePattern is kept too: a
+// stage an abandoned seed left can sit beside a selected file with no
+// transaction pending. The same section isn't added twice.
 func Kept(data []byte) []byte {
 	start := bytes.Index(data, []byte(Begin))
 	stop := bytes.Index(data, []byte(End))
 	if start < 0 || stop < start {
 		return bytes.Clone(data)
 	}
-	patterns := bytes.TrimPrefix(data[start+len(Begin):stop], []byte(StagePattern+"\n"))
+	patterns := data[start+len(Begin) : stop]
 	user := append(bytes.Clone(data[:start]), data[stop+len(End):]...)
-	kept := append([]byte(KeptHeader), patterns...)
+	kept := append(append([]byte(KeptHeader), patterns...), KeptEnd...)
 	if len(patterns) == 0 || bytes.Contains(user, kept) {
 		return user
 	}
 	result := append(bytes.Clone(data[:start]), kept...)
 	return append(result, data[stop+len(End):]...)
+}
+
+// WithoutKept removes every section Kept wrote from data and reports whether
+// it removed one. Only an exact section is removed: KeptHeader and KeptEnd on
+// lines of their own with nothing but pattern lines between them (no blank
+// line, comment or marker, which Kept never writes), so no user line is lost.
+func WithoutKept(data []byte) ([]byte, bool) {
+	result, removed := rewriteKept(data, func([]byte) bool { return false })
+	return result, len(removed) > 0
+}
+
+// Covered removes from the sections Kept wrote in data each line block also
+// holds, and a section left with no lines, and returns the removed lines
+// other than StagePattern, which every current block holds.
+func Covered(data, block []byte) ([]byte, []string) {
+	lines := map[string]bool{}
+	for _, line := range bytes.SplitAfter(block, []byte("\n")) {
+		lines[string(line)] = true
+	}
+	result, removed := rewriteKept(data, func(line []byte) bool { return !lines[string(line)] })
+	var patterns []string
+	for _, line := range removed {
+		if line != StagePattern+"\n" {
+			patterns = append(patterns, strings.TrimSuffix(line, "\n"))
+		}
+	}
+	return result, patterns
+}
+
+// rewriteKept keeps the lines of each exact section Kept wrote in data for
+// which keep is true, drops a section left with none, and returns the result
+// and the lines it dropped. data comes back unchanged when it drops none.
+func rewriteKept(data []byte, keep func([]byte) bool) ([]byte, []string) {
+	var result []byte
+	var removed []string
+	for rest := data; ; {
+		start := lineIndex(rest, KeptHeader)
+		if start < 0 {
+			if len(removed) == 0 {
+				return bytes.Clone(data), nil
+			}
+			return append(result, rest...), removed
+		}
+		body := rest[start+len(KeptHeader):]
+		n := keptBody(body)
+		if n < 0 {
+			result = append(result, rest[:start+len(KeptHeader)]...)
+			rest = body
+			continue
+		}
+		var kept []byte
+		for _, line := range bytes.SplitAfter(body[:n], []byte("\n")) {
+			if len(line) == 0 {
+				continue
+			}
+			if keep(line) {
+				kept = append(kept, line...)
+			} else {
+				removed = append(removed, string(line))
+			}
+		}
+		result = append(result, rest[:start]...)
+		if len(kept) > 0 {
+			result = append(append(append(result, KeptHeader...), kept...), KeptEnd...)
+		}
+		rest = body[n+len(KeptEnd):]
+	}
+}
+
+// lineIndex is the index of line, which ends in a newline, at the start of a
+// line in data, or -1.
+func lineIndex(data []byte, line string) int {
+	for offset := 0; ; {
+		i := bytes.Index(data[offset:], []byte(line))
+		if i < 0 {
+			return -1
+		}
+		if i += offset; i == 0 || data[i-1] == '\n' {
+			return i
+		}
+		offset = i + 1
+	}
+}
+
+// keptBody is the length of the pattern lines before KeptEnd at the start of
+// body, or -1 when body doesn't continue as a section Kept wrote.
+func keptBody(body []byte) int {
+	for n := 0; n < len(body); {
+		if bytes.HasPrefix(body[n:], []byte(KeptEnd)) {
+			return n
+		}
+		end := bytes.IndexByte(body[n:], '\n')
+		if end <= 0 || body[n] == '#' {
+			return -1
+		}
+		n += end + 1
+	}
+	return -1
 }

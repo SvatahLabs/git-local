@@ -445,7 +445,11 @@ func New(out, errOut io.Writer) *cobra.Command {
 		},
 		RunE: func(c *cobra.Command, _ []string) error {
 			return inspectCommand(c, func(r *gitexec.Runner, cwd string) error {
-				result, err := history.Status(c.Context(), r, cwd)
+				status := history.Status
+				if jsonEnabled(c) {
+					status = history.StatusWithoutPackingCheck
+				}
+				result, err := status(c.Context(), r, cwd)
 				if err != nil {
 					return err
 				}
@@ -626,7 +630,11 @@ func New(out, errOut io.Writer) *cobra.Command {
 		RunE: func(c *cobra.Command, _ []string) error {
 			return inspectCommand(c, func(r *gitexec.Runner, cwd string) error {
 				needsPacking := false
-				entries, err := history.LogFiltered(c.Context(), r, cwd, logWorkspace, limit, history.LogFilter{Branch: logBranch, MainCommit: logMainCommit, WithStat: logStat, Writer: logWriter, Path: logPath, WithProvenance: logProvenance, NeedsPacking: func() { needsPacking = true }})
+				filter := history.LogFilter{Branch: logBranch, MainCommit: logMainCommit, WithStat: logStat, Writer: logWriter, Path: logPath, WithProvenance: logProvenance}
+				if !jsonEnabled(c) {
+					filter.NeedsPacking = func() { needsPacking = true }
+				}
+				entries, err := history.LogFiltered(c.Context(), r, cwd, logWorkspace, limit, filter)
 				if errors.Is(err, history.ErrInvalidLogFilter) {
 					return usageError{err}
 				}

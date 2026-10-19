@@ -686,16 +686,28 @@ func TestDeinitNamesMovedWorktree(t *testing.T) {
 // initialized worktree by its recorded root, also when the Git directory is
 // separate from the main worktree (--separate-git-dir).
 func TestDeinitNamesInitializedWorktreeWithSeparateGitDir(t *testing.T) {
-	if testutil.RefFormat == "reftable" {
-		t.Skip("git init --separate-git-dir loses a reftable repository's HEAD (GL-141)")
-	}
 	f := newFixture(t)
 	root := f.repo.Root
+	separate := filepath.Join(t.TempDir(), "repo.git")
+	reftable := testutil.RefFormat == "reftable"
+	if reftable {
+		// Git can't move an existing reftable repository's directory with
+		// git init --separate-git-dir (GL-141): create the layout fresh.
+		if err := os.RemoveAll(filepath.Join(root, ".git")); err != nil {
+			t.Fatal(err)
+		}
+		f.git(f.plain, root, append([]string{"init", "-q", "-b", "main", "--template=", "--separate-git-dir", separate}, testutil.RefFormatArgs()...)...)
+		if err := os.MkdirAll(filepath.Join(separate, "info"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		write(t, filepath.Join(separate, "info", "exclude"), "/fixture-home/\n")
+	}
 	write(t, filepath.Join(root, "app.txt"), "application\n")
 	f.git(f.plain, root, "add", "app.txt")
 	f.git(f.plain, root, "commit", "-qm", "initial")
-	separate := filepath.Join(t.TempDir(), "repo.git")
-	f.git(f.plain, root, "init", "-q", "--separate-git-dir", separate)
+	if !reftable {
+		f.git(f.plain, root, "init", "-q", "--separate-git-dir", separate)
+	}
 	f.gl(root, "init")
 	plain := filepath.Join(filepath.Dir(root), filepath.Base(root)+"-plain")
 	f.git(f.plain, root, "worktree", "add", "-q", plain, "-b", "plain")

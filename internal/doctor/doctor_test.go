@@ -681,3 +681,48 @@ func TestDoctorWarnsWhenWorktreesDisagreeOnIgnoreCase(t *testing.T) {
 		t.Fatalf("doctor reports agreeing worktrees: %+v", *f)
 	}
 }
+
+// GL-131 review: a worktree whose core.ignorecase can't be read is a warning
+// naming it, the other worktrees are still compared, and doctor's exit status
+// is unaffected. "1k" is a value Git accepts (as true) but git-local doesn't
+// parse.
+func TestDoctorIgnoreCaseReadFailureNamesTheWorktree(t *testing.T) {
+	repo, r, _ := fixture(t)
+	linked := filepath.Join(t.TempDir(), "linked")
+	odd := filepath.Join(t.TempDir(), "odd")
+	repo.Git("worktree", "add", "-q", "-b", "aux", linked)
+	repo.Git("worktree", "add", "-q", "-b", "odd", odd)
+	for _, root := range []string{linked, odd} {
+		if _, err := workspace.Init(ctx, r, root); err != nil {
+			t.Fatal(err)
+		}
+	}
+	repo.Git("config", "extensions.worktreeConfig", "true")
+	repo.Git("config", "core.ignorecase", "false")
+	repo.At(linked, "config", "--worktree", "core.ignorecase", "true")
+	repo.At(odd, "config", "--worktree", "core.ignorecase", "1k")
+	result, err := Run(ctx, r, repo.Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var unreadable, mismatch bool
+	for _, f := range result.Findings {
+		if f.Severity == "error" {
+			t.Fatalf("doctor reports an error: %+v", f)
+		}
+		if f.Check != "core.ignorecase" {
+			continue
+		}
+		switch {
+		case strings.Contains(f.Message, "could not read") && strings.Contains(f.Message, odd):
+			unreadable = f.Severity == "warning"
+		case strings.Contains(f.Message, repo.Root+": false") && strings.Contains(f.Message, linked+": true") && !strings.Contains(f.Message, odd):
+			mismatch = f.Severity == "warning" && strings.Contains(f.Action, "--unset core.ignorecase") && strings.Contains(f.Action, "case-insensitive volumes")
+		default:
+			t.Fatalf("unexpected core.ignorecase finding: %+v", f)
+		}
+	}
+	if !unreadable || !mismatch {
+		t.Fatalf("unreadable warning %t, mismatch warning %t: %+v", unreadable, mismatch, result.Findings)
+	}
+}

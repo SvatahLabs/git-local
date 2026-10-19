@@ -84,6 +84,10 @@ func (o Observation) Size() int64 { return o.info.Size() }
 
 func (o Observation) ModTime() time.Time { return o.info.ModTime() }
 
+// Info is the open handle's stat, which identifies the file that was
+// observed or read rather than whatever the path names now.
+func (o Observation) Info() fs.FileInfo { return o.info }
+
 // Observe opens name and observes it, as StreamStable does, without reading
 // its content: for a file whose content is known from its stat fields.
 func (d *Dir) Observe(name string) (Observation, error) {

@@ -11,9 +11,10 @@ The first release meant for general use. It replaces the 0.1.4 test builds.
 
 - Release builds for macOS (Apple silicon and Intel), Linux and Windows
   (amd64 and arm64); each needs Git 2.50.1 or later. Building from source
-  needs Go 1.26 or later; `go.mod` names toolchain go1.26.9, which Go
-  downloads when the installed one is older, so builds include the fixes for
-  GO-2026-6604 and the other Go 1.26.8 advisories. Dependencies are at
+  needs Go 1.26.9 or later: `go.mod` requires it (Go downloads it when the
+  installed one is older, unless `GOTOOLCHAIN=local`, which then refuses),
+  so builds include the fixes for GO-2026-6604 and the other Go 1.26.8
+  advisories. Dependencies are at
   `golang.org/x/text` v0.41.0 (GO-2026-6629) and `golang.org/x/sys` v0.44.0
   (GO-2026-5024); neither advisory was reachable.
 - Both Git ref backends, `files` and `reftable`: the CLI and deinit
@@ -66,7 +67,11 @@ The first release meant for general use. It replaces the 0.1.4 test builds.
   of each selected file with the blob ID hashed from it) and don't read a
   file again while all of them match and its timestamps weren't within the
   last moment before it was read; any doubt reads the file. Sensitive files,
-  and every file on Windows, are always read. Backups leave the cache out.
+  and every file on Windows, are always read. A hit also needs the file
+  opened and read to be the one the cache describes. Entries for unselected
+  or sensitive paths are never kept, and `encrypt enable` and `encrypt
+  migrate` remove every workspace's cache, so no plaintext blob ID of a
+  secret stays. Backups leave the cache out.
 - A scoped snapshot (`commit -- <paths>`) after an `untrack` or `exclude`
   drops the no-longer-selected saved files instead of refusing until a full
   snapshot; earlier snapshots keep them. Older builds refuse to read such a
@@ -112,21 +117,27 @@ The first release meant for general use. It replaces the 0.1.4 test builds.
   change, and a rerun finishes an interrupted one; until it has, `init` in a
   worktree still holding an old identity refuses without creating anything
   and names `deinit`. The selected files stay ignored: deinit leaves the
-  managed block's patterns as ordinary `.git/info/exclude` lines under
-  `# kept by git local deinit`, so `git add -A` doesn't stage them and
-  `git clean -fd` doesn't delete them; `deinit --unignore` removes them and
-  warns about the sensitive paths among them.
+  managed block's patterns as ordinary `.git/info/exclude` lines between
+  `# kept by git local deinit` and `# end of lines kept by git local deinit`,
+  so `git add -A` doesn't stage them and `git clean -fd` doesn't delete them;
+  it warns that sensitive paths among them are no longer guarded.
+  `deinit --unignore` removes them (also lines an earlier deinit kept) and
+  warns about the sensitive paths; tracking a path again after a new `init`
+  takes its kept lines back into the managed block.
 - `git local maintenance` packs the private history store and deletes objects
   no snapshot or recovery ref uses; `doctor` reports the store's size. A
   snapshot also packs the store once it holds 6,700 loose objects or 256 MiB
   of them, so it no longer grows until every command slows down. Past those
   limits `status` and `log` print a one-line hint on stderr (not with
-  `--json`); they never pack.
+  `--json`); they never pack, and they count loose objects only up to the
+  limit, so the check costs the same on any store.
 - `git local encrypt migrate` corrects an existing sensitive-file policy with
   the same key.
 - `doctor` warns when worktrees disagree on `core.ignorecase`, naming each
   worktree and its value: they share one managed ignore block, which then
-  ignores more than is selected in some of them (never less).
+  ignores more than is selected in some of them (never less). A worktree
+  whose value can't be read gets its own warning; the rest are still
+  compared.
 - `git local recover <id> --abandon` gives up a transaction that can neither
   resume nor roll back, quarantining what it held.
 - `overlay remove --workspace <uuid>` for overlays of retired worktrees.

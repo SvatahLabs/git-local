@@ -170,6 +170,11 @@ func migrate(ctx context.Context, r *gitexec.Runner, cwd, keyFile string, paths 
 		if err := matchHeads(ctx, r, w.Store, oldHeads); err != nil {
 			return err
 		}
+		// The stat caches hold plaintext blob IDs of paths this policy makes
+		// sensitive (GL-138); none may outlive the migration.
+		if err := history.DropStatCaches(meta); err != nil {
+			return err
+		}
 		journal := migrationJournal{SchemaVersion: 1, Kind: "encrypt", ID: id, RepositoryID: w.RepositoryID, Policy: policy, OldPolicy: oldPolicy, OldHeads: oldHeads, NewHeads: rewritten.Heads, NewRecovery: newRecovery, SeedUpdates: seedUpdates, RestoreUpdates: restoreUpdates}
 		if oldPolicy != nil {
 			journal.SchemaVersion = 2
@@ -873,6 +878,11 @@ func RecoverMigration(ctx context.Context, r *gitexec.Runner, cwd, id, direction
 			return err
 		}
 		if err := verifyRecoveryUpdates(ctx, r, *w, meta, j.ID, w.Store, j.RestoreUpdates, j.Policy, key); err != nil {
+			return err
+		}
+		// A status run since the interruption may have cached plaintext blob
+		// IDs under the old policy (GL-138).
+		if err := history.DropStatCaches(meta); err != nil {
 			return err
 		}
 		if err := secureblob.WriteLocked(common, j.Policy, w.Root, w.Common); err != nil {

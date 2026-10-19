@@ -30,10 +30,15 @@ func deinitCommand() *cobra.Command {
 				for _, path := range result.Hooks {
 					fmt.Fprintf(out, "Removed git-local from hook %s.\n", path)
 				}
-				if result.KeptIgnored {
-					fmt.Fprintln(out, "Replaced the managed block in .git/info/exclude with ordinary lines under \"# kept by git local deinit\", so selected files stay ignored; delete those lines to stop ignoring them.")
-				} else if result.Exclude {
-					fmt.Fprintln(out, "Removed the managed block from .git/info/exclude; selected files now show as untracked, so git add -A would stage them and git clean -fd would delete them.")
+				switch untracked := "now show as untracked, so git add -A would stage them and git clean -fd would delete them."; {
+				case result.KeptIgnored:
+					fmt.Fprintln(out, "Replaced the managed block in .git/info/exclude with ordinary lines between \"# kept by git local deinit\" and \"# end of lines kept by git local deinit\", so selected files stay ignored; git local deinit --unignore removes them.")
+				case result.Exclude && result.KeptRemoved:
+					fmt.Fprintln(out, "Removed the managed block and the lines an earlier git local deinit kept from .git/info/exclude; selected files "+untracked)
+				case result.Exclude:
+					fmt.Fprintln(out, "Removed the managed block from .git/info/exclude; selected files "+untracked)
+				case result.KeptRemoved:
+					fmt.Fprintln(out, "Removed the lines an earlier git local deinit kept from .git/info/exclude; the files they ignored "+untracked)
 				}
 				for _, path := range result.Identities {
 					fmt.Fprintf(out, "Removed workspace identity %s.\n", path)
@@ -50,7 +55,7 @@ func deinitCommand() *cobra.Command {
 			})
 		},
 	}
-	command.Flags().BoolVar(&unignore, "unignore", false, "Stop ignoring the selected files instead of keeping their lines in .git/info/exclude")
+	command.Flags().BoolVar(&unignore, "unignore", false, "Stop ignoring the selected files instead of keeping their lines in .git/info/exclude, and remove the lines an earlier deinit kept")
 	command.Flags().BoolVar(&removeHistory, "remove-history", false, "Delete the private history instead of keeping it (refused while a quarantine or restore recovery ref exists)")
 	return command
 }

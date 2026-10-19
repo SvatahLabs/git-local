@@ -193,7 +193,7 @@ func captureRead(ctx context.Context, g historyGit, store string, files *storage
 					return e
 				})
 				if err == nil && !write {
-					cache.store(files, entry.Path, probe, id)
+					cache.store(entry.Path, probe, observation, id)
 				}
 			}
 			if err == nil {
@@ -420,12 +420,26 @@ func inspect(ctx context.Context, r *gitexec.Runner, w workspace.Context, state 
 	sort.Slice(result.status.Files, func(i, j int) bool { return result.status.Files[i].Path < result.status.Files[j].Path })
 	return result, nil
 }
+
+// Status compares the selected files with the latest snapshot and fills
+// NeedsPacking.
 func Status(ctx context.Context, r *gitexec.Runner, cwd string) (StatusResult, error) {
+	return status(ctx, r, cwd, true)
+}
+
+// StatusWithoutPackingCheck is Status for callers that won't print the
+// packing hint (--json): it leaves NeedsPacking false and skips the walk of
+// the store's loose objects.
+func StatusWithoutPackingCheck(ctx context.Context, r *gitexec.Runner, cwd string) (StatusResult, error) {
+	return status(ctx, r, cwd, false)
+}
+
+func status(ctx context.Context, r *gitexec.Runner, cwd string, checkPacking bool) (StatusResult, error) {
 	var result StatusResult
 	err := configtx.ReadSelection(ctx, r, cwd, func(w workspace.Context, s selection.State, warnings []string, recheck func() error) error {
 		inspection, err := inspect(ctx, r, w, s, warnings, recheck, r, w.Store, false)
 		result = inspection.status
-		result.NeedsPacking = NeedsPacking(w.Store)
+		result.NeedsPacking = checkPacking && NeedsPacking(w.Store)
 		return err
 	})
 	return result, err
