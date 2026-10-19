@@ -21,6 +21,8 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: '1.26.x'
+          # A runner's cached Go can be older than the go line in go.mod.
+          check-latest: true
       - name: gofmt
         run: |
           unformatted="$(gofmt -l .)"
@@ -50,6 +52,7 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: ${{ matrix.go }}
+          check-latest: true
       - run: git --version
       - run: go test -race -parallel 4 -timeout 30m ./...
       - run: go vet ./...
@@ -80,6 +83,7 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: '1.26.x'
+          check-latest: true
       - name: Build selected Git version
         shell: bash
         run: |
@@ -102,6 +106,7 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: '1.26.x'
+          check-latest: true
       - name: Build Git 2.56.0
         shell: bash
         run: |
