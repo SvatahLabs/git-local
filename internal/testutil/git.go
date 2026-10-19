@@ -2,6 +2,7 @@
 package testutil
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +15,37 @@ type Repo struct {
 	Root    string
 	Env     []string
 	GitPath string
+}
+
+// RefFormat is the ref backend New creates repositories with: empty for Git's
+// default, or "reftable". A package's TestMain sets it between runs to run
+// its tests again on the other backend (GL-132).
+var RefFormat string
+
+// ReftableSupported reports whether Git can create a reftable repository.
+func ReftableSupported() bool {
+	dir, err := os.MkdirTemp("", "gitlocal-reftable-")
+	if err != nil {
+		return false
+	}
+	defer os.RemoveAll(dir)
+	cmd := exec.Command("git", "init", "-q", "--template=", "--ref-format=reftable", dir)
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull)
+	return cmd.Run() == nil
+}
+
+// MainWithReftable is a package's TestMain: it runs the tests, then, unless
+// they failed, once is set (a child process that runs one command) or Git
+// can't create a reftable repository, runs them again with every New
+// repository on the reftable ref backend, Git 3.0's default (GL-132).
+func MainWithReftable(m *testing.M, once bool) int {
+	code := m.Run()
+	if code != 0 || once || !ReftableSupported() {
+		return code
+	}
+	fmt.Fprintln(os.Stderr, "=== the same tests on the reftable ref backend (GL-132)")
+	RefFormat = "reftable"
+	return m.Run()
 }
 
 func New(t testing.TB) *Repo {
@@ -35,7 +67,11 @@ func New(t testing.TB) *Repo {
 	}
 	env = append(env, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_AUTHOR_NAME=Fixture", "GIT_AUTHOR_EMAIL=fixture@localhost", "GIT_COMMITTER_NAME=Fixture", "GIT_COMMITTER_EMAIL=fixture@localhost", "GIT_TERMINAL_PROMPT=0")
 	r := &Repo{t, root, env, executable}
-	r.Git("init", "-q", "-b", "main", "--template=")
+	args := []string{"init", "-q", "-b", "main", "--template="}
+	if RefFormat != "" {
+		args = append(args, "--ref-format="+RefFormat)
+	}
+	r.Git(args...)
 	return r
 }
 

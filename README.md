@@ -21,6 +21,8 @@ See the [changelog](CHANGELOG.md) for what changed and the known limitations.
 ## Install
 
 git-local needs Git 2.50.1 or later; a built executable needs no Go runtime.
+Repositories may use either Git ref backend, `files` or `reftable` (Git 3.0's
+default).
 Put `git-local` on `PATH` and check it with `git local --version`. See
 [installing and removing git-local](docs/install.md) for release binaries, the
 macOS package, building from source, and uninstalling.

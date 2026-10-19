@@ -686,6 +686,9 @@ func TestDeinitNamesMovedWorktree(t *testing.T) {
 // initialized worktree by its recorded root, also when the Git directory is
 // separate from the main worktree (--separate-git-dir).
 func TestDeinitNamesInitializedWorktreeWithSeparateGitDir(t *testing.T) {
+	if testutil.RefFormat == "reftable" {
+		t.Skip("git init --separate-git-dir loses a reftable repository's HEAD (GL-141)")
+	}
 	f := newFixture(t)
 	root := f.repo.Root
 	write(t, filepath.Join(root, "app.txt"), "application\n")
