@@ -3,91 +3,168 @@
 **Private, versioned history for the files you and your coding agents keep
 out of Git.**
 
-An external Git command for maintaining independent local history of selected
-project files without adding that history to the project's commits or pushes.
+`git local` is a Git command. It keeps a separate history for files that you
+choose. That history lives inside `.git`. It never goes into your project's
+commits or pushes.
 
-Select files that belong to you rather than the project (notes, local
-configuration, scratch scripts, agent session files), and git-local snapshots
-them into a private store inside `.git`, with its own log, diff, show and
-restore. Guards keep the selected files out of mainline commits and pushes,
-overlays keep a local patch on a tracked file, and history can be encrypted and
-backed up to a separate remote.
+## Why use it
 
-**Status:** pre-release. Selection, snapshots, inspection, restore, journaled
-recovery, worktrees, guards and automatic snapshots, overlays, encryption at
-rest, encrypted backups, maintenance and removal are implemented and tested on
-macOS on Apple silicon. CI for Linux, macOS and Windows is configured but hasn't
-run yet. The Intel macOS build has only run under Rosetta, so it isn't
-qualified. **Windows is experimental:** its builds are published but have never
-run natively, it has known defects (among them key-file protection, so don't
-keep sensitive-file or backup keys there), and it isn't supported for 1.0.
-See the [changelog](CHANGELOG.md) for what changed and the known limitations.
+Coding agents and developers create files that should not be committed:
 
-## For coding agents
+- agent instructions, such as `CLAUDE.local.md` and local `AGENTS.md` notes
+- plans, prompts and handover notes
+- local configuration and `.env` files
+- scratch scripts and personal notes
 
-Agent instructions and session files (`CLAUDE.local.md`, `AGENTS.md` notes,
-local prompts, scratch plans, handovers) usually belong to one developer, not
-to the project, so they stay untracked and their history is lost. With
-`git local track CLAUDE.local.md .agents/` they keep their own snapshots in
-`.git` and can be diffed and restored like any other history. With the
-guards (`git local hook install`) they can't reach a mainline commit or push
-by accident, and with automatic snapshots (`git local auto install`) each new
-worktree an agent creates is seeded with them. An agent uses the same verbs
-it uses for Git (`git local status`, `log`, `diff`, `restore`), and every
-command takes `--json` for scripts.
+These files are usually ignored by Git. Ignored files have no history. If an
+agent overwrites or deletes one, the old version is gone.
+
+`git local` fixes this:
+
+- **History.** Save snapshots of the selected files. View the log, diff two
+  versions, print an old version, and restore it.
+- **Guards.** Git hooks stop a selected file from being committed or pushed
+  by mistake.
+- **Automatic snapshots.** Git hooks take a snapshot on commit, checkout,
+  rebase and rewrite.
+- **Worktrees.** Agents often work in a new Git worktree. A new worktree gets
+  a copy of the selected files from the main checkout.
+- **Writer IDs.** Each snapshot can record who made it, for example
+  `--writer agent-1`. `log --writer` filters by it.
+- **JSON output.** Every command accepts `--json`, so scripts and agents can
+  read the result.
+- **Encryption and backup.** Encrypt sensitive files in the history. Back up
+  the history, encrypted, to a separate Git remote.
 
 ## Install
 
-git-local needs Git 2.50.1 or later; a built executable needs no Go runtime.
-Repositories may use either Git ref backend, `files` or `reftable` (Git 3.0's
-default).
-Put `git-local` on `PATH` and check it with `git local --version`. See
-[installing and removing git-local](docs/install.md) for release binaries, the
-macOS package, building from source, and uninstalling.
+Requirements:
 
-## Quick start
+- Git 2.50.1 or later
+- macOS or Linux (Windows builds exist but are experimental)
+
+From a release:
+
+1. Download the binary for your system and `SHA256SUMS` from the
+   [releases page](https://github.com/SvatahLabs/git-local/releases).
+2. Check the download:
+   `shasum -a 256 -c --ignore-missing SHA256SUMS`
+3. Install it on your `PATH` as `git-local`:
+   `install -m 755 git-local_v1.0.0_darwin_arm64 /usr/local/bin/git-local`
+4. On macOS, remove the download quarantine flag:
+   `xattr -d com.apple.quarantine /usr/local/bin/git-local`
+5. Check it: `git local --version`
+
+From source (needs Go 1.26.9 or later):
 
 ```sh
-git local init                        # once per checkout
-git local track notes                 # select files or directories
-git local commit -m "Save my notes"   # snapshot the selection
+git clone https://github.com/SvatahLabs/git-local.git
+cd git-local
+go build -o bin/git-local ./cmd/git-local
+install -m 755 bin/git-local /usr/local/bin/git-local
+```
+
+More options, including the macOS package, checking release signatures, and
+uninstalling: [docs/install.md](docs/install.md).
+
+## How to use
+
+Set up a repository once:
+
+```sh
+git local init                       # create the private history store
+git local track CLAUDE.local.md      # select a file
+git local track .agents/ notes/      # select directories
+git local hook install               # block selected files from commits and pushes
+git local auto install               # take snapshots on Git events
+```
+
+Save and inspect history:
+
+```sh
+git local status                     # what changed since the last snapshot
+git local commit -m "Before refactor"
+git local commit -m "Session end" --if-changed --writer agent-1
 git local log
 git local diff
-git local show latest:notes/todo.md
-git local restore --source latest --dry-run -- notes
-git local hook install                # keep selected files out of commits and pushes
-git local auto install                # snapshot on Git events
-git local doctor
+git local show latest:CLAUDE.local.md
 ```
+
+Restore a file:
+
+```sh
+git local restore --source latest --dry-run -- CLAUDE.local.md   # preview
+git local restore --source latest -- CLAUDE.local.md
+```
+
+Check health and recover:
+
+```sh
+git local doctor                     # read-only health check
+git local recover --list             # list interrupted operations
+```
+
+Stop using it in a repository:
+
+```sh
+git local deinit                     # removes setup, keeps the private history
+```
+
+### Use with coding agents
+
+- Add `git local commit -m "<summary>" --if-changed --writer <agent-name>` to
+  the agent's session-end or pre-compaction hook.
+- Tell the agent to run `git local status` and `git local log` before editing
+  its notes, and `git local restore` to undo a bad edit.
+- Use `--json` when the agent or a script reads the output.
+- Run `git local auto install` in the main checkout so each new worktree
+  starts with the selected files.
 
 ## Documentation
 
 - [User guide](docs/guide.md): daily use, recovery, encryption, backups,
-  worktrees, guards, automatic snapshots, overlays, maintenance and removal.
+  worktrees, guards, automatic snapshots, overlays, maintenance and removal
 - [Command reference](docs/commands.md): every command and flag, JSON output
-  and exit codes.
-- [Installing and removing git-local](docs/install.md).
-- [Limits](docs/limits.md): size limits and platform constraints.
-- [Changelog](CHANGELOG.md).
+  and exit codes
+- [Install and remove](docs/install.md)
+- [Limits](docs/limits.md): size limits, platforms and filesystems
+- [Changelog](CHANGELOG.md): changes and known limitations
 
-## Development
+## Status
 
-Requires Go 1.26.9 or later and Git 2.50.1 or later. Initialization checks
-required Git behavior using disposable local fixtures; it performs no external
-network operations.
+Version 1.0.0 is not released yet.
+
+- Tested on macOS on Apple silicon.
+- CI builds and tests on Linux, macOS and Windows.
+- The Intel macOS build has only run under Rosetta. It is not qualified.
+- Windows is experimental. It has never run on native Windows and has known
+  defects. Do not keep encryption or backup keys on Windows.
+
+## How to develop
+
+Requirements: Go 1.26.9 or later and Git 2.50.1 or later.
 
 ```sh
-go test -race -parallel 4 -timeout 30m ./...
-go vet ./...
+git clone https://github.com/SvatahLabs/git-local.git
+cd git-local
 go build -o bin/git-local ./cmd/git-local
 ./bin/git-local --version
+go vet ./...
+go test -race -parallel 4 -timeout 30m ./...
 ```
 
-The version lives in the `VERSION` file and the minimum Git version in
-`gitexec.MinimumGit`; the release scripts and CI read them from there.
-The Go module path is `github.com/SvatahLabs/git-local`.
-Dependencies are Cobra plus Go's platform syscall and Unicode libraries.
+Notes:
+
+- The tests create temporary repositories. They make no network calls.
+- The full test suite takes about 15 to 20 minutes.
+- The version is in `VERSION`. The minimum Git version is in
+  `gitexec.MinimumGit`. Scripts and CI read both from there.
+- Release builds: `go run ./scripts/release-binaries.go` and
+  `scripts/build-macos-installer.sh`. See
+  [docs/install.md](docs/install.md#build-from-source).
+- The Go module path is `github.com/SvatahLabs/git-local`.
+- Dependencies: Cobra, plus Go's `x/sys` and `x/text`.
 
 ## License
 
-Apache License 2.0; see [LICENSE](LICENSE) and [NOTICE](NOTICE).
+Apache License 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
