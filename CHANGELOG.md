@@ -116,6 +116,9 @@ The first release meant for general use. It replaces the 0.1.4 test builds.
   of them, so it no longer grows until every command slows down.
 - `git local encrypt migrate` corrects an existing sensitive-file policy with
   the same key.
+- `doctor` warns when worktrees disagree on `core.ignorecase`, naming each
+  worktree and its value: they share one managed ignore block, which then
+  ignores more than is selected in some of them (never less).
 - `git local recover <id> --abandon` gives up a transaction that can neither
   resume nor roll back, quarantining what it held.
 - `overlay remove --workspace <uuid>` for overlays of retired worktrees.

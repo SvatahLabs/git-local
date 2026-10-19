@@ -38,7 +38,8 @@ clear error rather than truncating or guessing.
   256 MiB of them; `git local maintenance` repacks it fully (`doctor`
   reports the store's size).
 - Mixed `core.ignorecase` settings across worktrees can over-ignore paths
-  (never leak them).
+  (never leak them); `git local doctor` warns, naming each worktree and its
+  value.
 
 ## Backup remotes
 

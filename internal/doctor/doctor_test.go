@@ -642,3 +642,42 @@ func TestGuardsFindingNamesThePendingTransactionsNextStep(t *testing.T) {
 		t.Fatalf("guards action %q, transaction action %q", actions["guards"], actions["transaction "+id])
 	}
 }
+
+// GL-131: worktrees whose core.ignorecase settings differ share one managed
+// ignore block; doctor warns, naming each worktree and its value, and is
+// silent while they agree.
+func TestDoctorWarnsWhenWorktreesDisagreeOnIgnoreCase(t *testing.T) {
+	repo, r, _ := fixture(t)
+	linked := filepath.Join(t.TempDir(), "linked")
+	repo.Git("worktree", "add", "-q", "-b", "aux", linked)
+	if _, err := workspace.Init(ctx, r, linked); err != nil {
+		t.Fatal(err)
+	}
+	repo.Git("config", "extensions.worktreeConfig", "true")
+	repo.Git("config", "core.ignorecase", "false")
+	finding := func() *Finding {
+		t.Helper()
+		result, err := Run(ctx, r, repo.Root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i, f := range result.Findings {
+			if f.Check == "core.ignorecase" {
+				return &result.Findings[i]
+			}
+		}
+		return nil
+	}
+	if f := finding(); f != nil {
+		t.Fatalf("doctor reports agreeing worktrees: %+v", *f)
+	}
+	repo.At(linked, "config", "--worktree", "core.ignorecase", "true")
+	f := finding()
+	if f == nil || f.Severity != "warning" || !strings.Contains(f.Message, repo.Root+": false") || !strings.Contains(f.Message, linked+": true") {
+		t.Fatalf("doctor doesn't warn about disagreeing worktrees: %+v", f)
+	}
+	repo.At(linked, "config", "--worktree", "core.ignorecase", "false")
+	if f := finding(); f != nil {
+		t.Fatalf("doctor reports agreeing worktrees: %+v", *f)
+	}
+}
