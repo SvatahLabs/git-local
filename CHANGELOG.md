@@ -16,6 +16,8 @@ The first release meant for general use. It replaces the 0.1.4 test builds.
   GO-2026-6604 and the other Go 1.26.8 advisories. Dependencies are at
   `golang.org/x/text` v0.41.0 (GO-2026-6629) and `golang.org/x/sys` v0.44.0
   (GO-2026-5024); neither advisory was reachable.
+- Both Git ref backends, `files` and `reftable`: the CLI and deinit
+  end-to-end tests run once with each.
 - The test suite runs on macOS on Apple silicon. CI for Linux, macOS and
   Windows is configured but hasn't run yet.
 - The Intel macOS build has only run under Rosetta on Apple silicon; the test
@@ -193,6 +195,11 @@ About a hundred defects found in pre-release reviews, among them:
 
 ### Known limitations
 
+- Git 2.54 loses a reftable repository's refs when `git init
+  --separate-git-dir` moves its Git directory: HEAD names
+  `refs/heads/.invalid` and the commits are left dangling. `git local init`
+  then fails in `git symbolic-ref`. Don't move a reftable repository's Git
+  directory that way.
 - **Windows** isn't qualified: it has never run on native hardware or CI.
   Read-only targets and 8.3 short names are implemented but unverified.
   Key-file protection has known defects: a new key file is restricted only
