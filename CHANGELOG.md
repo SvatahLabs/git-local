@@ -3,7 +3,7 @@
 All notable changes to git-local. Versions follow `major.minor.patch`; a
 rebuilt distributable always gets a new patch version.
 
-## 1.0.0 (unreleased)
+## 1.0.0 (2026-10-19)
 
 The first release meant for general use. It replaces the 0.1.4 test builds.
 Licensed under Apache-2.0; the Go module path is
@@ -29,9 +29,10 @@ Licensed under Apache-2.0; the Go module path is
   network filesystems aren't qualified. Durability rests on the flush calls
   git-local makes, not on a power-cut test. See
   [docs/limits.md](docs/limits.md#filesystems-and-durability).
-- Windows is **experimental**: its builds are published but unqualified (they
-  have never run natively), and the defects under Known limitations don't
-  block the release. Don't rely on it for sensitive-file or backup keys.
+- Windows is **experimental**: its builds are published but unqualified. Its
+  tests pass in CI on GitHub's Windows Server runner, but it hasn't been used
+  on desktop Windows, and the defects under Known limitations don't block the
+  release. Don't rely on it for sensitive-file or backup keys.
 
 ### Upgrading from 0.1.4
 
@@ -232,8 +233,9 @@ About a hundred defects found in pre-release reviews, among them:
   `refs/heads/.invalid` and the commits are left dangling. `git local init`
   then fails in `git symbolic-ref`. Don't move a reftable repository's Git
   directory that way.
-- **Windows** is experimental: it has never run on native hardware or CI.
-  Restoring over or rolling back a read-only file, and refusing 8.3 short
+- **Windows** is experimental: its tests pass in CI on GitHub's Windows
+  Server runner, but it hasn't been used on desktop Windows. Overlays need
+  `core.autocrlf` off, which Git for Windows turns on. Restoring over or rolling back a read-only file, and refusing 8.3 short
   names (`PROGRA~1`, `NAME~1.EXT`) in selections and restore paths, are
   implemented but unverified there. The guards don't resolve short names in
   staged paths: on NTFS with 8.3 names enabled, `git add NOTES~1/secret` can

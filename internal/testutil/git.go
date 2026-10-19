@@ -147,7 +147,7 @@ func New(t testing.TB) *Repo {
 		t.Logf("fixture ref format: %s", RefFormat)
 	}
 	r.Git(append([]string{"init", "-q", "-b", "main", "--template="}, RefFormatArgs()...)...)
-	r.lineEndings()
+	r.LineEndings(r.Root)
 	return r
 }
 
@@ -172,12 +172,13 @@ func PrivatePerm() os.FileMode {
 	return 0600
 }
 
-// lineEndings turns off core.autocrlf on Windows, where Git sets it in the
-// system configuration that git-local reads: it converts the fixtures' line
-// endings, and overlays refuse it, as Windows users of overlays must too.
-func (r *Repo) lineEndings() {
+// LineEndings turns off core.autocrlf in the repository at dir on Windows,
+// where Git sets it in the system configuration that git-local reads: it
+// converts the fixtures' line endings, and overlays refuse it, as Windows
+// users of overlays must too. New does this; a clone needs it again.
+func (r *Repo) LineEndings(dir string) {
 	if runtime.GOOS == "windows" {
-		r.Git("config", "core.autocrlf", "false")
+		r.At(dir, "config", "core.autocrlf", "false")
 	}
 }
 
@@ -191,7 +192,7 @@ func NewReftable(t testing.TB) *Repo {
 		t.Fatal(err)
 	}
 	r.Git("init", "-q", "-b", "main", "--template=", "--ref-format=reftable")
-	r.lineEndings()
+	r.LineEndings(r.Root)
 	return r
 }
 

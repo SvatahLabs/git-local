@@ -137,8 +137,9 @@ Version 1.0.0 is not released yet.
 - Tested on macOS on Apple silicon.
 - CI builds and tests on Linux, macOS and Windows.
 - The Intel macOS build has only run under Rosetta. It is not qualified.
-- Windows is experimental. It has never run on native Windows and has known
-  defects. Do not keep encryption or backup keys on Windows.
+- Windows is experimental. Its tests pass in CI on Windows Server. It has not
+  been used on desktop Windows and has known defects. Do not keep encryption
+  or backup keys on Windows.
 
 ## How to develop
 

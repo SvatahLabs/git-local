@@ -9,8 +9,8 @@ git-local is a single executable, `git-local`. Git finds it on `PATH`, so
 Each release has six CGO-free binaries (macOS, Linux and Windows on amd64 and
 arm64) with a `release.json` manifest and a `SHA256SUMS` file. The Intel macOS
 build has only run under Rosetta, so it isn't qualified yet. The Windows
-builds are **experimental**: they have never run natively and have known
-defects, among them key-file protection, so don't keep sensitive-file or
+builds are **experimental**: their tests pass in CI on Windows Server, but
+they haven't been used on desktop Windows and have known defects, among them key-file protection, so don't keep sensitive-file or
 backup keys on Windows; see the
 [changelog](../CHANGELOG.md#known-limitations). Check the
 download, then put it on `PATH` under the name `git-local` (`git-local.exe` on

@@ -114,7 +114,7 @@ func legacyPolicyFixture(t *testing.T) legacyFixture {
 	if len(f.plainBlobs) != 4 {
 		t.Fatalf("fixture plaintext blobs: %v", f.plainBlobs)
 	}
-	f.key = filepath.Join(t.TempDir(), "sensitive.key")
+	f.key = filepath.Join(testutil.TempDir(t), "sensitive.key")
 	if err := keymaterial.Create(f.key, repo.Root); err != nil {
 		t.Fatal(err)
 	}

@@ -146,7 +146,7 @@ func TestSymlinksHardlinksAndNestedRepositories(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(p.Entries) != 1 || p.Entries[0].LinkTarget != outside {
+		if len(p.Entries) != 1 || p.Entries[0].LinkTarget != filepath.ToSlash(outside) {
 			t.Fatal("link was dereferenced")
 		}
 		if _, err = e.PlanTrack(ctx, Empty(), r.Root, "link/child"); err == nil {

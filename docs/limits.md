@@ -27,7 +27,9 @@ clear error rather than truncating or guessing.
   content filter on the file.
 - `git archive` applies active overlays; see the
   [user guide](guide.md#overlays) for the command that exports without them.
-- Windows is experimental: it hasn't run on native hardware or CI. 8.3-style
+- Windows is experimental: its tests pass in CI on GitHub's Windows Server
+  runner, but it hasn't been used on desktop Windows. Overlays need
+  `core.autocrlf` off, which Git for Windows turns on. 8.3-style
   short names (`PROGRA~1`) can't be selected there, but the guards don't
   resolve them in staged paths. Its key-file protection has known defects, so
   sensitive-file and backup keys aren't supported on Windows until they are

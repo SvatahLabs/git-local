@@ -108,6 +108,11 @@ func adoptEncryptedHistoryWithReboundFileKeyAndRecovery(t *testing.T, beside boo
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Create gives the key an owner-private ACL on Windows, which a new file
+	// written with os.WriteFile doesn't get; overwriting keeps it.
+	if err := keymaterial.Create(newKey, source.Root); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(newKey, contents, 0600); err != nil {
 		t.Fatal(err)
 	}

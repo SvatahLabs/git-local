@@ -236,6 +236,7 @@ func TestPushUsesIsolatedEncryptedCommitAndRefusesOriginHost(t *testing.T) {
 	if out, err := config.CombinedOutput(); err == nil || len(out) != 0 {
 		t.Fatalf("source filter was installed in clone: %v %q", err, out)
 	}
+	repo.LineEndings(overlayClone)
 	if err := os.WriteFile(filepath.Join(overlayClone, "app.txt"), version.Local, 0600); err != nil {
 		t.Fatal(err)
 	}

@@ -160,6 +160,9 @@ func TestSeedRecoveryReplacesInterruptedStage(t *testing.T) {
 						if mode == "100755" {
 							want = 0755
 						}
+						if runtime.GOOS == "windows" {
+							want = 0666 // no permission bits there
+						}
 						if err != nil || statErr != nil || string(data) != "seeded content" || info.Mode().Perm() != want {
 							t.Fatalf("resumed file: %q %v %v %v", data, info, err, statErr)
 						}

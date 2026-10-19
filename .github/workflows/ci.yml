@@ -45,9 +45,6 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         go: ['1.26.x', '1.27.x']
     runs-on: ${{ matrix.os }}
-    # Windows is experimental for 1.0 and its known failures are tracked; its
-    # jobs report results without failing the run.
-    continue-on-error: ${{ matrix.os == 'windows-latest' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
