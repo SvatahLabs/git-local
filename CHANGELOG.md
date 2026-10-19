@@ -24,7 +24,11 @@ Licensed under Apache-2.0; the Go module path is
 - The test suite runs on macOS on Apple silicon. CI for Linux, macOS and
   Windows is configured but hasn't run yet.
 - The Intel macOS build has only run under Rosetta on Apple silicon; the test
-  suite hasn't run on an Intel Mac.
+  suite hasn't run on an Intel Mac, so it's unqualified.
+- Filesystems: tested on APFS and a Linux container's overlay filesystem;
+  network filesystems aren't qualified. Durability rests on the flush calls
+  git-local makes, not on a power-cut test. See
+  [docs/limits.md](docs/limits.md#filesystems-and-durability).
 - Windows is **experimental**: its builds are published but unqualified (they
   have never run natively), and the defects under Known limitations don't
   block the release. Don't rely on it for sensitive-file or backup keys.
@@ -252,6 +256,10 @@ About a hundred defects found in pre-release reviews, among them:
   loaded machine (it runs about a dozen Git processes per file, hashing and
   reading each file's content), also in a repository whose main index holds
   90,000 paths.
+- **First snapshot** of a large selection takes about 8 ms per new file on
+  Apple silicon, because each new file is flushed to disk separately: 25,000
+  small files take about three minutes. Later snapshots write only changed
+  files.
 - **Seeding** a worktree takes about 12 ms per seeded file on a busy machine,
   most of it spent making each file durable.
 - **Maintenance:** snapshots pack loose objects; run `git local maintenance`

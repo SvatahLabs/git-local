@@ -14,6 +14,7 @@ clear error rather than truncating or guessing.
 | `log` | 1,000 entries per call | `-n` above 1,000 is refused. |
 | `grep` | 1–100 snapshots, 1–1,000 matches, 1 MiB per file, 64 MiB per search | Files and snapshots beyond the budget are reported as not searched. |
 | Overlay files | UTF-8 text, at most 1 MiB | `overlay add` refuses. |
+| First snapshot | time grows linearly with the number of new files, about 8 ms per file on Apple silicon, because each new file is flushed to disk separately | 25,000 small files take about three minutes; later snapshots write only changed files. |
 | Restore | time grows linearly with the restored file count, roughly half a second per file on a busy machine | A directory of a few thousand files takes tens of minutes. |
 
 ## Platform and environment
@@ -33,10 +34,9 @@ clear error rather than truncating or guessing.
   fixed. A command that waits for the repository lock while `deinit` runs
   goes on instead of stopping; rerun `deinit`. See the
   [changelog](../CHANGELOG.md#known-limitations).
-- The Intel macOS build has only run under Rosetta on Apple silicon; the test
+- The Intel macOS build (in the release binaries and the universal package)
+  is unqualified: it has only run under Rosetta on Apple silicon, and the test
   suite hasn't run on an Intel Mac.
-- Only APFS and a Linux container's overlay filesystem have been tested. Other
-  local filesystems are untested, and network filesystems aren't qualified.
 - A snapshot packs the private store once it holds 6,700 loose objects or
   256 MiB of them; `git local maintenance` repacks it fully (`doctor`
   reports the store's size).
@@ -53,6 +53,23 @@ clear error rather than truncating or guessing.
 - Mixed `core.ignorecase` settings across worktrees can over-ignore paths
   (never leak them); `git local doctor` warns, naming each worktree and its
   value.
+
+## Filesystems and durability
+
+- Tested on APFS (macOS) and on a Linux container's overlay filesystem. Other
+  local filesystems (ext4, xfs, btrfs, NTFS, exFAT) are expected to work but
+  are untested. Network filesystems (NFS, SMB, AFP) and synced folders
+  (iCloud Drive, Dropbox) aren't qualified: their locking, rename and
+  timestamp behavior may not be what git-local relies on.
+- Durability is a claim about the flush calls git-local makes, not a measured
+  guarantee: no power-cut test has been run. It writes each file to a
+  temporary name, flushes it, renames it into place and flushes the directory
+  (`F_FULLFSYNC` on macOS, `fsync` on Linux, write-through renames on
+  Windows), and runs Git on the private store with `core.fsync` for objects,
+  packs and refs. A drive or virtual machine that acknowledges flushes it
+  hasn't made durable can still lose the last writes; `git local doctor` and
+  `git local recover` find and finish an interrupted transaction.
+- Git built with Rust support is untested.
 
 ## Backup remotes
 
