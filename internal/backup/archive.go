@@ -89,7 +89,8 @@ func packDirectory(ctx context.Context, root *storage.Dir, dst *tar.Writer, rel,
 		// The quarantine holds local rescue copies, possibly plaintext; it
 		// isn't private history and stays out of backups. A temporary file
 		// left by an interrupted atomic write is never state.
-		if filepath.ToSlash(child) == "locks/repository.lock" || child == "quarantine" || storage.IsTempName(component) {
+		// The stat cache (history.StatCacheDir) only saves reads on this machine (GL-138).
+		if filepath.ToSlash(child) == "locks/repository.lock" || child == "quarantine" || child == "statcache" || storage.IsTempName(component) {
 			continue
 		}
 		// A file list kept beside a seed journal is state only while its

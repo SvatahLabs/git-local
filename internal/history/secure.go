@@ -41,6 +41,14 @@ func (s *secureState) covers(path string) bool {
 	return s != nil && s.policy.Covers(path)
 }
 
+// cacheable reports whether the stat cache may keep path's plaintext blob ID:
+// not for a sensitive file, nor one that matches a sensitive rule only by
+// spelling or kind (GL-138).
+func (s *secureState) cacheable(path string) bool {
+	_, uncovered := s.uncoveredRule(path)
+	return !s.covers(path) && !uncovered
+}
+
 // uncoveredRule reports the sensitive rule a path falls under by alias key
 // (case, normalization, or a file rule naming a directory) without being
 // covered by its exact spelling, so it would otherwise be stored as plaintext.

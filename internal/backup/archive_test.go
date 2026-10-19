@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"gitlocal/internal/configtx"
@@ -37,6 +38,14 @@ func TestPackEncryptedIncludesPrivateStoreAndIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := history.Commit(context.Background(), g, repo.Root, "backup source"); err != nil {
+		t.Fatal(err)
+	}
+	// The stat cache only saves this machine reads; it isn't backed up (GL-138).
+	cache := filepath.Join(w.Common, "gitlocal", history.StatCacheDir)
+	if err := os.MkdirAll(cache, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cache, w.WorkspaceID+".json"), []byte(`{"version":1,"entries":{}}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	key, err := GenerateKey()
@@ -83,6 +92,11 @@ func TestPackEncryptedIncludesPrivateStoreAndIdentity(t *testing.T) {
 	// The lock file is empty: check that it's absent, not that it's empty.
 	if _, archived := entries["state/locks/repository.lock"]; archived || len(entries["state/repository.json"]) == 0 {
 		t.Fatal("transient repository lock was archived")
+	}
+	for name := range entries {
+		if strings.HasPrefix(name, "state/"+history.StatCacheDir+"/") {
+			t.Fatalf("the stat cache was archived: %s", name)
+		}
 	}
 	stage, err := DecryptStaged(context.Background(), bytes.NewReader(encrypted.Bytes()), key, testRef(w.RepositoryID))
 	if err != nil {

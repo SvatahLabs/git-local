@@ -146,7 +146,7 @@ func hashRead(ctx context.Context, g historyGit, store string, input io.Reader, 
 	}
 	return oid(g.History(ctx, store, input, args...))
 }
-func captureRead(ctx context.Context, g historyGit, store string, files *storage.Dir, plan selection.Plan, write bool) (map[string]fileValue, func() error, error) {
+func captureRead(ctx context.Context, g historyGit, store string, files *storage.Dir, plan selection.Plan, write bool, cache *statCache) (map[string]fileValue, func() error, error) {
 	result := map[string]fileValue{}
 	observed := map[string]storage.Observation{}
 	for _, entry := range plan.Entries {
@@ -172,17 +172,30 @@ func captureRead(ctx context.Context, g historyGit, store string, files *storage
 			}
 		} else {
 			var observation storage.Observation
-			// Without a write, hash in process: one Git process per file
-			// dominated status on large selections (GL-135).
-			observation, err = files.StreamStableSize(entry.Path, func(size int64, input io.Reader) error {
-				var e error
-				if write {
-					id, e = hashRead(ctx, g, store, input, write)
-				} else {
-					id, e = blobID(size, input)
+			var probe statProbe
+			cached := false
+			// An unchanged file's blob ID comes from the stat cache, without
+			// reading it (GL-138).
+			if !write {
+				id, observation, probe, cached = cache.lookup(files, entry.Path, entry.Mode)
+			}
+			if !cached {
+				filesHashed.Add(1)
+				// Without a write, hash in process: one Git process per file
+				// dominated status on large selections (GL-135).
+				observation, err = files.StreamStableSize(entry.Path, func(size int64, input io.Reader) error {
+					var e error
+					if write {
+						id, e = hashRead(ctx, g, store, input, write)
+					} else {
+						id, e = blobID(size, input)
+					}
+					return e
+				})
+				if err == nil && !write {
+					cache.store(files, entry.Path, probe, id)
 				}
-				return e
-			})
+			}
 			if err == nil {
 				if observation.Mode() != entry.Mode {
 					return nil, nil, fmt.Errorf("%w: file mode changed during inspection", storage.ErrConflict)
@@ -295,8 +308,14 @@ func inspect(ctx context.Context, r *gitexec.Runner, w workspace.Context, state 
 			safe.Entries = append(safe.Entries, e)
 		}
 	}
+	var cache *statCache
+	if !write {
+		// Plaintext blob IDs of sensitive files are never kept.
+		cache = loadStatCache(w, secure.cacheable)
+		defer cache.close()
+	}
 	var recheckFiles func() error
-	result.after, recheckFiles, err = captureRead(ctx, g, store, files, safe, write)
+	result.after, recheckFiles, err = captureRead(ctx, g, store, files, safe, write, cache)
 	if err != nil {
 		return result, err
 	}
@@ -369,6 +388,7 @@ func inspect(ctx context.Context, r *gitexec.Runner, w workspace.Context, state 
 	if current != previous {
 		return result, fmt.Errorf("%w: snapshot head changed during inspection", storage.ErrConflict)
 	}
+	cache.save()
 	result.status.Selection = selectedChanges(old, state)
 	changes := map[string]string{}
 	for path, old := range result.before {

@@ -194,6 +194,13 @@ func commitWithOptions(ctx context.Context, r *gitexec.Runner, cwd, message, wri
 		for _, file := range oldFiles {
 			known[file.ID] = true
 		}
+		// A file whose stat fields the cache knows, with content the store
+		// holds, is recorded without reading it (GL-138).
+		cache := loadStatCache(w, secure.cacheable)
+		defer cache.close()
+		if scope != nil {
+			cache.retain(func(path string) bool { return !inScope(scope, path) })
+		}
 		flush := func() error {
 			if batch != nil {
 				return batch.flush(ctx, r, w.Store, nextFiles)
@@ -294,14 +301,19 @@ func commitWithOptions(ctx context.Context, r *gitexec.Runner, cwd, message, wri
 					id, e = hash(ctx, r, w.Store, strings.NewReader(target))
 				}
 			} else {
-				var computed string
-				hashed, err := files.StreamStableSize(entry.Path, func(size int64, input io.Reader) error {
+				computed, hashed, probe, cached := cache.lookup(files, entry.Path, entry.Mode)
+				if !cached || !known[computed] {
+					filesHashed.Add(1)
 					var err error
-					computed, err = blobID(size, input)
-					return err
-				})
-				if err != nil {
-					return err
+					hashed, err = files.StreamStableSize(entry.Path, func(size int64, input io.Reader) error {
+						var err error
+						computed, err = blobID(size, input)
+						return err
+					})
+					if err != nil {
+						return err
+					}
+					cache.store(files, entry.Path, probe, computed)
 				}
 				if hashed.Mode() != entry.Mode {
 					return fmt.Errorf("%w: mode changed at %q", storage.ErrConflict, entry.Path)
@@ -358,6 +370,7 @@ func commitWithOptions(ctx context.Context, r *gitexec.Runner, cwd, message, wri
 		if e := validateMergedFiles(nextFiles, state); e != nil {
 			return e
 		}
+		cache.save()
 		root := &directory{}
 		for path, file := range nextFiles {
 			root.add(path, file.Mode, file.ID)

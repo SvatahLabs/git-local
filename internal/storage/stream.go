@@ -5,6 +5,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"time"
 )
 
 // Observation retains handle-derived identity and observable read state.
@@ -80,3 +81,26 @@ func (d *Dir) StreamStableSize(name string, consume func(int64, io.Reader) error
 }
 
 func (o Observation) Size() int64 { return o.info.Size() }
+
+func (o Observation) ModTime() time.Time { return o.info.ModTime() }
+
+// Observe opens name and observes it, as StreamStable does, without reading
+// its content: for a file whose content is known from its stat fields.
+func (d *Dir) Observe(name string) (Observation, error) {
+	f, err := d.open(name, os.O_RDONLY, 0)
+	if err != nil {
+		return Observation{}, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return Observation{}, err
+	}
+	if err = ValidateInfo(info); err != nil {
+		return Observation{}, err
+	}
+	if !info.Mode().IsRegular() {
+		return Observation{}, fmt.Errorf("expected regular file at %q", name)
+	}
+	return Observation{info}, nil
+}

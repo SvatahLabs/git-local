@@ -37,6 +37,11 @@ clear error rather than truncating or guessing.
 - A snapshot packs the private store once it holds 6,700 loose objects or
   256 MiB of them; `git local maintenance` repacks it fully (`doctor`
   reports the store's size).
+- On Linux and macOS, `status` and snapshots skip reading a selected file
+  whose stat fields match the stat cache in `.git/gitlocal/statcache/`. Like
+  Git's index, it misses a change that leaves the size, mtime, ctime, inode
+  and device all equal, which takes setting the clock back. Sensitive files,
+  and every file on Windows, are always read.
 - Mixed `core.ignorecase` settings across worktrees can over-ignore paths
   (never leak them); `git local doctor` warns, naming each worktree and its
   value.

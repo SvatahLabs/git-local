@@ -23,6 +23,10 @@ func durableState(t *testing.T, root string) map[string]string {
 			return err
 		}
 		if d.IsDir() {
+			// Status may fill the stat cache; it records no state (GL-138).
+			if d.Name() == StatCacheDir && filepath.Base(filepath.Dir(path)) == "gitlocal" {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		fi, err := d.Info()

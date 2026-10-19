@@ -61,6 +61,12 @@ The first release meant for general use. It replaces the 0.1.4 test builds.
 - `status` and snapshots hash files in process and skip files whose content
   the previous snapshot already holds, instead of starting a Git process per
   selected file: `status` on 20,000 files went from about 400 s to seconds.
+- On Linux and macOS, `status` and snapshots keep a stat cache in
+  `.git/gitlocal/statcache/` (the size, mtime, ctime, inode, device and mode
+  of each selected file with the blob ID hashed from it) and don't read a
+  file again while all of them match and its timestamps weren't within the
+  last moment before it was read; any doubt reads the file. Sensitive files,
+  and every file on Windows, are always read. Backups leave the cache out.
 - A scoped snapshot (`commit -- <paths>`) after an `untrack` or `exclude`
   drops the no-longer-selected saved files instead of refusing until a full
   snapshot; earlier snapshots keep them. Older builds refuse to read such a
