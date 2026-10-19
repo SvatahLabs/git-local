@@ -390,9 +390,19 @@ func smokeHost(stage string, info manifest) error {
 	} else {
 		paths = append(paths, "/usr/bin", "/bin")
 	}
-	for _, dir := range paths {
+	// /usr/bin holds git and sh, and on some systems (GitHub's Ubuntu runners)
+	// go too. A go first on PATH that records its use and fails shadows it, so
+	// the smoke test still proves the binary never runs a Go toolchain.
+	goUsed := filepath.Join(stage, "smoke-go-used")
+	if runtime.GOOS != "windows" {
+		shadow := "#!/bin/sh\necho \"$@\" >> '" + goUsed + "'\nexit 97\n"
+		if err := os.WriteFile(filepath.Join(bin, "go"), []byte(shadow), 0755); err != nil {
+			return err
+		}
+	}
+	for _, dir := range paths[1:] {
 		for _, name := range []string{"go", "go.exe"} {
-			if info, err := os.Stat(filepath.Join(dir, name)); err == nil && info.Mode().IsRegular() {
+			if info, err := os.Stat(filepath.Join(dir, name)); err == nil && info.Mode().IsRegular() && runtime.GOOS == "windows" {
 				return fmt.Errorf("smoke-test PATH still contains a Go toolchain: %s", filepath.Join(dir, name))
 			}
 		}
@@ -534,6 +544,11 @@ func smokeHost(stage string, info manifest) error {
 	}
 	if committed, err := run(repo, git, "show", "HEAD:app.txt"); err != nil || !bytes.Equal(committed, base) {
 		return fmt.Errorf("packaged overlay entered a mainline commit: %v %q", err, committed)
+	}
+	if used, err := os.ReadFile(goUsed); err == nil {
+		return fmt.Errorf("packaged binary ran a Go toolchain: go %s", used)
+	} else if !os.IsNotExist(err) {
+		return err
 	}
 	return nil
 }

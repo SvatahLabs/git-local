@@ -84,10 +84,12 @@ jobs:
         shell: bash
         run: |
           version='${{ matrix.gitVersion }}'
+          # Backup tests push over HTTPS, so Git needs curl (git-remote-https).
+          sudo apt-get update -qq && sudo apt-get install -y -qq libcurl4-openssl-dev
           curl --fail --location "https://www.kernel.org/pub/software/scm/git/git-$version.tar.xz" --output "$RUNNER_TEMP/git.tar.xz"
           printf '%s  %s\n' '${{ matrix.sha256 }}' "$RUNNER_TEMP/git.tar.xz" | sha256sum -c -
           tar -xJf "$RUNNER_TEMP/git.tar.xz" -C "$RUNNER_TEMP"
-          make -C "$RUNNER_TEMP/git-$version" -j2 prefix="$RUNNER_TEMP/git-selected" NO_RUST=YesPlease NO_GETTEXT=YesPlease NO_TCLTK=YesPlease NO_CURL=YesPlease NO_PERL=YesPlease install
+          make -C "$RUNNER_TEMP/git-$version" -j2 prefix="$RUNNER_TEMP/git-selected" NO_RUST=YesPlease NO_GETTEXT=YesPlease NO_TCLTK=YesPlease NO_EXPAT=YesPlease NO_PERL=YesPlease install
           echo "$RUNNER_TEMP/git-selected/bin" >> "$GITHUB_PATH"
       - run: git --version
       - run: go test -parallel 4 -timeout 30m ./...
@@ -106,7 +108,7 @@ jobs:
           curl --fail --location https://www.kernel.org/pub/software/scm/git/git-2.56.0.tar.xz --output "$RUNNER_TEMP/git.tar.xz"
           printf '%s  %s\n' 26c56c296b38c0695b26fa95f475f1d01704d2d38e73465ca30b0b2f5dc789d3 "$RUNNER_TEMP/git.tar.xz" | shasum -a 256 -c -
           tar -xJf "$RUNNER_TEMP/git.tar.xz" -C "$RUNNER_TEMP"
-          make -C "$RUNNER_TEMP/git-2.56.0" -j2 prefix="$RUNNER_TEMP/git-current" NO_RUST=YesPlease NO_GETTEXT=YesPlease NO_TCLTK=YesPlease NO_CURL=YesPlease NO_PERL=YesPlease install
+          make -C "$RUNNER_TEMP/git-2.56.0" -j2 prefix="$RUNNER_TEMP/git-current" NO_RUST=YesPlease NO_GETTEXT=YesPlease NO_TCLTK=YesPlease NO_EXPAT=YesPlease NO_PERL=YesPlease install
           echo "$RUNNER_TEMP/git-current/bin" >> "$GITHUB_PATH"
       - run: git --version
       - run: go test -race -parallel 4 -timeout 30m ./...
