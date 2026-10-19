@@ -257,4 +257,7 @@ About a hundred defects found in pre-release reviews, among them:
   64 MiB beside its journal), `show`/`diff` output up to 16 MiB, and `log` up
   to 1,000 entries per call.
 - Mixed `core.ignorecase` across worktrees over-ignores (never leaks).
-- The macOS installer isn't signed or notarized yet.
+- Binaries and the macOS installer aren't code-signed or notarized: macOS
+  quarantines a download until `xattr -d com.apple.quarantine` clears it.
+  `SHA256SUMS` and every artifact carry a GitHub artifact attestation
+  (`gh attestation verify <file> --repo SvatahLabs/git-local`).

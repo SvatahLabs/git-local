@@ -23,6 +23,24 @@ git local --version
 
 `--version` names the release and the source commit it was built from.
 
+The binaries and the package aren't code-signed. What is signed is the
+release's provenance: the release workflow attests `SHA256SUMS` and every
+artifact it lists through GitHub artifact attestations (Sigstore, keyless),
+so a checksum file that matches came from that workflow at the tagged
+commit. Check it with the GitHub CLI before trusting the checksums:
+
+```sh
+gh attestation verify SHA256SUMS --repo SvatahLabs/git-local
+gh attestation verify git-local_v1.0.0_darwin_arm64 --repo SvatahLabs/git-local
+```
+
+macOS marks a downloaded binary as quarantined, and Gatekeeper refuses an
+unsigned one. After checking it, clear the attribute:
+
+```sh
+xattr -d com.apple.quarantine /usr/local/bin/git-local
+```
+
 ## Install the macOS package
 
 The macOS package installs a universal (Apple silicon and Intel) executable at
@@ -36,8 +54,10 @@ sudo installer -pkg GitLocal-1.0.0-macos-universal.pkg -target /
 git local --version
 ```
 
-The package isn't signed or notarized yet. A later version replaces it (package
-identifier `org.gitlocal.cli`). Use `git-local --help` for help: Git may route
+The package isn't signed or notarized; check it with `gh attestation verify`
+as above, and open it from Finder with Control-click → Open, or install it
+with `installer` as shown, which doesn't consult Gatekeeper. A later version
+replaces it (package identifier `org.gitlocal.cli`). Use `git-local --help` for help: Git may route
 `git local --help` to its manual-page lookup.
 
 ## Build from source
@@ -62,6 +82,10 @@ version is never rebuilt:
   for a built directory after verifying its checksum.
 - `scripts/build-macos-installer.sh` builds the macOS package into `dist/`
   (`GITLOCAL_DIST_DIR` changes that, `GITLOCAL_GO_BIN` names the Go binary).
+- Pushing a `v<version>` tag runs `.github/workflows/release.yml` on macOS:
+  it checks the tag against `VERSION`, runs both scripts, adds the package to
+  `SHA256SUMS`, attests the artifacts and `SHA256SUMS`, and publishes a
+  draft GitHub release. Tag only a commit whose CI run is green.
 
 ## Set up a checkout
 

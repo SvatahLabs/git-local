@@ -1,0 +1,56 @@
+name: release
+
+# A pushed v<VERSION> tag builds the six binaries and the macOS package,
+# attests them, and publishes a draft GitHub release. The attestations are
+# signed through Sigstore with this workflow's identity, so SHA256SUMS is
+# signed and every artifact has build provenance without a key to keep.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: macos-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+      - name: Tag matches VERSION
+        run: |
+          version="$(cat VERSION)"
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "tag $GITHUB_REF_NAME doesn't match VERSION $version" >&2
+            exit 1
+          fi
+      - name: Build and smoke-test the binaries
+        run: go run ./scripts/release-binaries.go -out dist/release
+      - name: Build the macOS package
+        run: scripts/build-macos-installer.sh
+        env:
+          GITLOCAL_DIST_DIR: dist/release
+      - name: Add the package to SHA256SUMS
+        working-directory: dist/release
+        run: cat ./*.pkg.sha256 >> SHA256SUMS
+      - name: Attest the artifacts listed in SHA256SUMS
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: dist/release/SHA256SUMS
+      - name: Attest SHA256SUMS itself
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/release/SHA256SUMS
+      - name: Publish a draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes="$(awk '/^## /{n++} n==1' CHANGELOG.md)"
+          gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
+            --title "git-local $GITHUB_REF_NAME" --notes "$notes" dist/release/*

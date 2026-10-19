@@ -20,7 +20,7 @@ func TestVersionAndMinimumGitAreSingleSourced(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"release-binaries.go", "build-macos-installer.sh", "../.github/workflows/ci.yml"} {
+	for _, name := range []string{"release-binaries.go", "build-macos-installer.sh", "../.github/workflows/ci.yml", "../.github/workflows/release.yml"} {
 		data, err := os.ReadFile(name)
 		if err != nil {
 			t.Fatal(err)
@@ -28,7 +28,7 @@ func TestVersionAndMinimumGitAreSingleSourced(t *testing.T) {
 		if regexp.MustCompile(`\b` + regexp.QuoteMeta(version) + `\b|0\.1\.4`).Match(data) {
 			t.Fatalf("%s hard-codes a release version", name)
 		}
-		if name != "../.github/workflows/ci.yml" && strings.Contains(string(data), gitexec.MinimumGit) {
+		if !strings.HasSuffix(name, "ci.yml") && strings.Contains(string(data), gitexec.MinimumGit) {
 			t.Fatalf("%s hard-codes the minimum Git version", name)
 		}
 	}
