@@ -29,11 +29,11 @@ func ownedSeed(t *testing.T, n, owned int) (r *gitexec.Runner, run func()) {
 		t.Fatal(err)
 	}
 	app := strings.TrimSpace(string(repo.At(linked, "hash-object", "-w", "app.txt")))
-	args := []string{"update-index", "--add"}
+	var entries strings.Builder
 	for i := 0; i < owned; i++ {
-		args = append(args, "--cacheinfo", fmt.Sprintf("100644,%s,main/file-%05d", app, i))
+		fmt.Fprintf(&entries, "100644 %s\tmain/file-%05d\n", app, i)
 	}
-	repo.At(linked, args...)
+	repo.Input(linked, entries.String(), "update-index", "--add", "--index-info")
 	blob, err := r.History(ctx, w.Store, strings.NewReader("seeded"), "hash-object", "-w", "--stdin", "--no-filters")
 	if err != nil {
 		t.Fatal(err)

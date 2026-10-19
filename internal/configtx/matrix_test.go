@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -121,11 +122,16 @@ func TestEverySeedFaultIsResolvable(t *testing.T) {
 			return strings.TrimSpace(string(out))
 		}
 		a, b := blob("seeded-a"), blob("seeded-b")
+		// Windows seeding refuses executable modes.
+		bMode := "100755"
+		if runtime.GOOS == "windows" {
+			bMode = "100644"
+		}
 		return linked, r, func(_ workspace.Context) (SeedPlan, error) {
 			state := selection.Empty()
 			state.Generation = 1
 			state.Include = []selection.Rule{{Path: "notes", Kind: "directory"}}
-			return SeedPlan{SourceWorkspace: main.WorkspaceID, SourceSnapshot: a, Selection: state, Files: []SeedFile{{Path: "notes/a", Mode: "100644", Blob: a}, {Path: "notes/sub/b", Mode: "100755", Blob: b}}}, nil
+			return SeedPlan{SourceWorkspace: main.WorkspaceID, SourceSnapshot: a, Selection: state, Files: []SeedFile{{Path: "notes/a", Mode: "100644", Blob: a}, {Path: "notes/sub/b", Mode: bMode, Blob: b}}}, nil
 		}
 	}
 	linked, r, planner := setup(t)

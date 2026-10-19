@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +15,9 @@ import (
 // renames the private state is told what happened, instead of going on to
 // fail on the first missing file.
 func TestLockReportsStateMovedWhileWaiting(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows can't move a folder that holds an open lock file")
+	}
 	ctx := context.Background()
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "gitlocal", "locks"), 0700); err != nil {

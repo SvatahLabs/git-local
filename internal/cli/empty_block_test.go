@@ -51,7 +51,7 @@ func TestInitWritesStageRuleWithoutSelections(t *testing.T) {
 		t.Fatal(err)
 	}
 	successful(t, repo.Root, "init")
-	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0600 || !hasStageRule() {
+	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != testutil.PrivatePerm() || !hasStageRule() {
 		t.Fatalf("init without info/exclude: %v %v", info, err)
 	}
 }

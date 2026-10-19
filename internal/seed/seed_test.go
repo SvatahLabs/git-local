@@ -131,13 +131,16 @@ func TestEncryptedSourceSeedsLinkedWorktreeAndSnapshotsThere(t *testing.T) {
 		t.Fatal(err)
 	}
 	reopenCompletedSeedJournal(t, main.Common, rolled.TransactionID)
-	if err := os.Remove(keyPath); err != nil {
+	// Moving the key away and back keeps its owner-private ACL on Windows,
+	// which a new file written with os.WriteFile wouldn't get.
+	aside := keyPath + ".aside"
+	if err := os.Rename(keyPath, aside); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := Recover(ctx, r, linkedRollback, rolled.TransactionID, true); err == nil {
 		t.Fatal("missing key permitted unverifiable encrypted seed rollback")
 	}
-	if err := os.WriteFile(keyPath, originalKey, 0600); err != nil {
+	if err := os.Rename(aside, keyPath); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := Recover(ctx, r, linkedRollback, rolled.TransactionID, true); err != nil {

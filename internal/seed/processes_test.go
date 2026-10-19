@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/SvatahLabs/git-local/internal/configtx"
@@ -111,6 +112,9 @@ func seedProcesses(t *testing.T, n int) (uint64, uint64) {
 // each sensitive file ran two Git processes (verification and decryption) and
 // each symlink one (GL-120).
 func TestSeedingSensitiveFilesAndSymlinksRunsConstantGitProcesses(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows seeding refuses symlinks")
+	}
 	t.Parallel()
 	smallSeed, smallResume := seedProcesses(t, 4)
 	largeSeed, largeResume := seedProcesses(t, 24)

@@ -244,7 +244,8 @@ func TestBackupTransportForwardsUserHTTPSSettings(t *testing.T) {
 	if err := r.BackupPush(ctx, store, url, id, ref); err == nil {
 		t.Fatal("HTTPS push succeeded without a trusted CA (sslVerify=false was forwarded)")
 	}
-	writeConfig("[http \"" + host + "\"]\n\tsslCAInfo = " + ca + "\n\tproxy = \n")
+	// Forward slashes: a backslash in a config value starts an escape.
+	writeConfig("[http \"" + host + "\"]\n\tsslCAInfo = " + filepath.ToSlash(ca) + "\n\tproxy = \n")
 	if err := r.BackupPush(ctx, store, url, id, ref); err != nil {
 		t.Fatalf("HTTPS push with the user's http.<url>.sslCAInfo: %v", err)
 	}

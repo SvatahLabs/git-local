@@ -158,7 +158,9 @@ func durable(t *testing.T, root string) map[string]string {
 		if err != nil {
 			return err
 		}
-		fi, err := d.Info()
+		// Not d.Info(): on Windows it reads the parent folder's copy of a
+		// directory's times, which NTFS updates lazily.
+		fi, err := os.Lstat(p)
 		if err != nil {
 			return err
 		}

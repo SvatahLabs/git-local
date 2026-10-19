@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -136,6 +137,9 @@ func linkedWorkspace(t *testing.T, repo *testutil.Repo, dir, branch string) stri
 // replaced by a file, so stat reports ENOTDIR. The other checkouts keep
 // working and are warned.
 func TestOfflineWorktreeIsUnavailableNotFatal(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows reports a path under a file as missing, so this can't stand in for an offline volume")
+	}
 	t.Parallel()
 	repo := layoutRepo(t)
 	volume := filepath.Join(t.TempDir(), "volume")
@@ -232,6 +236,9 @@ func TestUnreadableWorktreeRegistrationStopsInit(t *testing.T) {
 	t.Parallel()
 	if os.Geteuid() == 0 {
 		t.Skip("root reads unreadable files")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod can't make a file unreadable on Windows")
 	}
 	repo := layoutRepo(t)
 	linked := linkedWorkspace(t, repo, t.TempDir(), "unreadable")

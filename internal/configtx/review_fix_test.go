@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -47,6 +48,9 @@ func seedLinked(t *testing.T, content, mode string, paths ...string) (*testutil.
 // A plain symlink target over 1 MiB is refused like an encrypted one; before,
 // io.Copy used the embedded bytes.Buffer's ReadFrom and skipped the limit.
 func TestSeedRefusesPlainSymlinkTargetOver1MiB(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows seeding refuses symlinks")
+	}
 	t.Parallel()
 	_, r, linked, planner := seedLinked(t, strings.Repeat("x", 1<<20+1), "120000", "notes/link")
 	_, err := seed(context.Background(), r, linked, planner, nil)

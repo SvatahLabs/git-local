@@ -11,6 +11,7 @@ import (
 	"github.com/SvatahLabs/git-local/internal/keymaterial"
 	"github.com/SvatahLabs/git-local/internal/secureblob"
 	"github.com/SvatahLabs/git-local/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/testutil"
 )
 
 func TestProtectedRestoreMixedDirectoryAndSymlink(t *testing.T) {
@@ -220,7 +221,7 @@ func TestEncryptedRecoveryBlobHasKeyedFingerprintWithoutPlaintextGitObject(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := protectedBlobFingerprint(ctx, r, w.Store, cipherID, key, identity, 0600)
+	got, err := protectedBlobFingerprint(ctx, r, w.Store, cipherID, key, identity, uint32(testutil.PrivatePerm()))
 	if err != nil || got != protectedFingerprint(worktree) {
 		t.Fatalf("keyed recovery fingerprint: got %+v, want %+v: %v", got, protectedFingerprint(worktree), err)
 	}
@@ -229,7 +230,7 @@ func TestEncryptedRecoveryBlobHasKeyedFingerprintWithoutPlaintextGitObject(t *te
 		t.Fatalf("keyed recovery evidence: %+v, digest %q, size %d: %v", worktree, digest, size, err)
 	}
 	identity.Path = "other"
-	if _, err := protectedBlobFingerprint(ctx, r, w.Store, cipherID, key, identity, 0600); err == nil {
+	if _, err := protectedBlobFingerprint(ctx, r, w.Store, cipherID, key, identity, uint32(testutil.PrivatePerm())); err == nil {
 		t.Fatal("recovery ciphertext accepted for another path")
 	}
 }

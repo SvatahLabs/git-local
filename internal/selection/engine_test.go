@@ -52,9 +52,9 @@ func paths(p Plan) []string {
 func TestLiteralPathsAndFutureExclusions(t *testing.T) {
 	r, e := fixture(t)
 	ctx := context.Background()
-	names := []string{"notes/private.txt", "notes/space name", "notes/café", "notes/-dash", "notes/with\ttab"}
+	names := []string{"notes/private.txt", "notes/space name", "notes/café", "notes/-dash"}
 	if runtime.GOOS != "windows" {
-		names = append(names, "notes/literal*?[x]")
+		names = append(names, "notes/with\ttab", "notes/literal*?[x]")
 	}
 	for _, p := range names {
 		write(t, r, p)
@@ -216,9 +216,12 @@ func TestCaseAliasesAndUnexpectedNames(t *testing.T) {
 	if _, err := e.Validate(ctx, s); err == nil {
 		t.Fatal("alias bypassed exclusion")
 	}
-	write(t, r, "notes/unsafe\nname")
-	if _, err := e.PlanTrack(ctx, Empty(), r.Root, "notes"); err == nil {
-		t.Fatal("accepted unsupported filename")
+	// Windows can't hold a newline in a filename.
+	if runtime.GOOS != "windows" {
+		write(t, r, "notes/unsafe\nname")
+		if _, err := e.PlanTrack(ctx, Empty(), r.Root, "notes"); err == nil {
+			t.Fatal("accepted unsupported filename")
+		}
 	}
 	r.Commit()
 	if _, err := e.PlanTrack(ctx, Empty(), r.Root, "APP.TXT"); err == nil {

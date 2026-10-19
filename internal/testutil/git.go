@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -146,7 +147,38 @@ func New(t testing.TB) *Repo {
 		t.Logf("fixture ref format: %s", RefFormat)
 	}
 	r.Git(append([]string{"init", "-q", "-b", "main", "--template="}, RefFormatArgs()...)...)
+	r.lineEndings()
 	return r
+}
+
+// TempDir is t.TempDir without symlinks and, on Windows, in its long form:
+// TEMP can name a folder by its 8.3 short name (RUNNER~1), and git-local
+// names paths in their long form.
+func TempDir(t testing.TB) string {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// PrivatePerm is the permission a private (0600) file reports: Windows has no
+// permission bits, and Go reports a writable file there as 0666.
+func PrivatePerm() os.FileMode {
+	if runtime.GOOS == "windows" {
+		return 0666
+	}
+	return 0600
+}
+
+// lineEndings turns off core.autocrlf on Windows, where Git sets it in the
+// system configuration that git-local reads: it converts the fixtures' line
+// endings, and overlays refuse it, as Windows users of overlays must too.
+func (r *Repo) lineEndings() {
+	if runtime.GOOS == "windows" {
+		r.Git("config", "core.autocrlf", "false")
+	}
 }
 
 // NewReftable is New with Git's reftable ref backend: refs/heads is then a
@@ -159,15 +191,24 @@ func NewReftable(t testing.TB) *Repo {
 		t.Fatal(err)
 	}
 	r.Git("init", "-q", "-b", "main", "--template=", "--ref-format=reftable")
+	r.lineEndings()
 	return r
 }
 
 func (r *Repo) Git(args ...string) []byte { return r.At(r.Root, args...) }
 func (r *Repo) At(cwd string, args ...string) []byte {
 	r.T.Helper()
+	return r.Input(cwd, "", args...)
+}
+
+// Input runs a fixture Git command in cwd with stdin, for input too long for
+// a command line (Windows allows 32,767 characters).
+func (r *Repo) Input(cwd, stdin string, args ...string) []byte {
+	r.T.Helper()
 	cmd := exec.Command(r.GitPath, args...)
 	cmd.Dir = cwd
 	cmd.Env = r.Env
+	cmd.Stdin = strings.NewReader(stdin)
 	b, err := cmd.CombinedOutput()
 	if err != nil {
 		r.T.Fatalf("fixture git %v: %v\n%s", args, err, b)

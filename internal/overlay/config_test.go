@@ -129,7 +129,7 @@ func TestFilterConfigUsesGitConfigQuoting(t *testing.T) {
 		t.Fatalf("installed command did not round-trip: %v %q", err, command)
 	}
 	for _, bad := range []string{"tab\there", "bell\x07", "del\x7f"} {
-		if _, err := FilterConfig(filepath.Join(root, bad, "git-local")); err == nil || !strings.Contains(err.Error(), "control character") {
+		if _, err := FilterConfig(filepath.Join(root, bad, "git-local.exe")); err == nil || !strings.Contains(err.Error(), "control character") {
 			t.Fatalf("accepted control character in %q: %v", bad, err)
 		}
 	}

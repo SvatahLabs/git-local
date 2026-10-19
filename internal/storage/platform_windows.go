@@ -31,7 +31,7 @@ func inspectHandle(h windows.Handle) error {
 		return err
 	}
 	if info.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-		return errors.New("reparse points are unsupported")
+		return ErrReparsePoint
 	}
 	if info.FileAttributes&windows.FILE_ATTRIBUTE_DIRECTORY == 0 && info.NumberOfLinks != 1 {
 		return errors.New("hard-linked files are unsupported")
@@ -300,7 +300,9 @@ func (d *Dir) ReadLink(name string) (string, error) {
 	if info.Tag != windows.IO_REPARSE_TAG_SYMLINK {
 		return "", errors.New("only symbolic links may be captured; junctions and other reparse points are unsupported")
 	}
-	return d.root.Readlink(name)
+	target, err := d.root.Readlink(name)
+	// Git for Windows records a symlink target with forward slashes.
+	return filepath.ToSlash(target), err
 }
 
 func (d *Dir) RemoveDirectory(name string) error {

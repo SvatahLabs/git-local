@@ -28,6 +28,10 @@ import (
 
 var ErrConflict = errors.New("conflict or recovery required")
 
+// ErrReparsePoint is Windows' refusal of a symlink or other reparse point in
+// a path, where other systems fail with ELOOP.
+var ErrReparsePoint = errors.New("reparse points are unsupported")
+
 func UUID() (string, error) {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {

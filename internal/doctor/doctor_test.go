@@ -59,7 +59,9 @@ func durable(t *testing.T, root string) map[string]string {
 		if e != nil {
 			return e
 		}
-		fi, e := d.Info()
+		// Not d.Info(): on Windows it reads the parent folder's copy of a
+		// directory's times, which NTFS updates lazily.
+		fi, e := os.Lstat(p)
 		if e != nil {
 			return e
 		}
@@ -159,7 +161,7 @@ func TestDoctorReportsPendingAndCorruptJournal(t *testing.T) {
 func TestDoctorAcceptsCompletedRestoreFromOtherAndRetiredWorkspace(t *testing.T) {
 	repo, r, main := fixture(t)
 	linked := filepath.Join(t.TempDir(), "linked")
-	repo.Git("worktree", "add", "-q", "-b", "aux", linked)
+	repo.Git("worktree", "add", "-q", "-b", "side", linked)
 	other, err := workspace.Init(ctx, r, linked)
 	if err != nil {
 		t.Fatal(err)
@@ -648,8 +650,8 @@ func TestGuardsFindingNamesThePendingTransactionsNextStep(t *testing.T) {
 // silent while they agree.
 func TestDoctorWarnsWhenWorktreesDisagreeOnIgnoreCase(t *testing.T) {
 	repo, r, _ := fixture(t)
-	linked := filepath.Join(t.TempDir(), "linked")
-	repo.Git("worktree", "add", "-q", "-b", "aux", linked)
+	linked := filepath.Join(testutil.TempDir(t), "linked")
+	repo.Git("worktree", "add", "-q", "-b", "side", linked)
 	if _, err := workspace.Init(ctx, r, linked); err != nil {
 		t.Fatal(err)
 	}
@@ -688,9 +690,9 @@ func TestDoctorWarnsWhenWorktreesDisagreeOnIgnoreCase(t *testing.T) {
 // parse.
 func TestDoctorIgnoreCaseReadFailureNamesTheWorktree(t *testing.T) {
 	repo, r, _ := fixture(t)
-	linked := filepath.Join(t.TempDir(), "linked")
-	odd := filepath.Join(t.TempDir(), "odd")
-	repo.Git("worktree", "add", "-q", "-b", "aux", linked)
+	linked := filepath.Join(testutil.TempDir(t), "linked")
+	odd := filepath.Join(testutil.TempDir(t), "odd")
+	repo.Git("worktree", "add", "-q", "-b", "side", linked)
 	repo.Git("worktree", "add", "-q", "-b", "odd", odd)
 	for _, root := range []string{linked, odd} {
 		if _, err := workspace.Init(ctx, r, root); err != nil {

@@ -532,7 +532,7 @@ func TestCleanRestoreAndRetainedWorktreeExample(t *testing.T) {
 	}
 
 	linked := filepath.Join(t.TempDir(), "linked")
-	repo.Git("worktree", "add", "-q", "-b", "aux", linked)
+	repo.Git("worktree", "add", "-q", "-b", "side", linked)
 	initialized := successful(t, linked, "init")
 	lines := strings.Split(initialized, "\n")
 	fields := strings.Fields(lines[0])

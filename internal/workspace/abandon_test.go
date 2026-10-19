@@ -66,7 +66,7 @@ func TestAbandonInitOfRemovedWorktree(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			linked := filepath.Join(t.TempDir(), "linked")
+			linked := filepath.Join(testutil.TempDir(t), "linked")
 			r.Git("worktree", "add", "-q", "-b", "linked", linked)
 			if _, err := initialize(ctx, g, linked, func(at string) error {
 				if at == tc.stop {

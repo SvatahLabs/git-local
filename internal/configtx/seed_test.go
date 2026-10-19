@@ -12,6 +12,7 @@ import (
 
 	"github.com/SvatahLabs/git-local/internal/selection"
 	"github.com/SvatahLabs/git-local/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/testutil"
 	"github.com/SvatahLabs/git-local/internal/workspace"
 )
 
@@ -138,7 +139,7 @@ func TestSeedRecoveryReplacesInterruptedStage(t *testing.T) {
 					}
 					stage := filepath.Join(linked, filepath.FromSlash(j.Files[0].Stage))
 					info, err := os.Lstat(stage)
-					if err != nil || info.Mode().Perm() != 0600 {
+					if err != nil || info.Mode().Perm() != testutil.PrivatePerm() {
 						t.Fatalf("expected an interrupted 0600 stage: %v %v", info, err)
 					}
 					if _, err := RecoverSeed(ctx, r, linked, result.TransactionID, rollback); err != nil {

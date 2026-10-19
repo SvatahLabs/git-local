@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -273,6 +274,11 @@ func (r *Runner) controls() []string {
 	args := []string{"--no-pager", "--no-optional-locks"}
 	for _, c := range []string{"core.fsmonitor=false", "core.hooksPath=" + filepath.Join(r.private, "hooks"), "protocol.allow=never", "protocol.file.allow=never", "protocol.ext.allow=never", "protocol.http.allow=never", "protocol.https.allow=never", "protocol.ssh.allow=never", "protocol.git.allow=never", "maintenance.auto=false", "gc.auto=0", "commit.gpgSign=false", "tag.gpgSign=false", "core.askPass=", "credential.helper=", "diff.external=", "core.quotePath=true"} {
 		args = append(args, "-c", c)
+	}
+	// Git for Windows refuses paths over 260 characters unless core.longpaths
+	// is set, and refs in the private store alone take about 180.
+	if runtime.GOOS == "windows" {
+		args = append(args, "-c", "core.longpaths=true")
 	}
 	return args
 }

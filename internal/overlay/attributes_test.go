@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -19,7 +20,10 @@ func TestManagedAttributesPreserveUserBytesAndMatchLiteralNames(t *testing.T) {
 		t.Fatalf("init: %v %s", err, out)
 	}
 	user := []byte("*.txt custom=user\n# trailing user comment\n")
-	paths := []string{"config/space name", "config/star*name", "config/hash#name", "config/ümlaut"}
+	paths := []string{"config/space name", "config/hash#name", "config/ümlaut"}
+	if runtime.GOOS != "windows" { // Windows forbids * in names.
+		paths = append(paths, "config/star*name")
+	}
 	data, err := RenderAttributes(user, paths)
 	if err != nil {
 		t.Fatal(err)
@@ -63,7 +67,10 @@ func TestManagedAttributesUseGitQuotingForUnusualNames(t *testing.T) {
 	if out, err := exec.Command(git, "init", "-q", root).CombinedOutput(); err != nil {
 		t.Fatalf("init: %v %s", err, out)
 	}
-	paths := []string{"nbsp\u00a0name", "ideographic\u3000space", "zero\u200bwidth", "quote\"back", "tab\tname", "control\x01name", "del\x7fname"}
+	paths := []string{"nbsp\u00a0name", "ideographic\u3000space", "zero\u200bwidth", "tab\tname", "control\x01name", "del\x7fname"}
+	if runtime.GOOS != "windows" { // Windows forbids " in names.
+		paths = append(paths, "quote\"back")
+	}
 	data, err := RenderAttributes(nil, paths)
 	if err != nil {
 		t.Fatal(err)

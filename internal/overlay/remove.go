@@ -279,7 +279,7 @@ func renewTimes(root, path string) error {
 	info, err := files.Lstat(filepath.FromSlash(path))
 	// Missing, or under a symlink or a file in this checkout: Git has no
 	// stat of it cached here.
-	if os.IsNotExist(err) || errors.Is(err, syscall.ENOTDIR) || errors.Is(err, syscall.ELOOP) {
+	if os.IsNotExist(err) || errors.Is(err, syscall.ENOTDIR) || errors.Is(err, syscall.ELOOP) || errors.Is(err, storage.ErrReparsePoint) {
 		return nil
 	}
 	if err != nil {

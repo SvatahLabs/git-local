@@ -20,11 +20,11 @@ func restoreFolds(t *testing.T, n, owned int) int {
 	repo, r, _ := fixture(t)
 	root := repo.Root
 	blob := strings.TrimSpace(string(repo.Git("hash-object", "-w", "app.txt")))
-	args := []string{"update-index", "--add"}
+	var entries strings.Builder
 	for i := 0; i < owned; i++ {
-		args = append(args, "--cacheinfo", fmt.Sprintf("100644,%s,main/file-%05d", blob, i))
+		fmt.Fprintf(&entries, "100644 %s\tmain/file-%05d\n", blob, i)
 	}
-	repo.Git(args...)
+	repo.Input(root, entries.String(), "update-index", "--add", "--index-info")
 	for i := 0; i < n; i++ {
 		write(t, root, fmt.Sprintf("notes/file-%03d", i), "source")
 	}
