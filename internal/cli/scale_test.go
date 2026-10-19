@@ -14,7 +14,8 @@ import (
 // output capped well below their size (16 MiB in production, about 150k
 // tracked files), track, commit, status, diff and doctor still work.
 func TestLargeIndexAndTreeListingsExceedOutputCap(t *testing.T) {
-	t.Parallel()
+	// Not parallel: it lowers the package-wide gitexec.MaxOutput, which every
+	// other test's Git calls read.
 	repo := layoutRepo(t)
 	for i := 0; i < 400; i++ {
 		path := filepath.Join(repo.Root, "src", fmt.Sprintf("module-%03d", i/20), fmt.Sprintf("file-with-a-long-name-%04d.txt", i))
@@ -72,7 +73,8 @@ func TestLargeIndexAndTreeListingsExceedOutputCap(t *testing.T) {
 // cap; they're listings, so commit, status, log, show, diff, restore and doctor
 // still work with the cap enforced (GL-105).
 func TestLargeSnapshotListingsExceedOutputCap(t *testing.T) {
-	t.Parallel()
+	// Not parallel: it lowers the package-wide gitexec.MaxOutput, which every
+	// other test's Git calls read.
 	repo := layoutRepo(t)
 	saved := gitexec.MaxOutput
 	gitexec.MaxOutput = 8 << 10
