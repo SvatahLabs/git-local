@@ -21,8 +21,12 @@ type configState struct {
 	at    time.Time
 }
 
+// configNow is when a configState is read; a test moves it past the racy
+// margin of the seed's own configuration writes.
+var configNow = time.Now
+
 func (s *session) readConfigState(j Journal) (configState, error) {
-	state := configState{at: time.Now()}
+	state := configState{at: configNow()}
 	add := func(d *storage.Dir, name string) error {
 		info, err := d.Lstat(name)
 		if os.IsNotExist(err) {

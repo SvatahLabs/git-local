@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/SvatahLabs/git-local/internal/selection"
 	"github.com/SvatahLabs/git-local/internal/workspace"
@@ -47,6 +48,11 @@ func seedConfigReads(t *testing.T, n, rules int) int {
 	reads := 0
 	sourcesRead = func() { reads++ }
 	defer func() { sourcesRead = func() {} }()
+	// Read as if after the racy margin: else each file seeded within 50 ms of
+	// the seed's own configuration writes reads it again, as many as a slow
+	// machine seeds in that time.
+	configNow = func() time.Time { return time.Now().Add(time.Second) }
+	defer func() { configNow = time.Now }()
 	if _, err := Seed(ctx, r, linked, planner); err != nil {
 		t.Fatal(err)
 	}

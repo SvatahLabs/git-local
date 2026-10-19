@@ -449,6 +449,8 @@ func smokeHost(stage string, info manifest) error {
 		{git, "init", "-q", "-b", "main", "--template="},
 		{git, "config", "user.name", "Release Smoke"},
 		{git, "config", "user.email", "smoke@localhost"},
+		// Git for Windows sets core.autocrlf=true, which overlays refuse.
+		{git, "config", "core.autocrlf", "false"},
 	} {
 		if _, err := run(repo, command...); err != nil {
 			return err
