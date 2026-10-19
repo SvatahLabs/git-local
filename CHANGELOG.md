@@ -11,7 +11,11 @@ The first release meant for general use. It replaces the 0.1.4 test builds.
 
 - Release builds for macOS (Apple silicon and Intel), Linux and Windows
   (amd64 and arm64); each needs Git 2.50.1 or later. Building from source
-  needs Go 1.26 or later.
+  needs Go 1.26 or later; `go.mod` names toolchain go1.26.9, which Go
+  downloads when the installed one is older, so builds include the fixes for
+  GO-2026-6604 and the other Go 1.26.8 advisories. Dependencies are at
+  `golang.org/x/text` v0.41.0 (GO-2026-6629) and `golang.org/x/sys` v0.44.0
+  (GO-2026-5024); neither advisory was reachable.
 - The test suite runs on macOS on Apple silicon. CI for Linux, macOS and
   Windows is configured but hasn't run yet.
 - The Intel macOS build has only run under Rosetta on Apple silicon; the test
