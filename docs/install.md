@@ -59,7 +59,8 @@ git local --version
 The package isn't signed or notarized; check it with `gh attestation verify`
 as above, and open it from Finder with Control-click → Open, or install it
 with `installer` as shown, which doesn't consult Gatekeeper. A later version
-replaces it (package identifier `org.gitlocal.cli`). Use `git-local --help` for help: Git may route
+replaces it (package identifier `com.svatah.git-local`; test builds before
+1.0 used `org.gitlocal.cli`). Use `git-local --help` for help: Git may route
 `git local --help` to its manual-page lookup.
 
 ## Build from source
@@ -132,8 +133,9 @@ Delete `git-local` from `PATH`. For the macOS package:
 
 ```sh
 sudo rm /usr/local/bin/git-local
-sudo pkgutil --forget org.gitlocal.cli
+sudo pkgutil --forget com.svatah.git-local
 ```
 
-`pkgutil --forget` only drops the installer receipt. Removing the program
+A package from before 1.0 left the receipt `org.gitlocal.cli`; forget it the
+same way. `pkgutil --forget` only drops the installer receipt. Removing the program
 doesn't remove any repository's local history; use `deinit` for that.

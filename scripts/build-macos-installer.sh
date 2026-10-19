@@ -99,7 +99,7 @@ if ! /usr/bin/grep -q 'Available Commands:' "$work_dir/help.txt"; then
 fi
 
 COPYFILE_DISABLE=1 pkgbuild --root "$payload" --install-location / \
-  --identifier org.gitlocal.cli --version "$version" \
+  --identifier com.svatah.git-local --version "$version" \
   --ownership recommended "$staged_package"
 
 pkgutil --payload-files "$staged_package" > "$work_dir/payload-files.txt"

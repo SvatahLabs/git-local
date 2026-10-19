@@ -610,4 +610,4 @@ names the identity file to delete, deinit there refuses rather than remove the
 new state, and a deinit of the new state removes that file too.
 To remove the program itself, delete `git-local` from your `PATH`; for the
 macOS package, `sudo rm /usr/local/bin/git-local && sudo pkgutil --forget
-org.gitlocal.cli`.
+com.svatah.git-local` (`org.gitlocal.cli` for a package from before 1.0).

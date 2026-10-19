@@ -66,6 +66,9 @@ Licensed under Apache-2.0; the Go module path is
 
 ### Behavior changes
 
+- The macOS package identifier is `com.svatah.git-local` (0.1.4 used
+  `org.gitlocal.cli`). Installing it replaces `/usr/local/bin/git-local`;
+  `sudo pkgutil --forget org.gitlocal.cli` drops the old receipt.
 - `status` and snapshots hash files in process and skip files whose content
   the previous snapshot already holds, instead of starting a Git process per
   selected file: `status` on 20,000 files went from about 400 s to seconds.
