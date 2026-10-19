@@ -12,8 +12,8 @@ import (
 	"sort"
 	"strings"
 
-	"gitlocal/internal/gitexec"
-	"gitlocal/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/gitexec"
+	"github.com/SvatahLabs/git-local/internal/storage"
 )
 
 type GitReader interface {

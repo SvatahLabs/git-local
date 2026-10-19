@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"gitlocal/internal/storage"
-	"gitlocal/internal/workspace"
+	"github.com/SvatahLabs/git-local/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/workspace"
 )
 
 // TestUnreadableWorktreeIdentityIsNamed: abandoning an initialization journal

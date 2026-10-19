@@ -8,9 +8,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/SvatahLabs/git-local/internal/guard"
+	"github.com/SvatahLabs/git-local/internal/overlay"
 	"github.com/spf13/cobra"
-	"gitlocal/internal/guard"
-	"gitlocal/internal/overlay"
 )
 
 type jsonContextKey struct{}

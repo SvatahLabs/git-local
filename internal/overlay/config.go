@@ -10,7 +10,7 @@ import (
 	"runtime"
 	"strings"
 
-	"gitlocal/internal/gitexec"
+	"github.com/SvatahLabs/git-local/internal/gitexec"
 )
 
 const filterConfigName = "overlay-filter.gitconfig"

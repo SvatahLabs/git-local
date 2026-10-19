@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"gitlocal/internal/gitexec"
-	"gitlocal/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/gitexec"
+	"github.com/SvatahLabs/git-local/internal/storage"
 )
 
 const blobBatchFiles = 128

@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"gitlocal/internal/selection"
-	"gitlocal/internal/storage"
-	"gitlocal/internal/workspace"
+	"github.com/SvatahLabs/git-local/internal/selection"
+	"github.com/SvatahLabs/git-local/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/workspace"
 )
 
 // largeSeedPlanner plans n files under long directory names, so that their

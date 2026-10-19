@@ -14,11 +14,11 @@ import (
 	"testing"
 	"time"
 
-	"gitlocal/internal/configtx"
-	"gitlocal/internal/gitexec"
-	"gitlocal/internal/storage"
-	"gitlocal/internal/testutil"
-	"gitlocal/internal/workspace"
+	"github.com/SvatahLabs/git-local/internal/configtx"
+	"github.com/SvatahLabs/git-local/internal/gitexec"
+	"github.com/SvatahLabs/git-local/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/testutil"
+	"github.com/SvatahLabs/git-local/internal/workspace"
 )
 
 func fixture(t *testing.T) (*testutil.Repo, *gitexec.Runner, *workspace.Context) {

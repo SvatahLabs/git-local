@@ -11,8 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"gitlocal/internal/storage"
-	"gitlocal/internal/workspace"
+	"github.com/SvatahLabs/git-local/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/workspace"
 )
 
 // DecryptStaged authenticates an archive bound to ref and extracts it into a

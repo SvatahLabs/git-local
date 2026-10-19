@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"gitlocal/internal/selection"
-	"gitlocal/internal/storage"
-	"gitlocal/internal/workspace"
+	"github.com/SvatahLabs/git-local/internal/selection"
+	"github.com/SvatahLabs/git-local/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/workspace"
 )
 
 // seedInto prepares a linked worktree and a planner that seeds notes/a.

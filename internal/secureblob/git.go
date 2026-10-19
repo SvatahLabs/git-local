@@ -6,7 +6,7 @@ import (
 	"io"
 	"strings"
 
-	"gitlocal/internal/gitexec"
+	"github.com/SvatahLabs/git-local/internal/gitexec"
 )
 
 // EncryptGitBlob writes only authenticated ciphertext to the durable private

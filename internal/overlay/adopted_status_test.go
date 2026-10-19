@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"gitlocal/internal/testutil"
+	"github.com/SvatahLabs/git-local/internal/testutil"
 )
 
 // TestOverlayStatusNamesHunksAlreadyUpstream: a teammate commits one of the

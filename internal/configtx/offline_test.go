@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"gitlocal/internal/gitexec"
-	"gitlocal/internal/testutil"
-	"gitlocal/internal/workspace"
+	"github.com/SvatahLabs/git-local/internal/gitexec"
+	"github.com/SvatahLabs/git-local/internal/testutil"
+	"github.com/SvatahLabs/git-local/internal/workspace"
 )
 
 // TestOfflineWorktreeErrorsMakeItUnavailable injects the errors an offline

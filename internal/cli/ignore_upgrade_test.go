@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"gitlocal/internal/exclude"
-	"gitlocal/internal/selection"
-	"gitlocal/internal/testutil"
+	"github.com/SvatahLabs/git-local/internal/exclude"
+	"github.com/SvatahLabs/git-local/internal/selection"
+	"github.com/SvatahLabs/git-local/internal/testutil"
 )
 
 func TestInitRewritesUpgradedIgnoreBlockThatHidesAnExclusion(t *testing.T) {

@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"gitlocal/internal/gitexec"
-	"gitlocal/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/gitexec"
+	"github.com/SvatahLabs/git-local/internal/storage"
 )
 
 // Migrate repairs the shared filter installation of active overlays without

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"gitlocal/internal/selection"
-	"gitlocal/internal/workspace"
+	"github.com/SvatahLabs/git-local/internal/selection"
+	"github.com/SvatahLabs/git-local/internal/workspace"
 )
 
 // A seeded file's stage is published by a rename into its own directory,

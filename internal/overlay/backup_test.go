@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"gitlocal/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/storage"
 )
 
 func TestBackupArchivesAllOverlayVersionsAndRejectsCorruption(t *testing.T) {

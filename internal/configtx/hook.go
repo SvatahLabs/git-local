@@ -9,10 +9,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"gitlocal/internal/gitexec"
-	"gitlocal/internal/selection"
-	"gitlocal/internal/storage"
-	"gitlocal/internal/workspace"
+	"github.com/SvatahLabs/git-local/internal/gitexec"
+	"github.com/SvatahLabs/git-local/internal/selection"
+	"github.com/SvatahLabs/git-local/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/workspace"
 )
 
 type HookConflict struct {

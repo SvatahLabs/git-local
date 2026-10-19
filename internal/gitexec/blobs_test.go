@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"gitlocal/internal/testutil"
+	"github.com/SvatahLabs/git-local/internal/testutil"
 )
 
 // One cat-file process streams many blobs, byte for byte; a missing object

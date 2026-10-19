@@ -8,9 +8,9 @@ import (
 	"runtime"
 	"testing"
 
-	"gitlocal/internal/keymaterial"
-	"gitlocal/internal/secureblob"
-	"gitlocal/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/keymaterial"
+	"github.com/SvatahLabs/git-local/internal/secureblob"
+	"github.com/SvatahLabs/git-local/internal/storage"
 )
 
 func TestProtectedRestoreMixedDirectoryAndSymlink(t *testing.T) {

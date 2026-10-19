@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"gitlocal/internal/testutil"
+	"github.com/SvatahLabs/git-local/internal/testutil"
 )
 
 // Initialization resumes by running init again from its checkout; after the

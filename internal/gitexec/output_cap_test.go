@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"gitlocal/internal/testutil"
+	"github.com/SvatahLabs/git-local/internal/testutil"
 )
 
 // capFixture stages 400 files, so the index listing, the staged-name diff and

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"gitlocal/internal/exclude"
+	"github.com/SvatahLabs/git-local/internal/exclude"
 )
 
 // TestInitRewritesBlockDespiteUnrelatedSelectionProblem: an upgraded

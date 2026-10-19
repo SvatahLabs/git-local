@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"gitlocal/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/storage"
 )
 
 type Entry struct {

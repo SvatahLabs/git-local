@@ -5,7 +5,7 @@ import (
 	"context"
 	"strings"
 
-	"gitlocal/internal/gitexec"
+	"github.com/SvatahLabs/git-local/internal/gitexec"
 )
 
 // autocrlf returns the effective core.autocrlf when it converts line

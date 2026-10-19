@@ -6,6 +6,8 @@ rebuilt distributable always gets a new patch version.
 ## 1.0.0 (unreleased)
 
 The first release meant for general use. It replaces the 0.1.4 test builds.
+Licensed under Apache-2.0; the Go module path is
+`github.com/SvatahLabs/git-local` (the command stays `git local`).
 
 ### Supported platforms
 

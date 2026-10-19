@@ -6,8 +6,8 @@ import (
 	"os"
 	"path"
 
-	"gitlocal/internal/storage"
-	"gitlocal/internal/workspace"
+	"github.com/SvatahLabs/git-local/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/workspace"
 )
 
 // SeedListError reports a seed journal whose file list, kept beside it

@@ -11,9 +11,9 @@ import (
 	"strconv"
 	"strings"
 
-	"gitlocal/internal/gitexec"
-	"gitlocal/internal/history"
-	"gitlocal/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/gitexec"
+	"github.com/SvatahLabs/git-local/internal/history"
+	"github.com/SvatahLabs/git-local/internal/storage"
 )
 
 func inspectFile(ctx context.Context, r *gitexec.Runner, store string, files *storage.Dir, path string) (Fingerprint, error) {

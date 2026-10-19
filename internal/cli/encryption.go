@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/SvatahLabs/git-local/internal/encryption"
+	"github.com/SvatahLabs/git-local/internal/gitexec"
+	"github.com/SvatahLabs/git-local/internal/storage"
 	"github.com/spf13/cobra"
-	"gitlocal/internal/encryption"
-	"gitlocal/internal/gitexec"
-	"gitlocal/internal/storage"
 )
 
 func encryptionCommand() *cobra.Command {

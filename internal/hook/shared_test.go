@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"gitlocal/internal/testutil"
+	"github.com/SvatahLabs/git-local/internal/testutil"
 )
 
 // withHome points git-local at an isolated HOME whose .gitconfig is the global

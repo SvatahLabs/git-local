@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"gitlocal/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/storage"
 )
 
 const StoreConfig = "[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = true\n\tlogallrefupdates = false\n\tfsync = loose-object,reference\n\tfsyncMethod = fsync\n[gc]\n\tauto = 0\n[maintenance]\n\tauto = false\n"

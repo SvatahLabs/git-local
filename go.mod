@@ -1,4 +1,4 @@
-module gitlocal
+module github.com/SvatahLabs/git-local
 
 go 1.26.9
 

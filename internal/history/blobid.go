@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"gitlocal/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/storage"
 )
 
 // blobID computes the ID `git hash-object --no-filters` gives size bytes from

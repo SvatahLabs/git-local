@@ -13,9 +13,9 @@ import (
 	"strings"
 	"time"
 
-	"gitlocal/internal/gitexec"
-	"gitlocal/internal/selection"
-	"gitlocal/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/gitexec"
+	"github.com/SvatahLabs/git-local/internal/selection"
+	"github.com/SvatahLabs/git-local/internal/storage"
 )
 
 type historyGit interface {

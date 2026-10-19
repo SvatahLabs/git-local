@@ -10,8 +10,8 @@ import (
 	"sort"
 	"strings"
 
-	"gitlocal/internal/selection"
-	"gitlocal/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/selection"
+	"github.com/SvatahLabs/git-local/internal/storage"
 )
 
 type Fingerprint struct {

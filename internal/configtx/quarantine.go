@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"gitlocal/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/storage"
 )
 
 // QuarantineDir holds bytes an abandoned transaction would otherwise delete

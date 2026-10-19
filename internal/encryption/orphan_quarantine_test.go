@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"gitlocal/internal/doctor"
-	"gitlocal/internal/restore"
-	"gitlocal/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/doctor"
+	"github.com/SvatahLabs/git-local/internal/restore"
+	"github.com/SvatahLabs/git-local/internal/storage"
 )
 
 // After an encryption abandon quarantined a restore's completed journal, the

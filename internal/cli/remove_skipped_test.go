@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"gitlocal/internal/keymaterial"
-	"gitlocal/internal/secureblob"
-	"gitlocal/internal/storage"
-	"gitlocal/internal/testutil"
+	"github.com/SvatahLabs/git-local/internal/keymaterial"
+	"github.com/SvatahLabs/git-local/internal/secureblob"
+	"github.com/SvatahLabs/git-local/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/testutil"
 )
 
 // skippedRemoveFixture gives a linked worktree seeded with notes/Secret.txt

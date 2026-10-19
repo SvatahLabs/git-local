@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"gitlocal/internal/secureblob"
+	"github.com/SvatahLabs/git-local/internal/secureblob"
 )
 
 // While a transaction is pending, encrypt rebind-key refuses, so a recovery

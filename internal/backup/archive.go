@@ -11,8 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"gitlocal/internal/configtx"
-	"gitlocal/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/configtx"
+	"github.com/SvatahLabs/git-local/internal/storage"
 )
 
 // PackEncrypted streams Git Local's common state and the source checkout's

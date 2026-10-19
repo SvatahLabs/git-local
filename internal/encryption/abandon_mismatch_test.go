@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	"gitlocal/internal/configtx"
-	"gitlocal/internal/restore"
-	"gitlocal/internal/storage"
-	"gitlocal/internal/testutil"
+	"github.com/SvatahLabs/git-local/internal/configtx"
+	"github.com/SvatahLabs/git-local/internal/restore"
+	"github.com/SvatahLabs/git-local/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/testutil"
 )
 
 // TestAbandonWithoutKeyQuarantinesMismatchedJournal: after publication,

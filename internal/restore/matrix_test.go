@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"gitlocal/internal/configtx"
-	"gitlocal/internal/gitexec"
-	"gitlocal/internal/testutil"
+	"github.com/SvatahLabs/git-local/internal/configtx"
+	"github.com/SvatahLabs/git-local/internal/gitexec"
+	"github.com/SvatahLabs/git-local/internal/testutil"
 )
 
 // copyTree copies a fixture repository, so each matrix case starts from the

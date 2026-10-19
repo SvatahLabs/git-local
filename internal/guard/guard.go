@@ -11,10 +11,10 @@ import (
 	"strconv"
 	"strings"
 
-	"gitlocal/internal/configtx"
-	"gitlocal/internal/gitexec"
-	"gitlocal/internal/overlay"
-	"gitlocal/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/configtx"
+	"github.com/SvatahLabs/git-local/internal/gitexec"
+	"github.com/SvatahLabs/git-local/internal/overlay"
+	"github.com/SvatahLabs/git-local/internal/storage"
 )
 
 type Finding struct {

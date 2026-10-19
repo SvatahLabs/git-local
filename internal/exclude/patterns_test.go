@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"gitlocal/internal/gitexec"
-	"gitlocal/internal/selection"
-	"gitlocal/internal/testutil"
+	"github.com/SvatahLabs/git-local/internal/gitexec"
+	"github.com/SvatahLabs/git-local/internal/selection"
+	"github.com/SvatahLabs/git-local/internal/testutil"
 )
 
 func state(include []selection.Rule, excluded ...string) selection.State {

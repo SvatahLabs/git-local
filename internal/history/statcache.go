@@ -9,9 +9,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"gitlocal/internal/selection"
-	"gitlocal/internal/storage"
-	"gitlocal/internal/workspace"
+	"github.com/SvatahLabs/git-local/internal/selection"
+	"github.com/SvatahLabs/git-local/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/workspace"
 )
 
 // StatCacheDir holds, in the private state directory, one stat cache per

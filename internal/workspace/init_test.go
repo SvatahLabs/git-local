@@ -9,9 +9,9 @@ import (
 	"reflect"
 	"testing"
 
-	"gitlocal/internal/gitexec"
-	"gitlocal/internal/storage"
-	"gitlocal/internal/testutil"
+	"github.com/SvatahLabs/git-local/internal/gitexec"
+	"github.com/SvatahLabs/git-local/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/testutil"
 )
 
 func runner(t *testing.T, r *testutil.Repo) *gitexec.Runner {

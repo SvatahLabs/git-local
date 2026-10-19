@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"gitlocal/internal/gitexec"
-	"gitlocal/internal/workspace"
+	"github.com/SvatahLabs/git-local/internal/gitexec"
+	"github.com/SvatahLabs/git-local/internal/workspace"
 )
 
 func validRemoteName(name string) bool {

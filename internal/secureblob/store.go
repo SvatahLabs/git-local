@@ -4,7 +4,7 @@ import (
 	"errors"
 	"os"
 
-	"gitlocal/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/storage"
 )
 
 const PolicyFile = "gitlocal/encryption.json"

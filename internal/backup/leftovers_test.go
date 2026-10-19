@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"gitlocal/internal/gitexec"
-	"gitlocal/internal/history"
-	"gitlocal/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/gitexec"
+	"github.com/SvatahLabs/git-local/internal/history"
+	"github.com/SvatahLabs/git-local/internal/storage"
 )
 
 // A crash can leave temporary files from atomic writes and the stores of an

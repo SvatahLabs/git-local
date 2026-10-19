@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"gitlocal/internal/history"
-	"gitlocal/internal/testutil"
+	"github.com/SvatahLabs/git-local/internal/history"
+	"github.com/SvatahLabs/git-local/internal/testutil"
 )
 
 // restoreProcesses restores n changed files in a repository from newRepo and

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"gitlocal/internal/testutil"
+	"github.com/SvatahLabs/git-local/internal/testutil"
 )
 
 // layoutRepo is an initialized main checkout with an isolated HOME.

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"gitlocal/internal/testutil"
+	"github.com/SvatahLabs/git-local/internal/testutil"
 )
 
 func TestLeftoverStageFileIsIgnoredAndGuarded(t *testing.T) {

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"gitlocal/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/storage"
 )
 
 // A journal encode accepts must be readable: exactly journalLimit bytes on

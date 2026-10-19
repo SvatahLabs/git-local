@@ -9,11 +9,11 @@ import (
 	"io"
 	"strings"
 
-	"gitlocal/internal/gitexec"
-	"gitlocal/internal/history"
-	"gitlocal/internal/secureblob"
-	"gitlocal/internal/storage"
-	"gitlocal/internal/workspace"
+	"github.com/SvatahLabs/git-local/internal/gitexec"
+	"github.com/SvatahLabs/git-local/internal/history"
+	"github.com/SvatahLabs/git-local/internal/secureblob"
+	"github.com/SvatahLabs/git-local/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/workspace"
 )
 
 type RecoveryMigrationIdentity struct {

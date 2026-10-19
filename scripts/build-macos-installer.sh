@@ -64,7 +64,7 @@ staged_package="$stage_dir/$package_name"
 cd "$repo_root"
 for arch in arm64 amd64; do
   GOWORK=off CGO_ENABLED=0 GOOS=darwin GOARCH="$arch" "$go_bin" build \
-    -trimpath -buildvcs=false -ldflags="-buildid= -X gitlocal/internal/cli.Version=$version -X gitlocal/internal/cli.Commit=$commit" \
+    -trimpath -buildvcs=false -ldflags="-buildid= -X github.com/SvatahLabs/git-local/internal/cli.Version=$version -X github.com/SvatahLabs/git-local/internal/cli.Commit=$commit" \
     -o "$work_dir/git-local-$arch" ./cmd/git-local
 done
 

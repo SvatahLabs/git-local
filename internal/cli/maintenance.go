@@ -3,9 +3,9 @@ package cli
 import (
 	"fmt"
 
+	"github.com/SvatahLabs/git-local/internal/gitexec"
+	"github.com/SvatahLabs/git-local/internal/history"
 	"github.com/spf13/cobra"
-	"gitlocal/internal/gitexec"
-	"gitlocal/internal/history"
 )
 
 func maintenanceCommand() *cobra.Command {

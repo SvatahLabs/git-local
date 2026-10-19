@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"gitlocal/internal/testutil"
+	"github.com/SvatahLabs/git-local/internal/testutil"
 )
 
 // TestOverlayOfRemovedWorktreeCanBeRemoved: a linked worktree adds an overlay

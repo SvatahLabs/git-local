@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"gitlocal/internal/secureblob"
-	"gitlocal/internal/selection"
-	"gitlocal/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/secureblob"
+	"github.com/SvatahLabs/git-local/internal/selection"
+	"github.com/SvatahLabs/git-local/internal/storage"
 )
 
 // sensitiveRules takes each rule's kind from an exact selection include rule,

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"gitlocal/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/storage"
 )
 
 // GL-119: a restore stopped at a preserved external edit, or at staging bytes

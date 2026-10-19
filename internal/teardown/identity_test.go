@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"gitlocal/internal/gitexec"
-	"gitlocal/internal/storage"
-	"gitlocal/internal/testutil"
-	"gitlocal/internal/workspace"
+	"github.com/SvatahLabs/git-local/internal/gitexec"
+	"github.com/SvatahLabs/git-local/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/testutil"
+	"github.com/SvatahLabs/git-local/internal/workspace"
 )
 
 // GL-118: git local init in another worktree after deinit set the private

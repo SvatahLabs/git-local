@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"gitlocal/internal/cli"
+	"github.com/SvatahLabs/git-local/internal/cli"
 	"os"
 	"os/signal"
 )

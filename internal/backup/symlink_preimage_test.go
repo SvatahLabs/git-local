@@ -10,15 +10,15 @@ import (
 	"path/filepath"
 	"testing"
 
-	"gitlocal/internal/configtx"
-	"gitlocal/internal/encryption"
-	"gitlocal/internal/gitexec"
-	"gitlocal/internal/history"
-	"gitlocal/internal/keymaterial"
-	"gitlocal/internal/restore"
-	"gitlocal/internal/selection"
-	"gitlocal/internal/testutil"
-	"gitlocal/internal/workspace"
+	"github.com/SvatahLabs/git-local/internal/configtx"
+	"github.com/SvatahLabs/git-local/internal/encryption"
+	"github.com/SvatahLabs/git-local/internal/gitexec"
+	"github.com/SvatahLabs/git-local/internal/history"
+	"github.com/SvatahLabs/git-local/internal/keymaterial"
+	"github.com/SvatahLabs/git-local/internal/restore"
+	"github.com/SvatahLabs/git-local/internal/selection"
+	"github.com/SvatahLabs/git-local/internal/testutil"
+	"github.com/SvatahLabs/git-local/internal/workspace"
 )
 
 // TestSymlinkRestoreSurvivesMigrationAndBackupAdoption: a restore that

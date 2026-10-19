@@ -1,5 +1,8 @@
 # Git Local
 
+**Private, versioned history for the files you and your coding agents keep
+out of Git.**
+
 An external Git command for maintaining independent local history of selected
 project files without adding that history to the project's commits or pushes.
 
@@ -17,6 +20,19 @@ macOS on Apple silicon. CI for Linux, macOS and Windows is configured but hasn't
 run yet. The Intel macOS build has only run under Rosetta, and Windows has
 never run natively, so neither is qualified.
 See the [changelog](CHANGELOG.md) for what changed and the known limitations.
+
+## For coding agents
+
+Agent instructions and session files (`CLAUDE.local.md`, `AGENTS.md` notes,
+local prompts, scratch plans, handovers) usually belong to one developer, not
+to the project, so they stay untracked and their history is lost. With
+`git local track CLAUDE.local.md .agents/` they keep their own snapshots in
+`.git` and can be diffed and restored like any other history. With the
+guards (`git local hook install`) they can't reach a mainline commit or push
+by accident, and with automatic snapshots (`git local auto install`) each new
+worktree an agent creates is seeded with them. An agent uses the same verbs
+it uses for Git (`git local status`, `log`, `diff`, `restore`), and every
+command takes `--json` for scripts.
 
 ## Install
 
@@ -59,7 +75,7 @@ required Git behavior using disposable local fixtures; it performs no external
 network operations.
 
 ```sh
-go test -race -parallel 4 -timeout 20m ./...
+go test -race -parallel 4 -timeout 30m ./...
 go vet ./...
 go build -o bin/git-local ./cmd/git-local
 ./bin/git-local --version
@@ -67,5 +83,9 @@ go build -o bin/git-local ./cmd/git-local
 
 The version lives in the `VERSION` file and the minimum Git version in
 `gitexec.MinimumGit`; the release scripts and CI read them from there.
-The Go module path remains `gitlocal` until the published repository is chosen.
+The Go module path is `github.com/SvatahLabs/git-local`.
 Dependencies are Cobra plus Go's platform syscall and Unicode libraries.
+
+## License
+
+Apache License 2.0; see [LICENSE](LICENSE) and [NOTICE](NOTICE).

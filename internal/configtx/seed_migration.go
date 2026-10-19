@@ -4,8 +4,8 @@ import (
 	"errors"
 	"fmt"
 
-	"gitlocal/internal/secureblob"
-	"gitlocal/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/secureblob"
+	"github.com/SvatahLabs/git-local/internal/storage"
 )
 
 // SeedFileMigration maps a completed seed journal's source file to the same

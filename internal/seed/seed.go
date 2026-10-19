@@ -9,12 +9,12 @@ import (
 	"path/filepath"
 	"sort"
 
-	"gitlocal/internal/configtx"
-	"gitlocal/internal/gitexec"
-	"gitlocal/internal/history"
-	"gitlocal/internal/selection"
-	"gitlocal/internal/storage"
-	"gitlocal/internal/workspace"
+	"github.com/SvatahLabs/git-local/internal/configtx"
+	"github.com/SvatahLabs/git-local/internal/gitexec"
+	"github.com/SvatahLabs/git-local/internal/history"
+	"github.com/SvatahLabs/git-local/internal/selection"
+	"github.com/SvatahLabs/git-local/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/workspace"
 )
 
 func mainWorkspace(ctx context.Context, r *gitexec.Runner, w workspace.Context) (string, error) {

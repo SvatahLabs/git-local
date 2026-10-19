@@ -11,7 +11,7 @@ import (
 	"regexp"
 	"strings"
 
-	"gitlocal/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/storage"
 )
 
 const recordSchema = 1

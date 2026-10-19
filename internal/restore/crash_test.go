@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"gitlocal/internal/configtx"
-	"gitlocal/internal/gitexec"
+	"github.com/SvatahLabs/git-local/internal/configtx"
+	"github.com/SvatahLabs/git-local/internal/gitexec"
 )
 
 // Real process death deliberately bypasses defers and exercises ambiguous durable

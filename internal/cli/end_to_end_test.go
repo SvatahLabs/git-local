@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"gitlocal/internal/gitexec"
-	"gitlocal/internal/history"
-	"gitlocal/internal/storage"
-	"gitlocal/internal/testutil"
+	"github.com/SvatahLabs/git-local/internal/gitexec"
+	"github.com/SvatahLabs/git-local/internal/history"
+	"github.com/SvatahLabs/git-local/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/testutil"
 )
 
 func successful(t *testing.T, cwd string, args ...string) string {

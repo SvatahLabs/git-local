@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"gitlocal/internal/configtx"
-	"gitlocal/internal/gitexec"
+	"github.com/SvatahLabs/git-local/internal/configtx"
+	"github.com/SvatahLabs/git-local/internal/gitexec"
 )
 
 // stoppedRestore leaves a restore of notes/a stopped at an external edit it

@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"gitlocal/internal/keymaterial"
-	"gitlocal/internal/secureblob"
-	"gitlocal/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/keymaterial"
+	"github.com/SvatahLabs/git-local/internal/secureblob"
+	"github.com/SvatahLabs/git-local/internal/storage"
 )
 
 func TestRestoreOfAliasedPathWritesNoNewPlaintext(t *testing.T) {

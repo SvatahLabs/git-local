@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"gitlocal/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/storage"
 )
 
 const attrBegin = "# >>> git-local managed overlays >>>\n"

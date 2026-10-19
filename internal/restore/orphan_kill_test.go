@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"gitlocal/internal/configtx"
-	"gitlocal/internal/history"
-	"gitlocal/internal/secureblob"
+	"github.com/SvatahLabs/git-local/internal/configtx"
+	"github.com/SvatahLabs/git-local/internal/history"
+	"github.com/SvatahLabs/git-local/internal/secureblob"
 )
 
 // TestRestoreKilledBeforeJournalIsAbandonable kills a restore subprocess after

@@ -10,9 +10,9 @@ import (
 	"strconv"
 	"strings"
 
-	"gitlocal/internal/gitexec"
-	"gitlocal/internal/storage"
-	"gitlocal/internal/workspace"
+	"github.com/SvatahLabs/git-local/internal/gitexec"
+	"github.com/SvatahLabs/git-local/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/workspace"
 )
 
 // Registered lists every overlay of every workspace that isn't removed,

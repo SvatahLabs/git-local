@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"gitlocal/internal/testutil"
+	"github.com/SvatahLabs/git-local/internal/testutil"
 )
 
 // TestGuardRefusesHookRunForAnotherRepository: with git --git-dir=A

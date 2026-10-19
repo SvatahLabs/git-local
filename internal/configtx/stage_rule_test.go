@@ -6,8 +6,8 @@ import (
 	"os"
 	"testing"
 
-	"gitlocal/internal/exclude"
-	"gitlocal/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/exclude"
+	"github.com/SvatahLabs/git-local/internal/storage"
 )
 
 func TestStageRuleSurvivesUntrackingEverything(t *testing.T) {

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"gitlocal/internal/storage"
-	"gitlocal/internal/testutil"
+	"github.com/SvatahLabs/git-local/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/testutil"
 )
 
 func TestInitChecksOtherWorktreesBeforeWritingItsJournal(t *testing.T) {

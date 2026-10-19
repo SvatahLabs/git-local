@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"gitlocal/internal/exclude"
-	"gitlocal/internal/testutil"
+	"github.com/SvatahLabs/git-local/internal/exclude"
+	"github.com/SvatahLabs/git-local/internal/testutil"
 )
 
 // TestInitWritesStageRuleWithoutSelections: 0.1.4 wrote no managed block for

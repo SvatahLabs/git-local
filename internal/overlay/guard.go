@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"gitlocal/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/storage"
 )
 
 // HasAny reports whether this repository has an overlay registration. Doctor

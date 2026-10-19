@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"gitlocal/internal/testutil"
+	"github.com/SvatahLabs/git-local/internal/testutil"
 )
 
 // GL-132: the package's tests run a second time on the reftable ref backend.

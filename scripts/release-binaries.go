@@ -22,7 +22,7 @@ import (
 	"strings"
 	"syscall"
 
-	"gitlocal/internal/gitexec"
+	"github.com/SvatahLabs/git-local/internal/gitexec"
 )
 
 type target struct{ OS, Arch string }
@@ -129,7 +129,7 @@ func run(root string, args []string) error {
 	for _, platform := range selected {
 		name := artifactName(version, platform)
 		path := filepath.Join(stage, name)
-		cmd := exec.CommandContext(interrupted, *goBinary, "build", "-trimpath", "-buildvcs=false", "-ldflags=-buildid= -X gitlocal/internal/cli.Version="+version+" -X gitlocal/internal/cli.Commit="+info.SourceRevision, "-o", path, "./cmd/git-local")
+		cmd := exec.CommandContext(interrupted, *goBinary, "build", "-trimpath", "-buildvcs=false", "-ldflags=-buildid= -X github.com/SvatahLabs/git-local/internal/cli.Version="+version+" -X github.com/SvatahLabs/git-local/internal/cli.Commit="+info.SourceRevision, "-o", path, "./cmd/git-local")
 		cmd.Dir = root
 		cmd.Env = buildEnv(platform)
 		if output, err := cmd.CombinedOutput(); err != nil {

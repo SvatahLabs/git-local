@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"gitlocal/internal/testutil"
+	"github.com/SvatahLabs/git-local/internal/testutil"
 )
 
 // TestOverlayGuardChecksBackslashAliasSpelling stages content under conf\app.conf,

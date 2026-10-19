@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"gitlocal/internal/testutil"
+	"github.com/SvatahLabs/git-local/internal/testutil"
 )
 
 // GL-132: deinit's end-to-end tests run a second time on the reftable ref

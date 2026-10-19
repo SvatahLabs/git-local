@@ -9,8 +9,8 @@ import (
 	"sort"
 	"strings"
 
-	"gitlocal/internal/selection"
-	"gitlocal/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/selection"
+	"github.com/SvatahLabs/git-local/internal/storage"
 )
 
 const Begin = "# >>> git-local managed exclusions >>>\n"

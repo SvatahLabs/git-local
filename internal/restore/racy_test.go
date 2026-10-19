@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"gitlocal/internal/selection"
+	"github.com/SvatahLabs/git-local/internal/selection"
 
 	"golang.org/x/sys/unix"
 )

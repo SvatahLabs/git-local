@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"gitlocal/internal/testutil"
+	"github.com/SvatahLabs/git-local/internal/testutil"
 )
 
 // repeating is an endless reader of one line.

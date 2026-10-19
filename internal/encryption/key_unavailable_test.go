@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"gitlocal/internal/history"
-	"gitlocal/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/history"
+	"github.com/SvatahLabs/git-local/internal/storage"
 )
 
 // GL-108: with the key's directory gone (an ejected drive), a policy

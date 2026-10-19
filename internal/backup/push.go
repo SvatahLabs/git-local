@@ -10,12 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"gitlocal/internal/configtx"
-	"gitlocal/internal/gitexec"
-	"gitlocal/internal/overlay"
-	"gitlocal/internal/selection"
-	"gitlocal/internal/storage"
-	"gitlocal/internal/workspace"
+	"github.com/SvatahLabs/git-local/internal/configtx"
+	"github.com/SvatahLabs/git-local/internal/gitexec"
+	"github.com/SvatahLabs/git-local/internal/overlay"
+	"github.com/SvatahLabs/git-local/internal/selection"
+	"github.com/SvatahLabs/git-local/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/workspace"
 )
 
 type PushResult struct {

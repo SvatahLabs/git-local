@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"gitlocal/internal/configtx"
+	"github.com/SvatahLabs/git-local/internal/configtx"
 )
 
 // GL-124: a restore stopped at an edit it preserved records that in its

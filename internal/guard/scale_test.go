@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"gitlocal/internal/gitexec"
-	"gitlocal/internal/testutil"
+	"github.com/SvatahLabs/git-local/internal/gitexec"
+	"github.com/SvatahLabs/git-local/internal/testutil"
 )
 
 // importChain adds a linear history of n commits on branch from main with

@@ -11,9 +11,9 @@ import (
 	"strings"
 	"testing"
 
-	"gitlocal/internal/configtx"
-	"gitlocal/internal/selection"
-	"gitlocal/internal/workspace"
+	"github.com/SvatahLabs/git-local/internal/configtx"
+	"github.com/SvatahLabs/git-local/internal/selection"
+	"github.com/SvatahLabs/git-local/internal/workspace"
 )
 
 func TestResolveAndHistoricalTracking(t *testing.T) {

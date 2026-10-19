@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"gitlocal/internal/history"
+	"github.com/SvatahLabs/git-local/internal/history"
 )
 
 func TestMigrationResumeRemovesPartlyDeletedPlaintextStore(t *testing.T) {

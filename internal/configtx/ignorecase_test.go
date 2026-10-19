@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"gitlocal/internal/exclude"
-	"gitlocal/internal/selection"
+	"github.com/SvatahLabs/git-local/internal/exclude"
+	"github.com/SvatahLabs/git-local/internal/selection"
 )
 
 func TestExcludedPathsVisibleUnderEitherIgnoreCase(t *testing.T) {

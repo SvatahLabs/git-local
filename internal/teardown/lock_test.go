@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	"gitlocal/internal/gitexec"
-	"gitlocal/internal/hook"
-	"gitlocal/internal/testutil"
-	"gitlocal/internal/workspace"
+	"github.com/SvatahLabs/git-local/internal/gitexec"
+	"github.com/SvatahLabs/git-local/internal/hook"
+	"github.com/SvatahLabs/git-local/internal/testutil"
+	"github.com/SvatahLabs/git-local/internal/workspace"
 )
 
 // GL-112: deinit sets the private state aside under the exclusive lock, after

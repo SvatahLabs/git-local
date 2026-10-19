@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"gitlocal/internal/gitexec"
+	"github.com/SvatahLabs/git-local/internal/gitexec"
 )
 
 // GL-060: the version lives in VERSION and the minimum Git version in

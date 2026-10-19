@@ -2,7 +2,7 @@ package selection
 
 import (
 	"fmt"
-	"gitlocal/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/storage"
 	"os"
 	"strings"
 )

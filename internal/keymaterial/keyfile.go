@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"gitlocal/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/storage"
 )
 
 func keyPath(path, repoRoot string, existing bool) (string, error) {

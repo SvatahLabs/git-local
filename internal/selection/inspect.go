@@ -2,7 +2,7 @@ package selection
 
 import (
 	"context"
-	"gitlocal/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/storage"
 	"sort"
 	"strings"
 )

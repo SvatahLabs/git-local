@@ -3,7 +3,7 @@ package configtx
 import (
 	"context"
 
-	"gitlocal/internal/gitexec"
+	"github.com/SvatahLabs/git-local/internal/gitexec"
 )
 
 type PruneResult struct {

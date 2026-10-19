@@ -13,15 +13,15 @@ import (
 	"sort"
 	"strings"
 
-	"gitlocal/internal/backup"
-	"gitlocal/internal/configtx"
-	"gitlocal/internal/exclude"
-	"gitlocal/internal/gitexec"
-	"gitlocal/internal/hook"
-	"gitlocal/internal/overlay"
-	"gitlocal/internal/secureblob"
-	"gitlocal/internal/storage"
-	"gitlocal/internal/workspace"
+	"github.com/SvatahLabs/git-local/internal/backup"
+	"github.com/SvatahLabs/git-local/internal/configtx"
+	"github.com/SvatahLabs/git-local/internal/exclude"
+	"github.com/SvatahLabs/git-local/internal/gitexec"
+	"github.com/SvatahLabs/git-local/internal/hook"
+	"github.com/SvatahLabs/git-local/internal/overlay"
+	"github.com/SvatahLabs/git-local/internal/secureblob"
+	"github.com/SvatahLabs/git-local/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/workspace"
 )
 
 // Result reports what deinit removed. Archive is the kept private state,

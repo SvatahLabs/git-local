@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"gitlocal/internal/testutil"
+	"github.com/SvatahLabs/git-local/internal/testutil"
 )
 
 // testModes lets the test binary stand in for git-local in a subprocess.

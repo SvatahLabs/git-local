@@ -12,12 +12,12 @@ import (
 	"slices"
 	"strings"
 
-	"gitlocal/internal/exclude"
-	"gitlocal/internal/gitexec"
-	"gitlocal/internal/secureblob"
-	"gitlocal/internal/selection"
-	"gitlocal/internal/storage"
-	"gitlocal/internal/workspace"
+	"github.com/SvatahLabs/git-local/internal/exclude"
+	"github.com/SvatahLabs/git-local/internal/gitexec"
+	"github.com/SvatahLabs/git-local/internal/secureblob"
+	"github.com/SvatahLabs/git-local/internal/selection"
+	"github.com/SvatahLabs/git-local/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/workspace"
 )
 
 // OutcomeAbandoned marks a journal that was given up with recover --abandon.

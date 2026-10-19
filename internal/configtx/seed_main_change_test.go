@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"gitlocal/internal/selection"
-	"gitlocal/internal/testutil"
-	"gitlocal/internal/workspace"
+	"github.com/SvatahLabs/git-local/internal/selection"
+	"github.com/SvatahLabs/git-local/internal/testutil"
+	"github.com/SvatahLabs/git-local/internal/workspace"
 )
 
 // stoppedByMainChange seeds notes/a, notes/b and notes/c into a linked

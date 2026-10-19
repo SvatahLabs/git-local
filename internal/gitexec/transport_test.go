@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"gitlocal/internal/testutil"
+	"github.com/SvatahLabs/git-local/internal/testutil"
 )
 
 // GL-113: a failed backup push names its cause from Git's messages, and never

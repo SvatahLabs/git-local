@@ -14,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	"gitlocal/internal/testutil"
+	"github.com/SvatahLabs/git-local/internal/testutil"
 )
 
 // httpsBackupRemote serves a bare repository over TLS through git

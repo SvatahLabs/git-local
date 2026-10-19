@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"gitlocal/internal/testutil"
+	"github.com/SvatahLabs/git-local/internal/testutil"
 )
 
 // With the reftable backend refs/heads is a file, so the loose ref MainState

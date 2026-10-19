@@ -11,10 +11,10 @@ import (
 	"strings"
 	"testing"
 
-	"gitlocal/internal/gitexec"
-	"gitlocal/internal/keymaterial"
-	"gitlocal/internal/secureblob"
-	"gitlocal/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/gitexec"
+	"github.com/SvatahLabs/git-local/internal/keymaterial"
+	"github.com/SvatahLabs/git-local/internal/secureblob"
+	"github.com/SvatahLabs/git-local/internal/storage"
 )
 
 func TestEncryptedBlobStaysCiphertextInPrivateGitStore(t *testing.T) {

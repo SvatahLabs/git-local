@@ -8,10 +8,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"gitlocal/internal/configtx"
-	"gitlocal/internal/history"
-	"gitlocal/internal/secureblob"
-	"gitlocal/internal/testutil"
+	"github.com/SvatahLabs/git-local/internal/configtx"
+	"github.com/SvatahLabs/git-local/internal/history"
+	"github.com/SvatahLabs/git-local/internal/secureblob"
+	"github.com/SvatahLabs/git-local/internal/testutil"
 )
 
 // GL-124: encrypt migrate refuses a completed seed whose file list is lost

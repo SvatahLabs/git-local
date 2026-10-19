@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"gitlocal/internal/selection"
-	"gitlocal/internal/storage"
-	"gitlocal/internal/workspace"
+	"github.com/SvatahLabs/git-local/internal/selection"
+	"github.com/SvatahLabs/git-local/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/workspace"
 )
 
 // waitUntilSettled waits until no file under dir has a racy timestamp, so a

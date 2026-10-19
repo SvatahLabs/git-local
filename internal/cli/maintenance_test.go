@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"gitlocal/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/storage"
 )
 
 // GL-069: maintenance packs the private store and deletes unreachable

@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"gitlocal/internal/selection"
-	"gitlocal/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/selection"
+	"github.com/SvatahLabs/git-local/internal/storage"
 )
 
 // configState is what recognize reads, by stat: the workspace registrations

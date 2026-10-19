@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"gitlocal/internal/selection"
+	"github.com/SvatahLabs/git-local/internal/selection"
 )
 
 func wrapperNames(t *testing.T, ctx context.Context, g historyGit, store, id string) []string {

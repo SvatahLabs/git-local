@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"gitlocal/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/storage"
 )
 
 // ValidateBackupRecords verifies the saved patches before an encrypted

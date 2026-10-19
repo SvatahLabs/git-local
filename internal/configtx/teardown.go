@@ -6,8 +6,8 @@ import (
 	"errors"
 	"os"
 
-	"gitlocal/internal/exclude"
-	"gitlocal/internal/gitexec"
+	"github.com/SvatahLabs/git-local/internal/exclude"
+	"github.com/SvatahLabs/git-local/internal/gitexec"
 )
 
 // RemoveExcludeBlock deletes git-local's managed block from info/exclude and

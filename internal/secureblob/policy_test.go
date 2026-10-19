@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"gitlocal/internal/keymaterial"
-	"gitlocal/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/keymaterial"
+	"github.com/SvatahLabs/git-local/internal/storage"
 )
 
 func TestPolicyKeyLifecycleAndPathRules(t *testing.T) {

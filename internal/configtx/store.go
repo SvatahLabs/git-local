@@ -3,8 +3,8 @@ package configtx
 import (
 	"context"
 
-	"gitlocal/internal/gitexec"
-	"gitlocal/internal/workspace"
+	"github.com/SvatahLabs/git-local/internal/gitexec"
+	"github.com/SvatahLabs/git-local/internal/workspace"
 )
 
 // WithStore holds the exclusive repository lock, which every git-local

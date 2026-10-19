@@ -5,9 +5,9 @@ import (
 	"errors"
 	"path/filepath"
 
-	"gitlocal/internal/gitexec"
-	"gitlocal/internal/keymaterial"
-	"gitlocal/internal/workspace"
+	"github.com/SvatahLabs/git-local/internal/gitexec"
+	"github.com/SvatahLabs/git-local/internal/keymaterial"
+	"github.com/SvatahLabs/git-local/internal/workspace"
 )
 
 // CreateKeyFile writes a new raw key with owner-only permissions. It refuses

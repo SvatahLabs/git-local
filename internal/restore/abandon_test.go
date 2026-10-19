@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"gitlocal/internal/configtx"
+	"github.com/SvatahLabs/git-local/internal/configtx"
 )
 
 func TestAbandonRestoreKeepsUserEditsAndQuarantinesUnknownStage(t *testing.T) {

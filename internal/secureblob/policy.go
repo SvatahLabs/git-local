@@ -8,8 +8,8 @@ import (
 	"sort"
 	"strings"
 
-	"gitlocal/internal/keymaterial"
-	"gitlocal/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/keymaterial"
+	"github.com/SvatahLabs/git-local/internal/storage"
 )
 
 const PolicySchemaVersion = 1

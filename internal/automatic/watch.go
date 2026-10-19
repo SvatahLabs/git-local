@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"time"
 
-	"gitlocal/internal/gitexec"
-	"gitlocal/internal/history"
-	"gitlocal/internal/storage"
+	"github.com/SvatahLabs/git-local/internal/gitexec"
+	"github.com/SvatahLabs/git-local/internal/history"
+	"github.com/SvatahLabs/git-local/internal/storage"
 )
 
 const MinWatchInterval = time.Second
