@@ -113,7 +113,9 @@ The first release meant for general use. It replaces the 0.1.4 test builds.
 - `git local maintenance` packs the private history store and deletes objects
   no snapshot or recovery ref uses; `doctor` reports the store's size. A
   snapshot also packs the store once it holds 6,700 loose objects or 256 MiB
-  of them, so it no longer grows until every command slows down.
+  of them, so it no longer grows until every command slows down. Past those
+  limits `status` and `log` print a one-line hint on stderr (not with
+  `--json`); they never pack.
 - `git local encrypt migrate` corrects an existing sensitive-file policy with
   the same key.
 - `doctor` warns when worktrees disagree on `core.ignorecase`, naming each

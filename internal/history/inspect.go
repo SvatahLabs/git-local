@@ -32,6 +32,9 @@ type StatusResult struct {
 	Files     []FileChange      `json:"files"`
 	Selection []SelectionChange `json:"selection"`
 	Warnings  []string          `json:"warnings"`
+	// NeedsPacking reports a store past the limits at which a snapshot
+	// packs it; status only hints (GL-139).
+	NeedsPacking bool `json:"-"`
 }
 type fileValue struct{ Mode, ID string }
 
@@ -402,6 +405,7 @@ func Status(ctx context.Context, r *gitexec.Runner, cwd string) (StatusResult, e
 	err := configtx.ReadSelection(ctx, r, cwd, func(w workspace.Context, s selection.State, warnings []string, recheck func() error) error {
 		inspection, err := inspect(ctx, r, w, s, warnings, recheck, r, w.Store, false)
 		result = inspection.status
+		result.NeedsPacking = NeedsPacking(w.Store)
 		return err
 	})
 	return result, err

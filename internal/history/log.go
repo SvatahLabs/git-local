@@ -29,6 +29,9 @@ type LogFilter struct {
 	Writer         string
 	Path           string
 	WithProvenance bool
+	// NeedsPacking, when set, is called if the store passed the limits at
+	// which a snapshot packs it; log only hints (GL-139).
+	NeedsPacking func()
 }
 
 func Log(ctx context.Context, r *gitexec.Runner, cwd string, limit int) ([]LogEntry, error) {
@@ -65,6 +68,9 @@ func LogFiltered(ctx context.Context, r *gitexec.Runner, cwd, source string, lim
 	result := []LogEntry{}
 	outputBytes := 0
 	err := configtx.ReadSelection(ctx, r, cwd, func(w workspace.Context, _ selection.State, _ []string, recheck func() error) error {
+		if filter.NeedsPacking != nil && NeedsPacking(w.Store) {
+			filter.NeedsPacking()
+		}
 		if filter.Branch != "" {
 			if _, err := r.Main(ctx, w.Root, w.Admin, "check-ref-format", filter.Branch); err != nil {
 				var ge *gitexec.Error

@@ -49,6 +49,10 @@ var (
 	Commit  = ""
 )
 
+// packingHint is what status and log print, on stderr, when the private
+// store passed the limits at which a snapshot packs it (GL-139).
+const packingHint = "Hint: the private history store has many loose objects; run git local maintenance to pack it (a snapshot that saves changes also does)."
+
 // versionString is Version and the source commit: the one a release build
 // embeds, or for a source build the one Go's VCS stamping recorded, if any.
 func versionString() string {
@@ -451,6 +455,9 @@ func New(out, errOut io.Writer) *cobra.Command {
 				for _, warning := range result.Warnings {
 					fmt.Fprintln(c.ErrOrStderr(), "Warning:", warning)
 				}
+				if result.NeedsPacking {
+					fmt.Fprintln(c.ErrOrStderr(), packingHint)
+				}
 				if porcelain {
 					_, err = c.OutOrStdout().Write(result.Porcelain())
 				} else {
@@ -618,7 +625,8 @@ func New(out, errOut io.Writer) *cobra.Command {
 		},
 		RunE: func(c *cobra.Command, _ []string) error {
 			return inspectCommand(c, func(r *gitexec.Runner, cwd string) error {
-				entries, err := history.LogFiltered(c.Context(), r, cwd, logWorkspace, limit, history.LogFilter{Branch: logBranch, MainCommit: logMainCommit, WithStat: logStat, Writer: logWriter, Path: logPath, WithProvenance: logProvenance})
+				needsPacking := false
+				entries, err := history.LogFiltered(c.Context(), r, cwd, logWorkspace, limit, history.LogFilter{Branch: logBranch, MainCommit: logMainCommit, WithStat: logStat, Writer: logWriter, Path: logPath, WithProvenance: logProvenance, NeedsPacking: func() { needsPacking = true }})
 				if errors.Is(err, history.ErrInvalidLogFilter) {
 					return usageError{err}
 				}
@@ -636,6 +644,9 @@ func New(out, errOut io.Writer) *cobra.Command {
 					}
 					setJSON(c, map[string]any{"entries": items})
 					return nil
+				}
+				if needsPacking {
+					fmt.Fprintln(c.ErrOrStderr(), packingHint)
 				}
 				if len(entries) == 0 && (logBranch != "" || logMainCommit != "" || logWriter != "" || logPath != "") {
 					_, err = fmt.Fprintln(c.OutOrStdout(), "No matching local snapshots.")

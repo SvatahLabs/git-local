@@ -23,19 +23,26 @@ var (
 	autoPackLockWait = 5 * time.Second
 )
 
+// NeedsPacking reports whether a store's loose objects passed the limits at
+// which a snapshot packs it. It starts no Git; commands that don't write use
+// it for a hint instead of packing (GL-139).
+func NeedsPacking(store string) bool {
+	count, size, err := gitexec.LooseObjects(store)
+	return err == nil && (count >= autoPackObjects || size >= autoPackBytes)
+}
+
 // autoMaintain packs the store after a saved snapshot when it has grown past
 // the limits. It never fails the snapshot: a problem is returned as a warning.
 func autoMaintain(ctx context.Context, r *gitexec.Runner, cwd string, result *Result) {
 	if !result.Changed || result.store == "" {
 		return
 	}
-	count, size, err := gitexec.LooseObjects(result.store)
-	if err != nil || count < autoPackObjects && size < autoPackBytes {
+	if !NeedsPacking(result.store) {
 		return
 	}
 	lockCtx, cancel := context.WithTimeout(ctx, autoPackLockWait)
 	defer cancel()
-	err = configtx.WithStore(lockCtx, r, cwd, func(w workspace.Context) error {
+	err := configtx.WithStore(lockCtx, r, cwd, func(w workspace.Context) error {
 		if err := r.PackLoose(ctx, w.Store); err != nil {
 			return err
 		}

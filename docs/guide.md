@@ -547,6 +547,9 @@ A snapshot packs the private history store when it holds 6,700 loose
 objects or 256 MiB of them: it packs the loose objects that snapshots use
 and deletes the rest, unless a transaction is pending or another command
 holds the lock for more than five seconds (a later snapshot packs instead).
+Restores and seeds write loose objects too but never pack; past the same
+limits `status` and `log` print a one-line hint on stderr suggesting
+`git local maintenance` (not with `--json`), and pack nothing.
 `git local maintenance` does more: it repacks the whole store and deletes objects that no
 snapshot, retained workspace or restore recovery ref uses (leftovers of
 interrupted or conflicting snapshots). It refuses while a transaction is
