@@ -103,7 +103,11 @@ The first release meant for general use. It replaces the 0.1.4 test builds.
   `--remove-history`. Every check that can refuse runs before its first
   change, and a rerun finishes an interrupted one; until it has, `init` in a
   worktree still holding an old identity refuses without creating anything
-  and names `deinit`.
+  and names `deinit`. The selected files stay ignored: deinit leaves the
+  managed block's patterns as ordinary `.git/info/exclude` lines under
+  `# kept by git local deinit`, so `git add -A` doesn't stage them and
+  `git clean -fd` doesn't delete them; `deinit --unignore` removes them and
+  warns about the sensitive paths among them.
 - `git local maintenance` packs the private history store and deletes objects
   no snapshot or recovery ref uses; `doctor` reports the store's size. A
   snapshot also packs the store once it holds 6,700 loose objects or 256 MiB

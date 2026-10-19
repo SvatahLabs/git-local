@@ -190,9 +190,10 @@ func (f *fixture) installEverything() string {
 	return linked
 }
 
-// GL-068: after deinit, Git behaves as if git-local was never installed, in
-// the main and the linked worktree, even without git-local on PATH; the
-// private history is kept.
+// GL-068: after deinit --unignore, Git behaves as if git-local was never
+// installed, in the main and the linked worktree, even without git-local on
+// PATH; the private history is kept. (Without --unignore the selected files
+// stay ignored: TestDeinitKeepsSelectedPathsIgnored.)
 func TestDeinitLeavesAPlainRepository(t *testing.T) {
 	f := newFixture(t)
 	root := f.repo.Root
@@ -224,7 +225,7 @@ func TestDeinitLeavesAPlainRepository(t *testing.T) {
 	if out := f.git(f.withTool, root, "status", "--porcelain", "--", "config.txt"); out != "" {
 		t.Fatalf("overlay file shows as changed while active:\n%s", out)
 	}
-	out := f.gl(root, "deinit")
+	out := f.gl(root, "deinit", "--unignore")
 	if !strings.Contains(out, "gitlocal-removed-") {
 		t.Fatalf("deinit output doesn't name the kept history:\n%s", out)
 	}
@@ -331,7 +332,7 @@ func TestDeinitRemoveHistoryRefusesRecoveryRefs(t *testing.T) {
 	if leftovers, _ := filepath.Glob(filepath.Join(root, ".git", "gitlocal*")); len(leftovers) != 0 {
 		t.Fatalf("--remove-history left %q", leftovers)
 	}
-	if status := g.git(g.plain, root, "status", "--porcelain"); status != "?? notes.local\n" {
+	if status := g.git(g.plain, root, "status", "--porcelain"); status != "" {
 		t.Fatalf("status after deinit --remove-history:\n%s", status)
 	}
 	// Nor in a repository restored from a backup, whose restore lock is in

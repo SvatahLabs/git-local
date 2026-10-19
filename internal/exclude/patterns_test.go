@@ -172,3 +172,23 @@ func TestManagedBlockIgnoresStagesAndAcceptsLegacyBlock(t *testing.T) {
 		t.Fatal("Rendered misreports the managed block")
 	}
 }
+
+// GL-130: Kept leaves the block's patterns, without StagePattern, as ordinary
+// lines where the block was, adds them only once, and leaves nothing for a
+// block with no patterns.
+func TestKeptLinesReplaceTheBlock(t *testing.T) {
+	patterns := []byte("/private/\n/.env.local\n")
+	kept := KeptHeader + string(patterns)
+	if got := string(Kept(Render([]byte("/mine/\n!/private/x\n"), patterns))); got != kept+"/mine/\n!/private/x\n" {
+		t.Fatalf("kept lines: %q", got)
+	}
+	if got := string(Kept(Render([]byte(kept+"/mine/\n"), patterns))); got != kept+"/mine/\n" {
+		t.Fatalf("kept lines added twice: %q", got)
+	}
+	if got := string(Kept(append(legacyBlock(patterns), "/mine/\n"...))); got != kept+"/mine/\n" {
+		t.Fatalf("kept lines of a legacy block: %q", got)
+	}
+	if got := string(Kept(Render([]byte("/mine/\n"), nil))); got != "/mine/\n" {
+		t.Fatalf("kept lines of an empty block: %q", got)
+	}
+}

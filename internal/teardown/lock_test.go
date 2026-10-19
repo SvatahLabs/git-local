@@ -40,14 +40,14 @@ func TestDeinitRefusesWhatWasInstalledMeanwhile(t *testing.T) {
 		}
 	}
 	t.Cleanup(func() { beforeSetAside = func() {} })
-	if _, err := Deinit(ctx, r, repo.Root, false); err == nil || !strings.Contains(err.Error(), "hooks") {
+	if _, err := Deinit(ctx, r, repo.Root, false, false); err == nil || !strings.Contains(err.Error(), "hooks") {
 		t.Fatalf("deinit set the private state aside while hooks were installed: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(repo.Root, ".git", "gitlocal")); err != nil {
 		t.Fatalf("refused deinit set the private state aside: %v", err)
 	}
 	beforeSetAside = func() {}
-	result, err := Deinit(ctx, r, repo.Root, false)
+	result, err := Deinit(ctx, r, repo.Root, false, false)
 	if err != nil || result.Archive == "" || len(result.Hooks) == 0 {
 		t.Fatalf("rerun: %+v %v", result, err)
 	}
@@ -81,7 +81,7 @@ func TestRemoveHistoryChecksLossesAgainUnderTheLock(t *testing.T) {
 		repo.Git("--git-dir="+store, "update-ref", ref, commit)
 	}
 	t.Cleanup(func() { beforeSetAside = func() {} })
-	if _, err := Deinit(ctx, r, repo.Root, true); err == nil || !strings.Contains(err.Error(), ref) {
+	if _, err := Deinit(ctx, r, repo.Root, true, false); err == nil || !strings.Contains(err.Error(), ref) {
 		t.Fatalf("deinit --remove-history deleted a recovery ref made meanwhile: %v", err)
 	}
 	if _, err := os.Stat(store); err != nil {

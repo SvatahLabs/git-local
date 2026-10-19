@@ -9,11 +9,11 @@ import (
 )
 
 func deinitCommand() *cobra.Command {
-	var removeHistory bool
+	var removeHistory, unignore bool
 	command := &cobra.Command{Use: "deinit", Short: "Remove git-local from this repository and its worktrees, keeping the private history", Args: noArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
 			return inspectCommand(c, func(r *gitexec.Runner, cwd string) error {
-				result, err := teardown.Deinit(c.Context(), r, cwd, removeHistory)
+				result, err := teardown.Deinit(c.Context(), r, cwd, removeHistory, unignore)
 				if setJSON(c, result, result.Warnings...) {
 					return err
 				}
@@ -30,7 +30,9 @@ func deinitCommand() *cobra.Command {
 				for _, path := range result.Hooks {
 					fmt.Fprintf(out, "Removed git-local from hook %s.\n", path)
 				}
-				if result.Exclude {
+				if result.KeptIgnored {
+					fmt.Fprintln(out, "Replaced the managed block in .git/info/exclude with ordinary lines under \"# kept by git local deinit\", so selected files stay ignored; delete those lines to stop ignoring them.")
+				} else if result.Exclude {
 					fmt.Fprintln(out, "Removed the managed block from .git/info/exclude; selected files now show as untracked, so git add -A would stage them and git clean -fd would delete them.")
 				}
 				for _, path := range result.Identities {
@@ -48,6 +50,7 @@ func deinitCommand() *cobra.Command {
 			})
 		},
 	}
+	command.Flags().BoolVar(&unignore, "unignore", false, "Stop ignoring the selected files instead of keeping their lines in .git/info/exclude")
 	command.Flags().BoolVar(&removeHistory, "remove-history", false, "Delete the private history instead of keeping it (refused while a quarantine or restore recovery ref exists)")
 	return command
 }

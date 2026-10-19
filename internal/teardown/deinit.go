@@ -27,18 +27,20 @@ import (
 // Result reports what deinit removed. Archive is the kept private state,
 // relative to the common Git directory; it's empty when nothing was kept.
 type Result struct {
-	Overlays   []string `json:"overlays"`
-	Hooks      []string `json:"hooks"`
-	Exclude    bool     `json:"excludeBlockRemoved"`
-	Identities []string `json:"identities"`
-	Archive    string   `json:"archive,omitempty"`
-	Removed    bool     `json:"historyRemoved"`
-	Warnings   []string `json:"warnings"`
+	Overlays    []string `json:"overlays"`
+	Hooks       []string `json:"hooks"`
+	Exclude     bool     `json:"excludeBlockRemoved"`
+	KeptIgnored bool     `json:"keptIgnored"`
+	Identities  []string `json:"identities"`
+	Archive     string   `json:"archive,omitempty"`
+	Removed     bool     `json:"historyRemoved"`
+	Warnings    []string `json:"warnings"`
 }
 
 // Deinit removes git-local from the repository at cwd and every worktree:
 // overlays, hooks, the managed info/exclude block, the private state and each
-// worktree's identity file. It refuses while a transaction is pending or an
+// worktree's identity file. The selected paths stay ignored by ordinary
+// info/exclude lines unless unignore is set. It refuses while a transaction is pending or an
 // overlay's working file holds changes that aren't saved in the overlay.
 //
 // Each step can be run again, so an interrupted deinit is finished by running
@@ -48,7 +50,7 @@ type Result struct {
 // no other git local command installed anything meanwhile; removeHistory
 // deletes it instead, only when no quarantine or restore recovery ref would be
 // lost.
-func Deinit(ctx context.Context, r *gitexec.Runner, cwd string, removeHistory bool) (Result, error) {
+func Deinit(ctx context.Context, r *gitexec.Runner, cwd string, removeHistory, unignore bool) (Result, error) {
 	result := Result{Overlays: []string{}, Hooks: []string{}, Identities: []string{}, Warnings: []string{}}
 	w, err := workspace.Discover(ctx, r, cwd)
 	if err != nil {
@@ -120,10 +122,11 @@ func Deinit(ctx context.Context, r *gitexec.Runner, cwd string, removeHistory bo
 				return result, err
 			}
 		}
-		if result.Exclude, err = configtx.RemoveExcludeBlock(ctx, r, cwd); err != nil {
+		if result.Exclude, err = configtx.RemoveExcludeBlock(ctx, r, cwd, !unignore); err != nil {
 			return result, err
 		}
-		if result.Exclude && len(policy.Sensitive) > 0 {
+		result.KeptIgnored = result.Exclude && !unignore
+		if result.Exclude && unignore && len(policy.Sensitive) > 0 {
 			var paths []string
 			for _, rule := range policy.Sensitive {
 				paths = append(paths, rule.Path)

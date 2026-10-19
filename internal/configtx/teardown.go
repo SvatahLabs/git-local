@@ -11,21 +11,23 @@ import (
 )
 
 // RemoveExcludeBlock deletes git-local's managed block from info/exclude and
-// keeps the user's own lines, under the exclusive lock. It reports false when
-// there is no block (already removed). A block edited by hand is refused, as
-// elsewhere, so no user line is lost.
-func RemoveExcludeBlock(ctx context.Context, r *gitexec.Runner, cwd string) (bool, error) {
-	return excludeBlock(ctx, r, cwd, true)
+// keeps the user's own lines, under the exclusive lock. With keep, the
+// block's patterns stay as ordinary lines (exclude.Kept), so the selected
+// files stay ignored. It reports false when there is no block (already
+// removed). A block edited by hand is refused, as elsewhere, so no user line
+// is lost.
+func RemoveExcludeBlock(ctx context.Context, r *gitexec.Runner, cwd string, keep bool) (bool, error) {
+	return excludeBlock(ctx, r, cwd, true, keep)
 }
 
 // CheckExcludeBlock makes RemoveExcludeBlock's checks without changing
 // anything, so deinit can refuse before its first change.
 func CheckExcludeBlock(ctx context.Context, r *gitexec.Runner, cwd string) error {
-	_, err := excludeBlock(ctx, r, cwd, false)
+	_, err := excludeBlock(ctx, r, cwd, false, false)
 	return err
 }
 
-func excludeBlock(ctx context.Context, r *gitexec.Runner, cwd string, write bool) (bool, error) {
+func excludeBlock(ctx context.Context, r *gitexec.Runner, cwd string, write, keep bool) (bool, error) {
 	s, err := open(ctx, r, cwd)
 	if err != nil {
 		return false, err
@@ -56,6 +58,9 @@ func excludeBlock(ctx context.Context, r *gitexec.Runner, cwd string, write bool
 	}
 	if !write {
 		return true, nil
+	}
+	if keep {
+		user = exclude.Kept(current.Data)
 	}
 	return true, s.common.AtomicWrite("info/exclude", user, os.FileMode(current.Mode))
 }

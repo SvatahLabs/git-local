@@ -81,9 +81,11 @@ git local deinit
 `deinit` removes everything git-local added to the repository and its
 worktrees: overlays (each file keeps its local content as an ordinary change),
 the guard and snapshot hooks, the overlay filter and its include, the managed
-blocks in `.git/info/attributes` and `.git/info/exclude` (selected files then
-show as untracked), and each worktree's identity file. Afterwards Git behaves
-as if git-local was never installed, even without the executable.
+blocks in `.git/info/attributes` and `.git/info/exclude`, and each worktree's
+identity file. Afterwards Git behaves as if git-local was never installed,
+even without the executable, except that the selected files stay ignored by
+ordinary `.git/info/exclude` lines under `# kept by git local deinit`; delete
+them, or run `deinit --unignore` instead, to have Git see those files.
 
 It keeps the private history and state as
 `<git-common-dir>/gitlocal-removed-<id>`; delete that directory when you no

@@ -45,7 +45,7 @@ func TestDeinitKeepsIdentityOfInitThatRacedIt(t *testing.T) {
 		}
 	}
 	t.Cleanup(func() { beforeRemoveIdentities = func() {} })
-	result, err := Deinit(ctx, r, repo.Root, false)
+	result, err := Deinit(ctx, r, repo.Root, false, false)
 	if err != nil || result.Archive == "" {
 		t.Fatalf("deinit: %+v %v", result, err)
 	}
@@ -109,7 +109,7 @@ func TestDeinitRerunKeepsIdentityOfInitThatRacedIt(t *testing.T) {
 		}
 	}
 	t.Cleanup(func() { identitiesListed = func() {} })
-	if _, err := Deinit(ctx, r, repo.Root, false); err != nil {
+	if _, err := Deinit(ctx, r, repo.Root, false, false); err != nil {
 		t.Fatalf("deinit rerun: %v", err)
 	}
 	<-done

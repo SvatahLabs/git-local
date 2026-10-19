@@ -313,3 +313,27 @@ func userBytes(data, expected []byte) ([]byte, error) {
 	return append(result, data[stop:]...), nil
 }
 func Render(user, patterns []byte) []byte { b := Block(patterns); return append(b, user...) }
+
+// KeptHeader introduces the lines git local deinit leaves in place of the
+// managed block, so the files that were selected stay ignored.
+const KeptHeader = "# kept by git local deinit: paths git local selected; delete these lines to stop ignoring them\n"
+
+// Kept replaces the managed block in data, which UserBytes verified, by its
+// patterns as ordinary lines under KeptHeader, where the block was, so later
+// user lines keep their precedence. StagePattern isn't kept: deinit runs
+// with no transaction pending. Lines an earlier deinit kept aren't added again.
+func Kept(data []byte) []byte {
+	start := bytes.Index(data, []byte(Begin))
+	stop := bytes.Index(data, []byte(End))
+	if start < 0 || stop < start {
+		return bytes.Clone(data)
+	}
+	patterns := bytes.TrimPrefix(data[start+len(Begin):stop], []byte(StagePattern+"\n"))
+	user := append(bytes.Clone(data[:start]), data[stop+len(End):]...)
+	kept := append([]byte(KeptHeader), patterns...)
+	if len(patterns) == 0 || bytes.Contains(user, kept) {
+		return user
+	}
+	result := append(bytes.Clone(data[:start]), kept...)
+	return append(result, data[stop+len(End):]...)
+}
